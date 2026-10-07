@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}{{ hub.title }}{% endblock %}
+{% block content %}
+<h1>{{ hub.icon }} {{ hub.title }}</h1>
+<p class="hello muted">したいことをえらんでください。</p>
+<div class="tasks">
+  {% for t in tasks %}
+  <a class="task{{ ' main' if loop.first }}" href="{{ t.url }}"><b>{{ t.label }}</b>{% if t.desc %}<small>{{ t.desc }}</small>{% endif %}<span class="go">▶</span></a>
+  {% endfor %}
+</div>
+{% endblock %}

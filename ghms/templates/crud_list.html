@@ -16,7 +16,7 @@
     </select>
   {% endfor %}
   {% if date_field %}
-    <input type="date" name="from" value="{{ args.get('from','') }}" aria-label="いつから"> 〜 <input type="date" name="to" value="{{ args.get('to','') }}" aria-label="いつまで">
+    <span>{{ (ent.fields|selectattr('name', 'equalto', date_field)|first).label }}：</span><input type="date" name="from" value="{{ args.get('from','') }}" aria-label="いつから"> 〜 <input type="date" name="to" value="{{ args.get('to','') }}" aria-label="いつまで">
   {% endif %}
   <button class="btn">さがす</button> <a href="{{ url_for('crud.index', key=key) }}">条件をけす</a>
 </form>

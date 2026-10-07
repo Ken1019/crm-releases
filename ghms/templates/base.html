@@ -26,32 +26,11 @@
 </header>
 <div class="layout">
 <nav class="side" aria-label="メニュー">
-  {{ nav(url_for('views.dashboard'), '🏡', 'ホーム') }}
-  {{ nav(url_for('views.journal'), '📝', '今日の日誌を書く') }}
-  {{ nav(url_for('crud.index', key='residents'), '👤', '入居者') }}
-  {{ nav(url_for('crud.index', key='incidents'), '⚠️', 'ヒヤリハット・事故') }}
-  {{ nav(url_for('views.reports'), '🖨️', '書類を作る（Excel）') }}
-  {% set main_keys = ['residents', 'incidents'] %}
-  {% set masters = ['homes', 'addons', 'resident_addons', 'career_grades', 'shogu_requirements', 'shogu_plans', 'shogu_allocations'] %}
-  {% for grp in GROUPS if grp != '基本情報' %}
-    <div class="grp">{{ GROUP_ICONS[grp] }} {{ grp }}</div>
-    {% if grp == '職員・キャリアパス' and is_admin %}{{ nav(url_for('views.career'), '🪜', 'キャリアパス') }}{% endif %}
-    {% if grp == '加算・処遇改善' %}{{ nav(url_for('views.addon_check'), '☑️', '加算のチェック') }}
-      {% if is_admin %}{{ nav(url_for('views.shogu_index'), '💴', '処遇改善') }}{% endif %}{% endif %}
-    {% for key, e in ENTITIES.items() if e.group == grp and key not in main_keys and key not in masters and (is_admin or not e.admin_only) %}
-      {{ nav(url_for('crud.index', key=key), e.icon, e.title) }}
-    {% endfor %}
+  <p class="side-q">何をしますか？</p>
+  <a href="{{ url_for('views.dashboard') }}" class="{{ 'on' if request.endpoint == 'views.dashboard' }}"><span class="ic">🏡</span><span>ホーム<small>今日のやること</small></span></a>
+  {% for h in hubs %}
+  <a href="{{ hub_url(h) }}" class="{{ 'on' if cur_hub and cur_hub.key == h.key }}"><span class="ic">{{ h.icon }}</span><span>{{ h.title }}<small>{{ h.desc }}</small></span></a>
   {% endfor %}
-  <details{% if request.path.startswith(('/settings', '/users', '/audit')) or (request.view_args and request.view_args.get('key') in masters) %} open{% endif %}>
-    <summary>⚙️ 設定・マスタ（管理者向け）</summary>
-    {% for key in masters if is_admin or not ENTITIES[key].admin_only %}{{ nav(url_for('crud.index', key=key), ENTITIES[key].icon, ENTITIES[key].title) }}{% endfor %}
-    {% if is_admin %}
-      {{ nav(url_for('views.settings'), '🏢', '事業所の設定') }}
-      {{ nav(url_for('auth.users'), '🔑', 'ログインする人の管理') }}
-      {{ nav(url_for('views.audit_log'), '🕘', '操作の記録') }}
-      <a href="{{ url_for('views.backup') }}"><span class="ic">💾</span>バックアップを保存</a>
-    {% endif %}
-  </details>
   <div class="ver">v{{ VERSION }}</div>
 </nav>
 <main>
@@ -59,6 +38,9 @@
   {% with msgs = get_flashed_messages(with_categories=true) %}
     {% for cat, m in msgs %}<div class="flash {{ cat }}" role="status">{{ m }}</div>{% endfor %}
   {% endwith %}
+  {% if g.user and request.endpoint != 'views.dashboard' %}
+  <p class="crumb noprint"><a href="{{ url_for('views.dashboard') }}">🏡 ホーム</a>{% if cur_hub %} ＞ <a href="{{ hub_url(cur_hub) }}">{{ cur_hub.icon }} {{ cur_hub.title }}</a>{% endif %}</p>
+  {% endif %}
   {% block content %}{% endblock %}
 {% if g.user %}
 </main>

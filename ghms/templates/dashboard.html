@@ -2,16 +2,36 @@
 {% block title %}ホーム{% endblock %}
 {% block content %}
 <h1>{{ g.user['display_name'] }} さん、おつかれさまです 🌼</h1>
-<p class="hello muted">今日は {{ today.strftime('%Y年%m月%d日') }}（{{ '月火水木金土日'[today.weekday()] }}）です。下の大きなボタンから始められます。</p>
+<p class="hello muted">今日は {{ today.strftime('%Y年%m月%d日') }}（{{ '月火水木金土日'[today.weekday()] }}）です。したいことを下のボタンからえらんでください。</p>
 
 <div class="bigmenu">
-  <a class="main" href="{{ url_for('views.journal') }}"><span class="ic">📝</span><b>今日の日誌を書く</b><small>業務日誌と入居者の記録をまとめて</small></a>
-  <a href="{{ url_for('crud.index', key='residents') }}"><span class="ic">👤</span><b>入居者を見る</b><small>連絡先・服薬・受給者証など</small></a>
-  <a href="{{ url_for('crud.new', key='incidents') }}"><span class="ic">⚠️</span><b>ヒヤリハットを書く</b><small>ヒヤッとしたらすぐ記録</small></a>
-  <a href="{{ url_for('views.reports') }}"><span class="ic">🖨️</span><b>書類を作る</b><small>日誌や一覧をExcelで出す</small></a>
-  {% if is_admin %}<a href="{{ url_for('views.career') }}"><span class="ic">🪜</span><b>キャリアパス</b><small>等級・研修・評価</small></a>
-  <a href="{{ url_for('views.shogu_index') }}"><span class="ic">💴</span><b>処遇改善</b><small>加算額と職員への配分</small></a>{% endif %}
+  <a class="main" href="{{ url_for('views.journal') }}"><span class="ic">📝</span><b>今日の日誌を書く</b><small>いちばんよく使う画面です</small></a>
+  {% for h in hubs %}
+  <a href="{{ hub_url(h) }}"><span class="ic">{{ h.icon }}</span><b>{{ h.title }}</b><small>{{ h.desc }}</small></a>
+  {% endfor %}
 </div>
+
+<section class="card finder">
+  <label for="finder"><b>🔍 やりたいことを言葉でさがす</b></label>
+  <input id="finder" type="search" placeholder="例：研修、パスワード、モニタリング、加算" autocomplete="off">
+  <ul class="todo" id="finder-list" hidden>
+    {% for t in all_tasks %}
+    <li data-text="{{ t.label }} {{ t.desc }} {{ t.hub.title }}"><a href="{{ t.url }}"><span class="ic">{{ t.hub.icon }}</span>
+      <span><b>{{ t.label }}</b><br><small class="muted">{{ t.desc }}</small></span><span class="when">{{ t.hub.title }}</span></a></li>
+    {% endfor %}
+  </ul>
+  <p class="muted small" id="finder-none" hidden>見つかりませんでした。別の言葉でさがすか、上のボタンからえらんでください。</p>
+</section>
+<script>
+(function(){
+  var q=document.getElementById('finder'),list=document.getElementById('finder-list'),none=document.getElementById('finder-none');
+  q.addEventListener('input',function(){
+    var v=q.value.trim(),n=0;
+    list.querySelectorAll('li').forEach(function(li){var hit=v&&li.dataset.text.indexOf(v)>=0;li.hidden=!hit;if(hit)n++;});
+    list.hidden=!v||!n; none.hidden=!v||n>0;
+  });
+})();
+</script>
 
 <div class="cols">
 <section class="card">
@@ -36,7 +56,7 @@
       {% if done %}<span class="pill ok">書きました</span>{% else %}<span class="pill ng">まだです</span>{% endif %}
       <span><b>{{ h['name'] }}</b>（入居 {{ n }}名）</span><span class="when">{{ '見る' if done else '書く ▶' }}</span></a></li>
   {% else %}
-    <li class="guide">はじめに <a href="{{ url_for('crud.new', key='homes') }}">住居（ユニット）</a> を登録してください。</li>
+    <li><a href="{{ url_for('crud.new', key='homes') }}"><span class="pill warn">はじめに</span><span>まず<b>住居（ユニット）</b>を登録しましょう</span><span class="when">登録する ▶</span></a></li>
   {% endfor %}
   </ul>
 

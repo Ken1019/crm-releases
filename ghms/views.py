@@ -12,6 +12,7 @@ from .auth import admin_required
 from .crud import audit, label_of, ref_options
 from .db import get_db, get_setting, now, set_setting
 from .entities import MEAL, MED, MOOD, TIME_SLOT
+from .hubs import HUB_BY_KEY, visible_hubs, visible_tasks
 
 bp = Blueprint("views", __name__)
 
@@ -99,8 +100,18 @@ def dashboard():
     }
     recent = db.execute("SELECT i.*, r.name AS rname FROM incidents i LEFT JOIN residents r ON r.id=i.resident_id "
                         "ORDER BY i.date DESC, i.id DESC LIMIT 5").fetchall()
-    return render_template("dashboard.html", alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
+    all_tasks = [dict(t, hub=h) for h in visible_hubs() for t in visible_tasks(h)]
+    return render_template("dashboard.html", all_tasks=all_tasks, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
                            recent=recent, today=today)
+
+
+# ---------------------------------------------------------------- 目的別メニュー
+@bp.route("/do/<key>")
+def hub(key):
+    h = HUB_BY_KEY.get(key)
+    if h is None or h not in visible_hubs():
+        abort(404)
+    return render_template("hub.html", hub=h, tasks=visible_tasks(h))
 
 
 # ---------------------------------------------------------------- 日誌（1日分まとめて入力）

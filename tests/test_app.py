@@ -121,3 +121,21 @@ def test_staff_role_cannot_see_admin_pages(client, app):
 def test_open_redirect_blocked(client):
     r = post(client, "/m/homes/new", {"name": "a", "_next": "//evil.example"})
     assert r.headers["Location"].startswith("/m/homes/")
+
+
+def test_purpose_menu(client, app):
+    for key in ["daily", "residents", "staff", "money", "settings"]:
+        assert client.get(f"/do/{key}").status_code == 200, key
+    home = client.get("/").get_data(as_text=True)
+    assert "やりたいことを言葉でさがす" in home and "研修を受けた記録をつける" in home
+    # 入居者の画面ではメニューの「入居者のこと」が選択状態になり、道しるべが出る
+    page = client.get("/m/support_plans/").get_data(as_text=True)
+    assert 'class="on"><span class="ic">👤' in page and "＞" in page
+
+    post(client, "/users", {"action": "add", "username": "worker", "password": "password123", "role": "staff"})
+    c = app.test_client()
+    c.post("/login", data={"username": "worker", "password": "password123"})
+    assert c.get("/do/staff").status_code == 404
+    home = c.get("/").get_data(as_text=True)
+    assert "職員のこと" not in home and "処遇改善の計画と配分を見る" not in home
+    assert "今月の加算の要件をチェックする" in home

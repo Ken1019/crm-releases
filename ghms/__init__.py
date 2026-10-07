@@ -1,7 +1,7 @@
 import os
 import secrets
 
-from flask import Flask
+from flask import Flask, g
 
 from . import db
 
@@ -43,6 +43,12 @@ def create_app(test_config=None):
     from .entities import ENTITIES, GROUP_ICONS, GROUPS
 
     app.jinja_env.filters["reject_page"] = lambda args: {k: v for k, v in args.items() if k != "page"}
+
+    from .hubs import current_hub, hub_url, visible_hubs
+
+    @app.context_processor
+    def hubs():
+        return {"hubs": visible_hubs() if getattr(g, "user", None) else [], "cur_hub": current_hub(), "hub_url": hub_url}
 
     @app.context_processor
     def inject():
