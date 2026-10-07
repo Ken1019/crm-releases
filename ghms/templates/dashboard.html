@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}ダッシュボード{% endblock %}
+{% block content %}
+<h1>ダッシュボード <small class="muted">{{ today.strftime('%Y年%m月%d日') }}</small></h1>
+<div class="tiles">
+  <a class="tile" href="{{ url_for('crud.index', key='residents') }}"><b>{{ stats.residents }}</b><span>入居者</span></a>
+  {% if is_admin %}<a class="tile" href="{{ url_for('crud.index', key='staff') }}"><b>{{ stats.staff }}</b><span>在籍職員</span></a>{% endif %}
+  <a class="tile" href="{{ url_for('crud.index', key='incidents') }}"><b>{{ stats.incidents }}</b><span>ヒヤリ・事故（30日）</span></a>
+  <a class="tile" href="{{ url_for('views.addon_check') }}"><b>{{ stats.addons }}</b><span>算定中の加算</span></a>
+</div>
+
+<div class="cols">
+<section class="card">
+  <h2>⚠ 期限・対応が必要なもの</h2>
+  {% if alerts %}
+  <table class="list">
+  <thead><tr><th>内容</th><th>入居者</th><th>期限</th></tr></thead>
+  {% for kind, name, d, url in alerts %}
+    <tr class="{{ 'over' if d and d < today.isoformat() }}"><td><a href="{{ url }}">{{ kind }}</a></td><td>{{ name }}</td><td>{{ d }}</td></tr>
+  {% endfor %}
+  </table>
+  {% else %}<p class="muted">現在、期限が近いものはありません。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>📝 本日の業務日誌</h2>
+  {% for h, n, done in home_stats %}
+    <p><a href="{{ url_for('views.journal', home_id=h['id']) }}">{{ h['name'] }}</a>（入居 {{ n }}名）
+      {% if done %}<span class="ok">記入済</span>{% else %}<span class="ng">未記入</span>{% endif %}</p>
+  {% else %}
+    <p class="muted">まず <a href="{{ url_for('crud.new', key='homes') }}">住居（ユニット）</a> を登録してください。</p>
+  {% endfor %}
+
+  <h2>🏛 委員会・研修の最終実施日</h2>
+  <table class="list">
+  {% for kind, last, warn in meetings %}
+    <tr><td>{{ kind }}</td><td class="{{ 'ng' if warn }}">{{ last or '記録なし' }}</td></tr>
+  {% endfor %}
+  </table>
+  <p class="muted small">1年以上記録がないものを赤で表示します。必要な開催頻度は運営基準・指定権者の指導で確認してください。</p>
+</section>
+</div>
+
+<section class="card">
+  <h2>最近のヒヤリハット・事故</h2>
+  <table class="list">
+  {% for i in recent %}
+    <tr><td>{{ i['date'] }}</td><td>{{ i['kind'] or '' }}</td><td>{{ i['rname'] or '' }}</td>
+      <td><a href="{{ url_for('crud.view', key='incidents', rid=i['id']) }}">{{ (i['content'] or '')|truncate(50) }}</a></td></tr>
+  {% else %}<tr><td class="muted">記録はありません</td></tr>{% endfor %}
+  </table>
+</section>
+{% endblock %}

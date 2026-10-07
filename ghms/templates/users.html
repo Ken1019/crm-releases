@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}ユーザー管理{% endblock %}
+{% block content %}
+<h1>ユーザー管理</h1>
+<p class="muted">「職員」権限では、職員情報・キャリアパス・処遇改善（給与情報を含む）は表示されません。</p>
+<table class="list">
+<thead><tr><th>ユーザー名</th><th>表示名</th><th>権限</th><th>パスワード再設定</th><th></th></tr></thead>
+{% for u in rows %}
+<tr><td>{{ u['username'] }}</td><td>{{ u['display_name'] }}</td><td>{{ '管理者' if u['role'] == 'admin' else '職員' }}</td>
+<td><form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <input type="hidden" name="action" value="password"><input type="hidden" name="id" value="{{ u['id'] }}">
+  <input type="password" name="password" minlength="8" placeholder="新しいパスワード" required> <button class="btn">変更</button></form></td>
+<td>{% if u['id'] != g.user['id'] %}<form method="post" class="inline" onsubmit="return confirm('削除しますか？')">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete">
+  <input type="hidden" name="id" value="{{ u['id'] }}"><button class="btn danger">削除</button></form>{% endif %}</td></tr>
+{% endfor %}
+</table>
+<h2>ユーザー追加</h2>
+<form method="post" class="card form">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="add">
+  <label><span>ユーザー名</span><input name="username" required></label>
+  <label><span>表示名</span><input name="display_name"></label>
+  <label><span>パスワード（8文字以上）</span><input type="password" name="password" minlength="8" required></label>
+  <label><span>権限</span><select name="role"><option value="staff">職員</option><option value="admin">管理者</option></select></label>
+  <div class="actions wide"><button class="btn primary">追加</button></div>
+</form>
+{% endblock %}

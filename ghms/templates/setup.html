@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}初期設定{% endblock %}
+{% block content %}
+<div class="auth card">
+  <h1>初期設定</h1>
+  <p>最初に管理者アカウントを作成します。</p>
+  <form method="post">
+    <label><span>事業所名</span><input name="office_name" required></label>
+    <label><span>管理者 ユーザー名（半角英数）</span><input name="username" required autocomplete="username"></label>
+    <label><span>表示名（氏名）</span><input name="display_name"></label>
+    <label><span>パスワード（8文字以上）</span><input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+    <button class="btn primary">作成して開始</button>
+  </form>
+</div>
+{% endblock %}

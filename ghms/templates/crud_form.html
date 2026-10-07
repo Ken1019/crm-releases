@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block title %}{{ ent.title }}{% endblock %}
+{% block content %}
+<h1>{{ ent.title }}　{{ '編集' if rid else '新規登録' }}</h1>
+<form method="post" class="card form">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <input type="hidden" name="_next" value="{{ next }}">
+  {% for f in ent.fields if f.type != 'hidden' %}
+  <label class="{{ 'wide' if f.type == 'textarea' }}">
+    <span>{{ f.label }}{% if f.required %} <em>*</em>{% endif %}</span>
+    {% set v = values.get(f.name) %}{% include '_form_field.html' %}
+    {% if f.help %}<small class="muted">{{ f.help }}</small>{% endif %}
+  </label>
+  {% endfor %}
+  <div class="actions wide">
+    <button class="btn primary">保存</button>
+    <a class="btn" href="{{ url_for('crud.view', key=key, rid=rid) if rid else url_for('crud.index', key=key) }}">キャンセル</a>
+  </div>
+</form>
+{% endblock %}

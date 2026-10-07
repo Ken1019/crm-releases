@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block title %}処遇改善{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>処遇改善 計画・配分</h1>
+  <a class="btn primary" href="{{ url_for('crud.new', key='shogu_plans') }}">＋ 年度計画を作成</a>
+  <a class="btn" href="{{ url_for('crud.index', key='shogu_requirements') }}">要件マスタ</a>
+</div>
+<p class="muted small">福祉・介護職員等処遇改善加算の年度ごとの加算見込額と、職員への賃金改善の配分を管理します。
+  加算率・要件は改定で変わるため、最新の通知・自治体の案内を確認して入力してください。</p>
+<table class="list">
+<thead><tr><th>年度</th><th>区分</th><th>加算率</th><th>加算額見込</th><th>賃金改善額</th><th>差額</th><th>対象職員</th><th></th></tr></thead>
+{% for p, s in plans %}
+<tr><td>{{ p['fiscal_year']|int }}年度</td><td>{{ p['category'] or '' }}</td><td>{{ p['rate'] if p['rate'] is not none else '' }}%</td>
+  <td class="num">{{ '{:,.0f}'.format(s.addon) }}</td><td class="num">{{ '{:,.0f}'.format(s.total) }}</td>
+  <td class="num {{ 'ng' if s.diff < 0 else 'ok' }}">{{ '{:+,.0f}'.format(s.diff) }}</td><td>{{ s.allocs|length }}名</td>
+  <td><a href="{{ url_for('views.shogu_plan', pid=p['id']) }}">開く</a></td></tr>
+{% else %}<tr><td colspan="8" class="muted">計画がありません。</td></tr>{% endfor %}
+</table>
+{% endblock %}

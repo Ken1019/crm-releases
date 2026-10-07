@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}加算 要件確認{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>加算 要件確認・概算（{{ first.strftime('%Y年%m月') }}）</h1>
+  <form method="get" class="inline"><input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()"></form>
+  <button class="btn" onclick="window.print()">印刷</button>
+  <a class="btn" href="{{ url_for('crud.index', key='addons') }}">加算マスタを編集</a>
+</div>
+<p class="muted small">「算定中」にチェックした加算が表示されます。単位数は加算マスタに入力した値で計算する<b>概算</b>です
+  （日割・区分別単価・人数区分・減算等は反映されません）。請求は国保連請求ソフトの結果を正としてください。</p>
+
+<form method="post">
+<input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}">
+<table class="list">
+<thead><tr><th>加算</th><th>種類</th><th>単位</th><th>対象人数</th><th>概算単位数</th><th>要件確認</th></tr></thead>
+{% for it in items %}{% set a = it.a %}
+<tr>
+  <td><a href="{{ url_for('crud.view', key='addons', rid=a['id']) }}">{{ a['name'] }}</a>
+    {% if it.ok and it.reqs %}<span class="ok">要件OK</span>{% elif it.reqs %}<span class="ng">未確認あり</span>{% endif %}
+    {% if not a['units'] %}<br><small class="ng">単位数が未入力です</small>{% endif %}</td>
+  <td>{{ '個別' if it.individual else '体制' }}</td>
+  <td class="nowrap">{{ a['units']|int if a['units'] else '-' }} / {{ a['unit_type'] or '' }}</td>
+  <td>{% if it.individual %}<a href="{{ url_for('crud.index', key='resident_addons', addon_id=a['id']) }}">{{ it.count }}名</a>{% else %}{{ it.count }}名（入居者全員）{% endif %}</td>
+  <td class="num">{{ '{:,.0f}'.format(it.units) }}{% if a['unit_type'] == '回' %}<br><small class="muted">×回数</small>{% endif %}</td>
+  <td>{% for i, item, c in it.reqs %}
+      <label class="check"><input type="checkbox" name="a{{ a['id'] }}_{{ i }}" value="1"{% if c and c['checked'] %} checked{% endif %}> {{ item }}</label>
+    {% endfor %}</td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="muted">算定中の加算がありません。<a href="{{ url_for('crud.index', key='addons') }}">加算マスタ</a>で「算定中」にチェックしてください。</td></tr>
+{% endfor %}
+</table>
+<p class="summary card">概算合計：<b>{{ '{:,.0f}'.format(total_units) }} 単位</b> × {{ price }}円
+  ＝ <b>約 {{ '{:,.0f}'.format(total_units * price) }} 円</b>
+  <small class="muted">（{{ days }}日・入居者 {{ n_res }}名で計算、「回」単位の加算は除く。処遇改善加算は率計算のため含みません）</small></p>
+{% if items %}<div class="actions noprint"><button class="btn primary">要件確認を保存</button></div>{% endif %}
+</form>
+{% endblock %}

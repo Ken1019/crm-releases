@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}操作履歴{% endblock %}
+{% block content %}
+<h1>操作履歴（最新300件）</h1>
+<table class="list">
+<thead><tr><th>日時</th><th>ユーザー</th><th>操作</th><th>対象</th></tr></thead>
+{% for r in rows %}
+<tr><td>{{ r['at'] }}</td><td>{{ r['username'] }}</td>
+  <td>{{ {'create': '登録', 'update': '更新', 'delete': '削除'}.get(r['action'], r['action']) }}</td>
+  <td>{% if r['entity'] in ENTITIES %}{{ ENTITIES[r['entity']].title }}{% if r['action'] != 'delete' %}
+    <a href="{{ url_for('crud.view', key=r['entity'], rid=r['record_id']) }}">#{{ r['record_id'] }}</a>{% else %} #{{ r['record_id'] }}{% endif %}{% endif %}</td></tr>
+{% endfor %}
+</table>
+{% endblock %}

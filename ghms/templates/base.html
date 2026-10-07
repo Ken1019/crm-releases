@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %}｜グループホーム業務管理</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+{% if g.user %}
+<header class="top">
+  <a class="brand" href="{{ url_for('views.dashboard') }}">🏠 {{ office_name }}</a>
+  <span class="spacer"></span>
+  <span class="who">{{ g.user['display_name'] }}（{{ '管理者' if is_admin else '職員' }}）</span>
+  <a href="{{ url_for('auth.my_password') }}">パスワード変更</a>
+  <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="link">ログアウト</button>
+  </form>
+</header>
+<div class="layout">
+<nav class="side">
+  <a href="{{ url_for('views.dashboard') }}">ダッシュボード</a>
+  <a href="{{ url_for('views.journal') }}">📝 日誌入力（1日分）</a>
+  <a href="{{ url_for('views.reports') }}">📄 帳票・資料出力</a>
+  {% for grp in GROUPS %}
+    <div class="grp">{{ grp }}</div>
+    {% if grp == '職員・キャリアパス' and is_admin %}<a href="{{ url_for('views.career') }}">キャリアパス一覧</a>{% endif %}
+    {% if grp == '加算・処遇改善' %}<a href="{{ url_for('views.addon_check') }}">加算 要件確認・概算</a>
+      {% if is_admin %}<a href="{{ url_for('views.shogu_index') }}">処遇改善 計画・配分</a>{% endif %}{% endif %}
+    {% for key, e in ENTITIES.items() if e.group == grp and (is_admin or not e.admin_only) %}
+      <a href="{{ url_for('crud.index', key=key) }}">{{ e.title }}</a>
+    {% endfor %}
+  {% endfor %}
+  {% if is_admin %}
+    <div class="grp">管理</div>
+    <a href="{{ url_for('views.settings') }}">事業所設定</a>
+    <a href="{{ url_for('auth.users') }}">ユーザー管理</a>
+    <a href="{{ url_for('views.audit_log') }}">操作履歴</a>
+    <a href="{{ url_for('views.backup') }}">バックアップをダウンロード</a>
+  {% endif %}
+  <div class="ver">v{{ VERSION }}</div>
+</nav>
+<main>
+{% endif %}
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+{% if g.user %}
+</main>
+</div>
+{% endif %}
+</body>
+</html>

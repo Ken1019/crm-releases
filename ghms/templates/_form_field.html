@@ -1,0 +1,17 @@
+{# f: field, v: value, refs #}
+{% set name = prefix ~ f.name if prefix is defined else f.name %}
+{% if f.type == 'textarea' %}
+  <textarea name="{{ name }}" rows="4">{{ v if v is not none }}</textarea>
+{% elif f.type == 'select' %}
+  <select name="{{ name }}"><option value=""></option>
+  {% for o in f.options %}<option{% if v == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+{% elif f.type == 'ref' %}
+  <select name="{{ name }}"><option value=""></option>
+  {% for id, lab in refs[f.name] %}<option value="{{ id }}"{% if v is not none and v|string == id|string %} selected{% endif %}>{{ lab }}</option>{% endfor %}</select>
+{% elif f.type == 'check' %}
+  <input type="checkbox" name="{{ name }}" value="1"{% if v %} checked{% endif %}>
+{% elif f.type == 'number' %}
+  <input type="number" name="{{ name }}" step="{{ f.step or 'any' }}" value="{{ (v|int if v is number and v == v|int else v) if v is not none }}">
+{% else %}
+  <input type="{{ f.type if f.type in ('date','time') else 'text' }}" name="{{ name }}" value="{{ v if v is not none }}">
+{% endif %}

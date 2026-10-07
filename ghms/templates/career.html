@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block title %}キャリアパス{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>キャリアパス</h1>
+  <a class="btn" href="{{ url_for('views.career_export') }}">キャリアパス表・職員別状況（Excel）</a>
+  <a class="btn" href="{{ url_for('crud.index', key='career_grades') }}">等級を編集</a>
+</div>
+
+<section class="card">
+  <h2>等級・任用要件・賃金体系</h2>
+  <table class="list">
+  <thead><tr><th>等級</th><th>職位</th><th>任用要件</th><th>必須研修</th><th>基本給</th><th>在籍</th></tr></thead>
+  {% for gr in grades %}
+  <tr><td><a href="{{ url_for('crud.view', key='career_grades', rid=gr['id']) }}">{{ gr['name'] }}</a></td><td>{{ gr['position'] or '' }}</td>
+    <td class="pre">{{ gr['requirements'] or '' }}</td><td class="pre">{{ gr['trainings'] or '' }}</td>
+    <td class="nowrap">{% if gr['salary_min'] or gr['salary_max'] %}{{ '{:,.0f}'.format(gr['salary_min'] or 0) }}〜{{ '{:,.0f}'.format(gr['salary_max'] or 0) }}円{% else %}<span class="ng">未設定</span>{% endif %}</td>
+    <td><a href="{{ url_for('crud.index', key='staff', grade_id=gr['id']) }}">{{ gr['n'] }}名</a></td></tr>
+  {% endfor %}
+  </table>
+</section>
+
+<section class="card">
+  <h2>職員別 状況（{{ fy }}年度）</h2>
+  <table class="list">
+  <thead><tr><th>氏名</th><th>職種</th><th>等級</th><th>勤続</th><th>通算経験</th><th>資格</th><th>研修</th><th>直近評価</th><th>推薦等級</th><th></th></tr></thead>
+  {% for r in rows %}
+  <tr><td><a href="{{ url_for('crud.view', key='staff', rid=r.s['id']) }}">{{ r.s['name'] }}</a></td><td>{{ r.s['job'] or '' }}</td>
+    <td>{{ r.grade }}</td><td>{{ '%d年'|format(r.tenure) if r.tenure is not none else '-' }}</td><td>{{ r.total_exp }}年</td>
+    <td class="pre small">{{ r.s['qualifications'] or '' }}</td>
+    <td class="nowrap">{{ r.count }}件 / {{ r.hours|round(1) }}h</td>
+    <td>{{ (r.ev['score'] ~ '（' ~ r.ev['date'] ~ '）') if r.ev else '未実施' }}</td>
+    <td>{{ r.recommend or '' }}</td>
+    <td class="nowrap"><a href="{{ url_for('crud.new', key='trainings', staff_id=r.s['id'], next=request.path) }}">＋研修</a>
+      <a href="{{ url_for('crud.new', key='evaluations', staff_id=r.s['id'], next=request.path) }}">＋評価</a></td></tr>
+  {% else %}<tr><td colspan="10" class="muted">職員が登録されていません。</td></tr>{% endfor %}
+  </table>
+</section>
+
+<section class="card">
+  <div class="head"><h2>{{ fy }}年度 研修計画</h2>
+    <a class="btn" href="{{ url_for('crud.new', key='training_plans', fiscal_year=fy, next=request.path) }}">＋ 追加</a></div>
+  <table class="list">
+  {% for p in plans %}
+    <tr><td>{{ p['month']|int if p['month'] else '' }}月</td><td>{{ p['title'] }}</td><td>{{ p['target'] or '' }}</td>
+      <td class="{{ 'ok' if p['status'] == '実施済' }}">{{ p['status'] or '' }}</td>
+      <td><a href="{{ url_for('crud.edit', key='training_plans', rid=p['id'], next=request.path) }}">編集</a></td></tr>
+  {% else %}<tr><td class="muted">研修計画がありません（処遇改善 キャリアパス要件Ⅱの根拠になります）。</td></tr>{% endfor %}
+  </table>
+</section>
+{% endblock %}

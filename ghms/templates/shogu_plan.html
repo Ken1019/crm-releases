@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}処遇改善 {{ label }}{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>処遇改善 {{ label }}</h1>
+  <a class="btn" href="{{ url_for('crud.edit', key='shogu_plans', rid=plan['id'], next=request.path) }}">計画を編集</a>
+  <a class="btn" href="{{ url_for('views.shogu_export', pid=plan['id']) }}">配分表（Excel）</a>
+  <button class="btn" onclick="window.print()">印刷</button>
+</div>
+<div class="tiles">
+  <div class="tile"><b>{{ '{:,.0f}'.format(s.addon) }}</b><span>加算額見込（円/年）</span></div>
+  <div class="tile"><b>{{ '{:,.0f}'.format(s.total) }}</b><span>賃金改善額 合計</span></div>
+  <div class="tile"><b class="{{ 'ng' if s.diff < 0 else 'ok' }}">{{ '{:+,.0f}'.format(s.diff) }}</b><span>差額（改善額−加算額）</span></div>
+  <div class="tile"><b>{{ '{:.1f}'.format(s.monthly_ratio) if s.monthly_ratio is not none else '-' }}%</b><span>うち月額（基本給・毎月手当）</span></div>
+</div>
+{% if s.diff < 0 %}<div class="flash error">賃金改善額が加算額見込を下回っています。加算額以上の賃金改善が必要です。</div>{% endif %}
+<p class="muted small">加算額見込 ＝ 報酬総額見込 {{ '{:,.0f}'.format(plan['revenue'] or 0) }}円 × 加算率 {{ plan['rate'] or 0 }}%。
+  月額改善の必要割合は区分・通知により異なるため確認してください。法定福利費等の事業主負担増加分の扱いも通知に従ってください。</p>
+
+<section class="card">
+  <div class="head"><h2>職員別配分</h2>
+    <a class="btn primary" href="{{ url_for('crud.new', key='shogu_allocations', plan_id=plan['id'], next=request.path) }}">＋ 配分を追加</a></div>
+  <table class="list">
+  <thead><tr><th>氏名</th><th>職種</th><th>雇用形態</th><th>支給方法</th><th>月額</th><th>賞与・一時金</th><th>年間合計</th><th></th></tr></thead>
+  {% for a in s.allocs %}
+  <tr><td>{{ a['sname'] or '' }}</td><td>{{ a['job'] or '' }}</td><td>{{ a['employment'] or '' }}</td><td>{{ a['method'] or '' }}</td>
+    <td class="num">{{ '{:,.0f}'.format(a['monthly'] or 0) }}</td><td class="num">{{ '{:,.0f}'.format(a['annual_lump'] or 0) }}</td>
+    <td class="num">{{ '{:,.0f}'.format((a['monthly'] or 0) * 12 + (a['annual_lump'] or 0)) }}</td>
+    <td><a href="{{ url_for('crud.edit', key='shogu_allocations', rid=a['id'], next=request.path) }}">編集</a></td></tr>
+  {% else %}<tr><td colspan="8" class="muted">配分が登録されていません。</td></tr>{% endfor %}
+  <tr class="total"><td colspan="4">合計</td><td class="num">{{ '{:,.0f}'.format(s.monthly_total / 12) }}/月</td>
+    <td class="num">{{ '{:,.0f}'.format(s.lump_total) }}</td><td class="num">{{ '{:,.0f}'.format(s.total) }}</td><td></td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>算定要件チェック（区分{{ plan['category'] or '未設定' }}）</h2>
+  <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    {% for r, ok in reqs %}
+      <label class="check req"><input type="checkbox" name="req" value="{{ r['id'] }}"{% if ok %} checked{% endif %}>
+        <b>{{ r['name'] }}</b><br><small class="muted">{{ r['description'] or '' }}</small></label>
+    {% endfor %}
+    <div class="actions noprint"><button class="btn primary">保存</button>
+      <a href="{{ url_for('views.career') }}">キャリアパス（要件Ⅰ〜Ⅲの根拠資料）を確認</a></div>
+  </form>
+</section>
+{% endblock %}

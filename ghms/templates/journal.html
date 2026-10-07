@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+{% block title %}日誌入力{% endblock %}
+{% block content %}
+<h1>日誌入力（1日分まとめて）</h1>
+<form method="get" class="filters">
+  <a class="btn" href="{{ url_for('views.journal', date=prev, home_id=home_id, slot=slot) }}">◀ 前日</a>
+  <input type="date" name="date" value="{{ d.isoformat() }}" onchange="this.form.submit()">
+  <a class="btn" href="{{ url_for('views.journal', date=next, home_id=home_id, slot=slot) }}">翌日 ▶</a>
+  <select name="home_id" onchange="this.form.submit()">
+    {% for h in homes %}<option value="{{ h['id'] }}"{% if h['id'] == home_id %} selected{% endif %}>{{ h['name'] }}</option>{% endfor %}
+  </select>
+  <select name="slot" onchange="this.form.submit()">
+    {% for s in TIME_SLOT %}<option{% if s == slot %} selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <noscript><button class="btn">表示</button></noscript>
+</form>
+
+<form method="post">
+<input type="hidden" name="_csrf" value="{{ csrf_token }}">
+<input type="hidden" name="date" value="{{ d.isoformat() }}">
+<input type="hidden" name="home_id" value="{{ home_id or '' }}">
+<input type="hidden" name="slot" value="{{ slot }}">
+
+<section class="card form">
+  <h2 class="wide">業務日誌</h2>
+  <label><span>日中勤務者</span><input name="day_staff" value="{{ log['day_staff'] or '' if log }}"></label>
+  <label><span>夜間勤務者</span><input name="night_staff" value="{{ log['night_staff'] or '' if log }}"></label>
+  <label><span>在籍者数</span><input type="number" name="residents_count" value="{{ (log['residents_count']|int if log['residents_count'] is not none else '') if log else residents|length }}"></label>
+  <label><span>外泊・入院者</span><input name="absent" value="{{ log['absent'] or '' if log }}"></label>
+  <label class="wide"><span>全体の様子</span><textarea name="summary" rows="3">{{ log['summary'] or '' if log }}</textarea></label>
+  <label class="wide"><span>行事・来訪・通院</span><textarea name="events" rows="2">{{ log['events'] or '' if log }}</textarea></label>
+  <label class="wide"><span>申し送り</span><textarea name="handover" rows="3">{{ log['handover'] or '' if log }}</textarea></label>
+  <label><span>確認者（管理者）</span><input name="checker" value="{{ log['checker'] or '' if log }}"></label>
+</section>
+
+<section class="card">
+  <h2>支援記録（時間帯：{{ slot }}）</h2>
+  <div class="tablewrap">
+  <table class="list grid">
+    <thead><tr><th>居室</th><th>氏名</th><th>体温</th><th>食事</th><th>服薬</th><th>様子</th><th>記録内容</th><th>記録者</th></tr></thead>
+    {% for r in residents %}{% set rec = recs.get(r['id']) %}{% set p = 'r' ~ r['id'] ~ '_' %}
+    <tr>
+      <td>{{ r['room'] or '' }}</td>
+      <td class="nowrap"><a href="{{ url_for('crud.view', key='residents', rid=r['id']) }}">{{ r['name'] }}</a>
+        {% if r['status'] == '入院中' %}<small class="ng">入院中</small>{% endif %}</td>
+      <td><input type="number" step="0.1" name="{{ p }}temperature" class="w5" value="{{ rec['temperature'] if rec and rec['temperature'] is not none }}"></td>
+      <td><select name="{{ p }}meal"><option></option>{% for o in MEAL %}<option{% if rec and rec['meal'] == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select></td>
+      <td><select name="{{ p }}medication"><option></option>{% for o in MED %}<option{% if rec and rec['medication'] == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select></td>
+      <td><select name="{{ p }}mood"><option></option>{% for o in MOOD %}<option{% if rec and rec['mood'] == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select></td>
+      <td><textarea name="{{ p }}content" rows="2">{{ rec['content'] or '' if rec }}</textarea></td>
+      <td><input name="{{ p }}staff" class="w8" value="{{ (rec['staff'] or '') if rec else g.user['display_name'] }}"></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="muted">この住居に入居者が登録されていません。</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+  <p class="muted small">記入のない入居者の記録は作成されません。</p>
+</section>
+<div class="actions"><button class="btn primary big">保存</button></div>
+</form>
+
+{% if day_all %}
+<section class="card">
+  <h2>この日の支援記録（全時間帯）</h2>
+  <table class="list">
+  <thead><tr><th>時間帯</th><th>氏名</th><th>体温</th><th>食事</th><th>服薬</th><th>様子</th><th>内容</th><th>記録者</th></tr></thead>
+  {% for s in day_all %}
+    <tr><td>{{ s['time_slot'] or '' }}</td><td>{{ s['rname'] }}</td><td>{{ s['temperature'] if s['temperature'] is not none }}</td>
+      <td>{{ s['meal'] or '' }}</td><td>{{ s['medication'] or '' }}</td><td>{{ s['mood'] or '' }}</td>
+      <td class="pre"><a href="{{ url_for('crud.edit', key='support_records', rid=s['id']) }}">{{ s['content'] or '（編集）' }}</a></td><td>{{ s['staff'] or '' }}</td></tr>
+  {% endfor %}
+  </table>
+</section>
+{% endif %}
+{% endblock %}
