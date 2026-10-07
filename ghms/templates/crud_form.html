@@ -1,20 +1,23 @@
 {% extends 'base.html' %}
 {% block title %}{{ ent.title }}{% endblock %}
 {% block content %}
-<h1>{{ ent.title }}　{{ '編集' if rid else '新規登録' }}</h1>
-<form method="post" class="card form">
+<h1>{{ ent.icon }} {{ ent.title }}を{{ '直す' if rid else '追加する' }}</h1>
+<p class="guide"><span class="must">必須</span> がついている所だけ入れれば保存できます。分からない所は空のままで大丈夫です。</p>
+<form method="post" data-guard>
   <input type="hidden" name="_csrf" value="{{ csrf_token }}">
   <input type="hidden" name="_next" value="{{ next }}">
+  <div class="card form">
   {% for f in ent.fields if f.type != 'hidden' %}
   <label class="{{ 'wide' if f.type == 'textarea' }}">
-    <span>{{ f.label }}{% if f.required %} <em>*</em>{% endif %}</span>
+    <span>{{ f.label }}{% if f.required %}<span class="must">必須</span>{% endif %}</span>
     {% set v = values.get(f.name) %}{% include '_form_field.html' %}
     {% if f.help %}<small class="muted">{{ f.help }}</small>{% endif %}
   </label>
   {% endfor %}
-  <div class="actions wide">
-    <button class="btn primary">保存</button>
-    <a class="btn" href="{{ url_for('crud.view', key=key, rid=rid) if rid else url_for('crud.index', key=key) }}">キャンセル</a>
+  </div>
+  <div class="actions sticky-save">
+    <button class="btn primary big">💾 保存する</button>
+    <a class="btn" href="{{ next or (url_for('crud.view', key=key, rid=rid) if rid else url_for('crud.index', key=key)) }}">やめる</a>
   </div>
 </form>
 {% endblock %}

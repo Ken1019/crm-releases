@@ -1,36 +1,41 @@
 {% extends 'base.html' %}
 {% block title %}{{ ent.title }}{% endblock %}
 {% block content %}
+<p class="noprint"><a href="{{ url_for('crud.index', key=key) }}">◀ {{ ent.title }}の一覧にもどる</a></p>
 <div class="head">
-  <h1>{{ ent.title }}</h1>
-  <a class="btn primary" href="{{ url_for('crud.edit', key=key, rid=row['id']) }}">編集</a>
-  <button class="btn" onclick="window.print()">印刷</button>
+  <h1>{{ ent.icon }} {{ ent.title }}</h1>
+  <a class="btn primary" href="{{ url_for('crud.edit', key=key, rid=row['id']) }}">✏️ 直す</a>
+  <button class="btn" onclick="window.print()">🖨️ 印刷</button>
   {% if key == 'residents' %}
-    <a class="btn" href="{{ url_for('views.resident_records_export', rid=row['id']) }}">今月の支援記録（Excel）</a>
+    <a class="btn" href="{{ url_for('views.resident_records_export', rid=row['id']) }}">📄 今月の記録をExcelで</a>
   {% elif key == 'shogu_plans' %}
-    <a class="btn" href="{{ url_for('views.shogu_plan', pid=row['id']) }}">配分・要件チェック画面</a>
+    <a class="btn" href="{{ url_for('views.shogu_plan', pid=row['id']) }}">💴 配分・要件チェックの画面</a>
   {% endif %}
-  <form method="post" action="{{ url_for('crud.delete', key=key, rid=row['id']) }}" class="inline"
-        onsubmit="return confirm('削除してよろしいですか？元に戻せません。')">
-    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="btn danger">削除</button>
-  </form>
 </div>
 <p class="printonly">{{ office_name }}</p>
-<table class="detail card">
+<div class="card">
+<table class="detail">
   {% for f in ent.fields if f.type != 'hidden' %}
   <tr><th>{{ f.label }}</th><td class="pre">{{ fmt(f, row[f.name], maps) }}</td></tr>
   {% endfor %}
-  <tr class="noprint"><th>最終更新</th><td class="muted">{{ row['updated_at'] }} {{ row['updated_by'] or '' }}</td></tr>
+  <tr class="noprint"><th>最後に直した日時</th><td class="muted">{{ row['updated_at'] }} {{ row['updated_by'] or '' }}</td></tr>
 </table>
+</div>
 {% if related %}
-<div class="noprint">
-<h2>関連データ</h2>
+<section class="card noprint">
+<h2>🔗 この{{ ent.title }}に関係する記録</h2>
 <ul class="related">
 {% for k, e, fname in related %}
-  <li><a href="{{ url_for('crud.index', key=k, **{fname: row['id']}) }}">{{ e.title }}</a>
-      （<a href="{{ url_for('crud.new', key=k, **{fname: row['id'], 'next': request.path}) }}">＋追加</a>）</li>
+  <li>{{ e.icon }} <a href="{{ url_for('crud.index', key=k, **{fname: row['id']}) }}">{{ e.title }}を見る</a>
+      ・<a href="{{ url_for('crud.new', key=k, **{fname: row['id'], 'next': request.path}) }}">＋追加</a></li>
 {% endfor %}
 </ul>
-</div>
+</section>
 {% endif %}
+<div class="noprint" style="margin-top:30px">
+  <form method="post" action="{{ url_for('crud.delete', key=key, rid=row['id']) }}" class="inline"
+        onsubmit="return confirm('本当に削除しますか？\n削除すると元に戻せません。')">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="btn danger">🗑 この記録を削除する</button>
+  </form>
+</div>
 {% endblock %}

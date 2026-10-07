@@ -40,12 +40,12 @@ def create_app(test_config=None):
     app.register_blueprint(views.bp)
     auth.install(app)
 
-    from .entities import ENTITIES, GROUPS
+    from .entities import ENTITIES, GROUP_ICONS, GROUPS
 
     app.jinja_env.filters["reject_page"] = lambda args: {k: v for k, v in args.items() if k != "page"}
 
     @app.context_processor
     def inject():
-        return {"ENTITIES": ENTITIES, "GROUPS": GROUPS, "VERSION": VERSION, "office_name": db.get_setting("office_name")}
+        return {"ENTITIES": ENTITIES, "GROUPS": GROUPS, "GROUP_ICONS": GROUP_ICONS, "VERSION": VERSION, "office_name": db.get_setting("office_name")}
 
     return app

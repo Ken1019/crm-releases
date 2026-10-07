@@ -1,53 +1,69 @@
 {% extends 'base.html' %}
-{% block title %}ダッシュボード{% endblock %}
+{% block title %}ホーム{% endblock %}
 {% block content %}
-<h1>ダッシュボード <small class="muted">{{ today.strftime('%Y年%m月%d日') }}</small></h1>
-<div class="tiles">
-  <a class="tile" href="{{ url_for('crud.index', key='residents') }}"><b>{{ stats.residents }}</b><span>入居者</span></a>
-  {% if is_admin %}<a class="tile" href="{{ url_for('crud.index', key='staff') }}"><b>{{ stats.staff }}</b><span>在籍職員</span></a>{% endif %}
-  <a class="tile" href="{{ url_for('crud.index', key='incidents') }}"><b>{{ stats.incidents }}</b><span>ヒヤリ・事故（30日）</span></a>
-  <a class="tile" href="{{ url_for('views.addon_check') }}"><b>{{ stats.addons }}</b><span>算定中の加算</span></a>
+<h1>{{ g.user['display_name'] }} さん、おつかれさまです 🌼</h1>
+<p class="hello muted">今日は {{ today.strftime('%Y年%m月%d日') }}（{{ '月火水木金土日'[today.weekday()] }}）です。下の大きなボタンから始められます。</p>
+
+<div class="bigmenu">
+  <a class="main" href="{{ url_for('views.journal') }}"><span class="ic">📝</span><b>今日の日誌を書く</b><small>業務日誌と入居者の記録をまとめて</small></a>
+  <a href="{{ url_for('crud.index', key='residents') }}"><span class="ic">👤</span><b>入居者を見る</b><small>連絡先・服薬・受給者証など</small></a>
+  <a href="{{ url_for('crud.new', key='incidents') }}"><span class="ic">⚠️</span><b>ヒヤリハットを書く</b><small>ヒヤッとしたらすぐ記録</small></a>
+  <a href="{{ url_for('views.reports') }}"><span class="ic">🖨️</span><b>書類を作る</b><small>日誌や一覧をExcelで出す</small></a>
+  {% if is_admin %}<a href="{{ url_for('views.career') }}"><span class="ic">🪜</span><b>キャリアパス</b><small>等級・研修・評価</small></a>
+  <a href="{{ url_for('views.shogu_index') }}"><span class="ic">💴</span><b>処遇改善</b><small>加算額と職員への配分</small></a>{% endif %}
 </div>
 
 <div class="cols">
 <section class="card">
-  <h2>⚠ 期限・対応が必要なもの</h2>
+  <h2>🔔 やることリスト</h2>
   {% if alerts %}
-  <table class="list">
-  <thead><tr><th>内容</th><th>入居者</th><th>期限</th></tr></thead>
+  <ul class="todo">
   {% for kind, name, d, url in alerts %}
-    <tr class="{{ 'over' if d and d < today.isoformat() }}"><td><a href="{{ url }}">{{ kind }}</a></td><td>{{ name }}</td><td>{{ d }}</td></tr>
+    {% set over = d and d < today.isoformat() %}
+    <li class="{{ 'over' if over }}"><a href="{{ url }}">
+      {% if not d %}<span class="pill ng">未作成</span>{% elif over %}<span class="pill ng">期限切れ</span>{% else %}<span class="pill warn">もうすぐ</span>{% endif %}
+      <span><b>{{ name }}</b> さん：{{ kind }}</span><span class="when">{{ d }}</span></a></li>
   {% endfor %}
-  </table>
-  {% else %}<p class="muted">現在、期限が近いものはありません。</p>{% endif %}
+  </ul>
+  {% else %}<p class="allgood">✔ いま期限が近いものはありません。</p>{% endif %}
 </section>
 
 <section class="card">
-  <h2>📝 本日の業務日誌</h2>
+  <h2>📔 今日の日誌</h2>
+  <ul class="todo">
   {% for h, n, done in home_stats %}
-    <p><a href="{{ url_for('views.journal', home_id=h['id']) }}">{{ h['name'] }}</a>（入居 {{ n }}名）
-      {% if done %}<span class="ok">記入済</span>{% else %}<span class="ng">未記入</span>{% endif %}</p>
+    <li><a href="{{ url_for('views.journal', home_id=h['id']) }}">
+      {% if done %}<span class="pill ok">書きました</span>{% else %}<span class="pill ng">まだです</span>{% endif %}
+      <span><b>{{ h['name'] }}</b>（入居 {{ n }}名）</span><span class="when">{{ '見る' if done else '書く ▶' }}</span></a></li>
   {% else %}
-    <p class="muted">まず <a href="{{ url_for('crud.new', key='homes') }}">住居（ユニット）</a> を登録してください。</p>
+    <li class="guide">はじめに <a href="{{ url_for('crud.new', key='homes') }}">住居（ユニット）</a> を登録してください。</li>
   {% endfor %}
+  </ul>
 
-  <h2>🏛 委員会・研修の最終実施日</h2>
+  <h2 style="margin-top:20px">🗣️ 委員会の最終実施日</h2>
   <table class="list">
   {% for kind, last, warn in meetings %}
-    <tr><td>{{ kind }}</td><td class="{{ 'ng' if warn }}">{{ last or '記録なし' }}</td></tr>
+    <tr><td>{{ kind }}</td><td>{% if warn %}<span class="pill ng">{{ last or '記録なし' }}</span>{% else %}{{ last }}{% endif %}</td></tr>
   {% endfor %}
   </table>
-  <p class="muted small">1年以上記録がないものを赤で表示します。必要な開催頻度は運営基準・指定権者の指導で確認してください。</p>
+  <p class="muted small">1年以上記録がないものは赤で表示します。必要な開催回数は運営基準・自治体の指導で確認してください。</p>
 </section>
 </div>
 
+<div class="tiles">
+  <a class="tile" href="{{ url_for('crud.index', key='residents') }}"><b>{{ stats.residents }}名</b><span>入居者</span></a>
+  {% if is_admin %}<a class="tile" href="{{ url_for('crud.index', key='staff') }}"><b>{{ stats.staff }}名</b><span>職員</span></a>{% endif %}
+  <a class="tile" href="{{ url_for('crud.index', key='incidents') }}"><b>{{ stats.incidents }}件</b><span>ヒヤリ・事故（最近30日）</span></a>
+  <a class="tile" href="{{ url_for('views.addon_check') }}"><b>{{ stats.addons }}件</b><span>算定中の加算</span></a>
+</div>
+
 <section class="card">
-  <h2>最近のヒヤリハット・事故</h2>
-  <table class="list">
+  <h2>⚠️ 最近のヒヤリハット・事故</h2>
+  <table class="list"><tbody>
   {% for i in recent %}
-    <tr><td>{{ i['date'] }}</td><td>{{ i['kind'] or '' }}</td><td>{{ i['rname'] or '' }}</td>
-      <td><a href="{{ url_for('crud.view', key='incidents', rid=i['id']) }}">{{ (i['content'] or '')|truncate(50) }}</a></td></tr>
-  {% else %}<tr><td class="muted">記録はありません</td></tr>{% endfor %}
-  </table>
+    <tr class="click" data-href="{{ url_for('crud.view', key='incidents', rid=i['id']) }}"><td class="nowrap">{{ i['date'] }}</td><td>{{ i['kind'] or '' }}</td><td>{{ i['rname'] or '' }}</td>
+      <td>{{ (i['content'] or '')|truncate(50) }}</td></tr>
+  {% else %}<tr><td class="empty">記録はありません</td></tr>{% endfor %}
+  </tbody></table>
 </section>
 {% endblock %}

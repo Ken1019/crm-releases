@@ -41,7 +41,7 @@
       <label class="check req"><input type="checkbox" name="req" value="{{ r['id'] }}"{% if ok %} checked{% endif %}>
         <b>{{ r['name'] }}</b><br><small class="muted">{{ r['description'] or '' }}</small></label>
     {% endfor %}
-    <div class="actions noprint"><button class="btn primary">保存</button>
+    <div class="actions noprint"><button class="btn primary">💾 保存する</button>
       <a href="{{ url_for('views.career') }}">キャリアパス（要件Ⅰ〜Ⅲの根拠資料）を確認</a></div>
   </form>
 </section>

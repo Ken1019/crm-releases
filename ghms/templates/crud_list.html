@@ -2,40 +2,41 @@
 {% block title %}{{ ent.title }}{% endblock %}
 {% block content %}
 <div class="head">
-  <h1>{{ ent.title }}</h1>
-  <a class="btn primary" href="{{ url_for('crud.new', key=key) }}">＋ 新規登録</a>
-  <a class="btn" href="{{ url_for('crud.export', key=key, **args) }}">Excel出力</a>
-  {% if key == 'shogu_plans' %}<a class="btn" href="{{ url_for('views.shogu_index') }}">計画・配分画面へ</a>{% endif %}
+  <h1>{{ ent.icon }} {{ ent.title }}</h1>
+  <a class="btn primary" href="{{ url_for('crud.new', key=key) }}">＋ 新しく追加する</a>
+  <a class="btn" href="{{ url_for('crud.export', key=key, **args) }}">🖨️ Excelで出す</a>
+  {% if key == 'shogu_plans' %}<a class="btn" href="{{ url_for('views.shogu_index') }}">💴 処遇改善の画面へ</a>{% endif %}
 </div>
-<form class="filters" method="get">
-  <input type="search" name="q" value="{{ args.get('q','') }}" placeholder="キーワード">
+{% if ent.guide %}<p class="guide">{{ ent.guide }}</p>{% endif %}
+<form class="filters card" method="get">
+  <input type="search" name="q" value="{{ args.get('q','') }}" placeholder="🔍 名前や言葉でさがす" aria-label="キーワード">
   {% for f in filters %}
-    <select name="{{ f.name }}"><option value="">{{ f.label }}：すべて</option>
+    <select name="{{ f.name }}" aria-label="{{ f.label }}"><option value="">{{ f.label }}：すべて</option>
     {% for v, lab in options[f.name] %}<option value="{{ v }}"{% if args.get(f.name) == v|string %} selected{% endif %}>{{ lab }}</option>{% endfor %}
     </select>
   {% endfor %}
   {% if date_field %}
-    <input type="date" name="from" value="{{ args.get('from','') }}"> 〜 <input type="date" name="to" value="{{ args.get('to','') }}">
+    <input type="date" name="from" value="{{ args.get('from','') }}" aria-label="いつから"> 〜 <input type="date" name="to" value="{{ args.get('to','') }}" aria-label="いつまで">
   {% endif %}
-  <button class="btn">絞り込み</button> <a href="{{ url_for('crud.index', key=key) }}">クリア</a>
+  <button class="btn">さがす</button> <a href="{{ url_for('crud.index', key=key) }}">条件をけす</a>
 </form>
-<p class="muted">{{ total }}件</p>
+<p class="muted">{{ total }}件あります。行をクリックすると開きます。</p>
 <div class="tablewrap">
 <table class="list">
   <thead><tr>{% for f in cols %}<th>{{ f.label }}</th>{% endfor %}<th></th></tr></thead>
   <tbody>
   {% for r in rows %}
-    <tr>{% for f in cols %}<td class="{{ f.type }}">{{ fmt(f, r[f.name], maps)|truncate(60) }}</td>{% endfor %}
-      <td class="nowrap"><a href="{{ url_for('crud.view', key=key, rid=r['id']) }}">詳細</a> ·
-        <a href="{{ url_for('crud.edit', key=key, rid=r['id']) }}">編集</a></td></tr>
+    <tr class="click" data-href="{{ url_for('crud.view', key=key, rid=r['id']) }}">{% for f in cols %}<td class="{{ f.type }}">{{ fmt(f, r[f.name], maps)|truncate(60) }}</td>{% endfor %}
+      <td class="nowrap"><a class="btn" href="{{ url_for('crud.edit', key=key, rid=r['id']) }}">✏️ 直す</a></td></tr>
   {% else %}
-    <tr><td colspan="{{ cols|length + 1 }}" class="muted">データがありません</td></tr>
+    <tr><td colspan="{{ cols|length + 1 }}" class="empty">まだ登録がありません。<br>
+      <a class="btn primary" href="{{ url_for('crud.new', key=key) }}">＋ 最初の1件を追加する</a></td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
 {% if pages > 1 %}
-<p class="pager">{% for p in range(1, pages + 1) %}
+<p class="pager">ページ：{% for p in range(1, pages + 1) %}
   {% if p == page %}<b>{{ p }}</b>{% else %}<a href="{{ url_for('crud.index', key=key, page=p, **(args|reject_page)) }}">{{ p }}</a>{% endif %}
 {% endfor %}</p>
 {% endif %}

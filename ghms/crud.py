@@ -73,7 +73,8 @@ def query_rows(key, ent, args, limit=None, offset=0):
         if v not in (None, "") and f["type"] in ("ref", "select", "number", "check", "date"):
             where.append(f'"{f["name"]}" = ?')
             params.append(v)
-    date_field = next((f["name"] for f in ent["fields"] if f["type"] == "date"), None)
+    # 期間で絞り込むのは、一覧に表示している最初の日付項目（記録日など）
+    date_field = next((f["name"] for f in ent["fields"] if f["type"] == "date" and f.get("list")), None)
     if date_field and args.get("from"):
         where.append(f'"{date_field}" >= ?')
         params.append(args["from"])

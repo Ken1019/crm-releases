@@ -5,6 +5,6 @@
 <form method="post" class="card form">
   <input type="hidden" name="_csrf" value="{{ csrf_token }}">
   {% for k, label, v in items %}<label><span>{{ label }}</span><input name="{{ k }}" value="{{ v }}"></label>{% endfor %}
-  <div class="actions wide"><button class="btn primary">保存</button></div>
+  <div class="actions wide"><button class="btn primary">💾 保存する</button></div>
 </form>
 {% endblock %}

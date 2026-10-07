@@ -2,11 +2,12 @@
 {% block title %}ログイン{% endblock %}
 {% block content %}
 <div class="auth card">
-  <h1>🏠 {{ office_name }}</h1>
+  <h1>🌼 {{ office_name }}</h1>
+  <p class="muted" style="text-align:center">ユーザー名とパスワードを入れて「ログイン」を押してください。</p>
   <form method="post">
     <label><span>ユーザー名</span><input name="username" required autofocus autocomplete="username"></label>
     <label><span>パスワード</span><input type="password" name="password" required autocomplete="current-password"></label>
-    <button class="btn primary">ログイン</button>
+    <button class="btn primary big">ログイン</button>
   </form>
 </div>
 {% endblock %}

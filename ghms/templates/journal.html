@@ -1,11 +1,12 @@
 {% extends 'base.html' %}
 {% block title %}日誌入力{% endblock %}
 {% block content %}
-<h1>日誌入力（1日分まとめて）</h1>
-<form method="get" class="filters">
-  <a class="btn" href="{{ url_for('views.journal', date=prev, home_id=home_id, slot=slot) }}">◀ 前日</a>
+<h1>📝 日誌を書く</h1>
+<p class="guide">① 日付と住居をえらぶ → ② 業務日誌を書く → ③ 入居者ごとに様子を書く → ④ いちばん下の「保存する」を押す。書いていない入居者の記録は作られません。</p>
+<form method="get" class="filters card">
+  <a class="btn" href="{{ url_for('views.journal', date=prev, home_id=home_id, slot=slot) }}">◀ 前の日</a>
   <input type="date" name="date" value="{{ d.isoformat() }}" onchange="this.form.submit()">
-  <a class="btn" href="{{ url_for('views.journal', date=next, home_id=home_id, slot=slot) }}">翌日 ▶</a>
+  <a class="btn" href="{{ url_for('views.journal', date=next, home_id=home_id, slot=slot) }}">次の日 ▶</a>
   <select name="home_id" onchange="this.form.submit()">
     {% for h in homes %}<option value="{{ h['id'] }}"{% if h['id'] == home_id %} selected{% endif %}>{{ h['name'] }}</option>{% endfor %}
   </select>
@@ -15,14 +16,14 @@
   <noscript><button class="btn">表示</button></noscript>
 </form>
 
-<form method="post">
+<form method="post" data-guard>
 <input type="hidden" name="_csrf" value="{{ csrf_token }}">
 <input type="hidden" name="date" value="{{ d.isoformat() }}">
 <input type="hidden" name="home_id" value="{{ home_id or '' }}">
 <input type="hidden" name="slot" value="{{ slot }}">
 
 <section class="card form">
-  <h2 class="wide">業務日誌</h2>
+  <h2 class="wide">📔 業務日誌（{{ d.strftime('%m月%d日') }}）</h2>
   <label><span>日中勤務者</span><input name="day_staff" value="{{ log['day_staff'] or '' if log }}"></label>
   <label><span>夜間勤務者</span><input name="night_staff" value="{{ log['night_staff'] or '' if log }}"></label>
   <label><span>在籍者数</span><input type="number" name="residents_count" value="{{ (log['residents_count']|int if log['residents_count'] is not none else '') if log else residents|length }}"></label>
@@ -34,7 +35,7 @@
 </section>
 
 <section class="card">
-  <h2>支援記録（時間帯：{{ slot }}）</h2>
+  <h2>👤 入居者ごとの記録（時間帯：{{ slot }}）</h2>
   <div class="tablewrap">
   <table class="list grid">
     <thead><tr><th>居室</th><th>氏名</th><th>体温</th><th>食事</th><th>服薬</th><th>様子</th><th>記録内容</th><th>記録者</th></tr></thead>
@@ -51,18 +52,18 @@
       <td><input name="{{ p }}staff" class="w8" value="{{ (rec['staff'] or '') if rec else g.user['display_name'] }}"></td>
     </tr>
     {% else %}
-    <tr><td colspan="8" class="muted">この住居に入居者が登録されていません。</td></tr>
+    <tr><td colspan="8" class="empty">この住居に入居者が登録されていません。<br><a class="btn primary" href="{{ url_for('crud.new', key='residents', home_id=home_id) }}">＋ 入居者を追加する</a></td></tr>
     {% endfor %}
   </table>
   </div>
-  <p class="muted small">記入のない入居者の記録は作成されません。</p>
+  
 </section>
-<div class="actions"><button class="btn primary big">保存</button></div>
+<div class="actions sticky-save"><button class="btn primary big">💾 保存する</button></div>
 </form>
 
 {% if day_all %}
 <section class="card">
-  <h2>この日の支援記録（全時間帯）</h2>
+  <h2>この日に書いた記録（すべての時間帯）</h2>
   <table class="list">
   <thead><tr><th>時間帯</th><th>氏名</th><th>体温</th><th>食事</th><th>服薬</th><th>様子</th><th>内容</th><th>記録者</th></tr></thead>
   {% for s in day_all %}

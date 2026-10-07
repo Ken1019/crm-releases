@@ -1,15 +1,15 @@
 {% extends 'base.html' %}
 {% block title %}帳票・資料出力{% endblock %}
 {% block content %}
-<h1>帳票・資料出力</h1>
-<p class="muted">各画面の「Excel出力」は、絞り込み条件を反映した一覧をExcelで出力します。詳細画面は「印刷」でPDF保存もできます。</p>
+<h1>🖨️ 書類を作る</h1>
+<p class="guide">作りたい書類の「Excelで出す」を押すと、Excelファイルがダウンロードされます。それぞれの画面の「印刷」からPDFにもできます。</p>
 
 <section class="card">
   <h2>業務日誌・支援記録（月次）</h2>
   <form method="get" action="{{ url_for('views.journal_export') }}" class="filters">
     <input type="month" name="ym" value="{{ ym }}">
     <select name="home_id"><option value="">全住居</option>{% for h in homes %}<option value="{{ h['id'] }}">{{ h['name'] }}</option>{% endfor %}</select>
-    <button class="btn primary">Excel出力</button>
+    <button class="btn primary">🖨️ Excelで出す</button>
   </form>
 </section>
 
@@ -18,7 +18,7 @@
   <form method="get" class="filters" onsubmit="this.action='{{ url_for('views.resident_records_export', rid=0) }}'.replace('/0/', '/' + this.rid.value + '/'); return true;">
     <input type="month" name="ym" value="{{ ym }}">
     <select name="rid" required>{% for r in residents %}<option value="{{ r['id'] }}">{{ r['name'] }}</option>{% endfor %}</select>
-    <button class="btn primary">Excel出力</button>
+    <button class="btn primary">🖨️ Excelで出す</button>
   </form>
 </section>
 

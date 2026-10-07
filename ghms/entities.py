@@ -43,6 +43,8 @@ def F(name, label, type="text", **kw):
 ENTITIES = {
     # ---------------- 基本情報 ----------------
     "homes": {
+        "guide": "グループホームの建物（ユニット）ごとに1件ずつ登録します。最初にここを登録してください。",
+        "icon": "🏠",
         "title": "住居（ユニット）",
         "group": "基本情報",
         "display": "name",
@@ -57,6 +59,8 @@ ENTITIES = {
         ],
     },
     "residents": {
+        "guide": "入居者の名前をクリックすると、くわしい情報を見たり直したりできます。退居した方は「状態」を「退居」にすると一覧の下に移ります。",
+        "icon": "👤",
         "title": "入居者",
         "group": "入居者",
         "display": "name",
@@ -89,6 +93,8 @@ ENTITIES = {
         ],
     },
     "support_plans": {
+        "guide": "計画期間の終わりや次のモニタリング日を入れておくと、ホーム画面でお知らせします。",
+        "icon": "📋",
         "title": "個別支援計画",
         "group": "入居者",
         "display": "period_start",
@@ -110,6 +116,8 @@ ENTITIES = {
         ],
     },
     "support_records": {
+        "guide": "ふだんは「今日の日誌を書く」画面からまとめて入力すると便利です。",
+        "icon": "✍️",
         "title": "支援記録（個別）",
         "group": "日誌・記録",
         "display": "date",
@@ -127,6 +135,8 @@ ENTITIES = {
         ],
     },
     "daily_logs": {
+        "guide": "ふだんは「今日の日誌を書く」画面から入力すると便利です。",
+        "icon": "📔",
         "title": "業務日誌",
         "group": "日誌・記録",
         "display": "date",
@@ -145,6 +155,8 @@ ENTITIES = {
         ],
     },
     "incidents": {
+        "guide": "ヒヤッとしたこと、ハッとしたことは小さなことでも記録しましょう。再発防止につながります。",
+        "icon": "⚠️",
         "title": "ヒヤリハット・事故報告",
         "group": "日誌・記録",
         "display": "date",
@@ -165,6 +177,8 @@ ENTITIES = {
         ],
     },
     "meetings": {
+        "guide": "虐待防止委員会・身体拘束適正化委員会などの記録を残すと、ホーム画面に最終実施日が出ます。",
+        "icon": "🗣️",
         "title": "会議・委員会記録",
         "group": "日誌・記録",
         "display": "date",
@@ -180,6 +194,7 @@ ENTITIES = {
     },
     # ---------------- 職員・キャリアパス ----------------
     "career_grades": {
+        "icon": "🪜",
         "title": "キャリアパス等級",
         "group": "職員・キャリアパス",
         "display": "name",
@@ -199,6 +214,8 @@ ENTITIES = {
         ],
     },
     "staff": {
+        "guide": "職員の情報です。管理者だけが見られます。",
+        "icon": "🧑‍💼",
         "title": "職員",
         "group": "職員・キャリアパス",
         "display": "name",
@@ -222,6 +239,8 @@ ENTITIES = {
         ],
     },
     "trainings": {
+        "guide": "研修を受けたら記録します。処遇改善のキャリアパス要件の根拠資料になります。",
+        "icon": "🎓",
         "title": "研修受講記録",
         "group": "職員・キャリアパス",
         "display": "title",
@@ -238,6 +257,7 @@ ENTITIES = {
         ],
     },
     "training_plans": {
+        "icon": "🗓️",
         "title": "研修計画（年間）",
         "group": "職員・キャリアパス",
         "display": "title",
@@ -253,6 +273,7 @@ ENTITIES = {
         ],
     },
     "evaluations": {
+        "icon": "💬",
         "title": "人事評価・面談",
         "group": "職員・キャリアパス",
         "display": "period",
@@ -272,6 +293,8 @@ ENTITIES = {
     },
     # ---------------- 加算・処遇改善 ----------------
     "addons": {
+        "guide": "算定している加算は「算定中」にチェックを入れ、単位数を最新の報酬告示で確認して入力してください。",
+        "icon": "➕",
         "title": "加算マスタ・算定状況",
         "group": "加算・処遇改善",
         "display": "name",
@@ -291,6 +314,7 @@ ENTITIES = {
         ],
     },
     "resident_addons": {
+        "icon": "🔖",
         "title": "利用者別加算",
         "group": "加算・処遇改善",
         "display": "id",
@@ -304,6 +328,7 @@ ENTITIES = {
         ],
     },
     "shogu_requirements": {
+        "icon": "✅",
         "title": "処遇改善 要件マスタ",
         "group": "加算・処遇改善",
         "display": "name",
@@ -317,6 +342,8 @@ ENTITIES = {
         ],
     },
     "shogu_plans": {
+        "guide": "年度ごとに1件作ります。作ったあと「処遇改善」画面で職員への配分を入れます。",
+        "icon": "💴",
         "title": "処遇改善 計画",
         "group": "加算・処遇改善",
         "display": "fiscal_year",
@@ -335,6 +362,7 @@ ENTITIES = {
         ],
     },
     "shogu_allocations": {
+        "icon": "👛",
         "title": "処遇改善 職員別配分",
         "group": "加算・処遇改善",
         "display": "id",
@@ -351,7 +379,9 @@ ENTITIES = {
     },
 }
 
-GROUPS = ["基本情報", "入居者", "日誌・記録", "職員・キャリアパス", "加算・処遇改善"]
+GROUPS = ["入居者", "日誌・記録", "職員・キャリアパス", "加算・処遇改善", "基本情報"]
+
+GROUP_ICONS = {"入居者": "👤", "日誌・記録": "📔", "職員・キャリアパス": "🧑‍💼", "加算・処遇改善": "💴", "基本情報": "🏠"}
 
 
 def entity(key):

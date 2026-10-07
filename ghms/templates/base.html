@@ -4,51 +4,86 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{% endblock %}｜グループホーム業務管理</title>
+<script>try{if(localStorage.getItem('ghms-font')==='large')document.documentElement.classList.add('font-large')}catch(e){}</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+{% macro nav(url, icon, label) -%}
+  <a href="{{ url }}" class="{{ 'on' if request.path == url or (url != '/' and request.path.startswith(url)) }}"><span class="ic">{{ icon }}</span>{{ label }}</a>
+{%- endmacro %}
 {% if g.user %}
 <header class="top">
-  <a class="brand" href="{{ url_for('views.dashboard') }}">🏠 {{ office_name }}</a>
+  <a class="brand" href="{{ url_for('views.dashboard') }}">🌼 {{ office_name }}</a>
   <span class="spacer"></span>
-  <span class="who">{{ g.user['display_name'] }}（{{ '管理者' if is_admin else '職員' }}）</span>
+  <span class="fontsize" role="group" aria-label="文字の大きさ">
+    <button type="button" data-f="normal">文字 ふつう</button><button type="button" data-f="large">大きく</button>
+  </span>
+  <span class="who">{{ g.user['display_name'] }} さん</span>
   <a href="{{ url_for('auth.my_password') }}">パスワード変更</a>
   <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
     <input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="link">ログアウト</button>
   </form>
 </header>
 <div class="layout">
-<nav class="side">
-  <a href="{{ url_for('views.dashboard') }}">ダッシュボード</a>
-  <a href="{{ url_for('views.journal') }}">📝 日誌入力（1日分）</a>
-  <a href="{{ url_for('views.reports') }}">📄 帳票・資料出力</a>
-  {% for grp in GROUPS %}
-    <div class="grp">{{ grp }}</div>
-    {% if grp == '職員・キャリアパス' and is_admin %}<a href="{{ url_for('views.career') }}">キャリアパス一覧</a>{% endif %}
-    {% if grp == '加算・処遇改善' %}<a href="{{ url_for('views.addon_check') }}">加算 要件確認・概算</a>
-      {% if is_admin %}<a href="{{ url_for('views.shogu_index') }}">処遇改善 計画・配分</a>{% endif %}{% endif %}
-    {% for key, e in ENTITIES.items() if e.group == grp and (is_admin or not e.admin_only) %}
-      <a href="{{ url_for('crud.index', key=key) }}">{{ e.title }}</a>
+<nav class="side" aria-label="メニュー">
+  {{ nav(url_for('views.dashboard'), '🏡', 'ホーム') }}
+  {{ nav(url_for('views.journal'), '📝', '今日の日誌を書く') }}
+  {{ nav(url_for('crud.index', key='residents'), '👤', '入居者') }}
+  {{ nav(url_for('crud.index', key='incidents'), '⚠️', 'ヒヤリハット・事故') }}
+  {{ nav(url_for('views.reports'), '🖨️', '書類を作る（Excel）') }}
+  {% set main_keys = ['residents', 'incidents'] %}
+  {% set masters = ['homes', 'addons', 'resident_addons', 'career_grades', 'shogu_requirements', 'shogu_plans', 'shogu_allocations'] %}
+  {% for grp in GROUPS if grp != '基本情報' %}
+    <div class="grp">{{ GROUP_ICONS[grp] }} {{ grp }}</div>
+    {% if grp == '職員・キャリアパス' and is_admin %}{{ nav(url_for('views.career'), '🪜', 'キャリアパス') }}{% endif %}
+    {% if grp == '加算・処遇改善' %}{{ nav(url_for('views.addon_check'), '☑️', '加算のチェック') }}
+      {% if is_admin %}{{ nav(url_for('views.shogu_index'), '💴', '処遇改善') }}{% endif %}{% endif %}
+    {% for key, e in ENTITIES.items() if e.group == grp and key not in main_keys and key not in masters and (is_admin or not e.admin_only) %}
+      {{ nav(url_for('crud.index', key=key), e.icon, e.title) }}
     {% endfor %}
   {% endfor %}
-  {% if is_admin %}
-    <div class="grp">管理</div>
-    <a href="{{ url_for('views.settings') }}">事業所設定</a>
-    <a href="{{ url_for('auth.users') }}">ユーザー管理</a>
-    <a href="{{ url_for('views.audit_log') }}">操作履歴</a>
-    <a href="{{ url_for('views.backup') }}">バックアップをダウンロード</a>
-  {% endif %}
+  <details{% if request.path.startswith(('/settings', '/users', '/audit')) or (request.view_args and request.view_args.get('key') in masters) %} open{% endif %}>
+    <summary>⚙️ 設定・マスタ（管理者向け）</summary>
+    {% for key in masters if is_admin or not ENTITIES[key].admin_only %}{{ nav(url_for('crud.index', key=key), ENTITIES[key].icon, ENTITIES[key].title) }}{% endfor %}
+    {% if is_admin %}
+      {{ nav(url_for('views.settings'), '🏢', '事業所の設定') }}
+      {{ nav(url_for('auth.users'), '🔑', 'ログインする人の管理') }}
+      {{ nav(url_for('views.audit_log'), '🕘', '操作の記録') }}
+      <a href="{{ url_for('views.backup') }}"><span class="ic">💾</span>バックアップを保存</a>
+    {% endif %}
+  </details>
   <div class="ver">v{{ VERSION }}</div>
 </nav>
 <main>
 {% endif %}
   {% with msgs = get_flashed_messages(with_categories=true) %}
-    {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
+    {% for cat, m in msgs %}<div class="flash {{ cat }}" role="status">{{ m }}</div>{% endfor %}
   {% endwith %}
   {% block content %}{% endblock %}
 {% if g.user %}
 </main>
 </div>
 {% endif %}
+<script>
+(function(){
+  // 文字の大きさ
+  var root=document.documentElement;
+  function mark(){document.querySelectorAll('.fontsize button').forEach(function(b){
+    b.classList.toggle('on',(b.dataset.f==='large')===root.classList.contains('font-large'));});}
+  document.querySelectorAll('.fontsize button').forEach(function(b){b.addEventListener('click',function(){
+    root.classList.toggle('font-large',b.dataset.f==='large');try{localStorage.setItem('ghms-font',b.dataset.f)}catch(e){}mark();});});
+  mark();
+  // 一覧の行をクリックで開く
+  document.querySelectorAll('tr[data-href]').forEach(function(tr){tr.addEventListener('click',function(e){
+    if(e.target.closest('a,button,input,select,textarea'))return;location.href=tr.dataset.href;});});
+  // 入力途中で画面を離れようとしたら確認・二重送信防止
+  document.querySelectorAll('form[data-guard]').forEach(function(f){
+    var dirty=false;f.addEventListener('input',function(){dirty=true;});
+    window.addEventListener('beforeunload',function(e){if(dirty){e.preventDefault();e.returnValue='';}});
+    f.addEventListener('submit',function(){dirty=false;f.querySelectorAll('button.primary').forEach(function(b){
+      setTimeout(function(){b.disabled=true;b.textContent='保存しています…';},0);});});
+  });
+})();
+</script>
 </body>
 </html>

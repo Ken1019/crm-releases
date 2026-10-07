@@ -34,6 +34,6 @@
 <p class="summary card">概算合計：<b>{{ '{:,.0f}'.format(total_units) }} 単位</b> × {{ price }}円
   ＝ <b>約 {{ '{:,.0f}'.format(total_units * price) }} 円</b>
   <small class="muted">（{{ days }}日・入居者 {{ n_res }}名で計算、「回」単位の加算は除く。処遇改善加算は率計算のため含みません）</small></p>
-{% if items %}<div class="actions noprint"><button class="btn primary">要件確認を保存</button></div>{% endif %}
+{% if items %}<div class="actions noprint"><button class="btn primary">💾 チェックを保存する</button></div>{% endif %}
 </form>
 {% endblock %}
