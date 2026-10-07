@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block title %}書類の確認{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>📑 契約書・同意書がそろっているか</h1>
+  <a class="btn primary" href="{{ url_for('crud.new', key='resident_documents', next=request.path) }}">＋ 書類を登録する</a>
+</div>
+<p class="guide">入居中の方ごとに、基本の書類がそろっているかを表示します。「なし」を押すとその書類を登録できます。運営指導（実地指導）の前の確認にも使えます。</p>
+<div class="tablewrap">
+<table class="list">
+  <thead><tr><th>入居者</th>{% for t in types %}<th>{{ t }}</th>{% endfor %}</tr></thead>
+  {% for r in residents %}
+  <tr><td><b>{{ r['name'] }}</b></td>
+    {% for t in types %}{% set d = docs.get((r['id'], t)) %}
+    <td>{% if not d %}<a class="pill ng" href="{{ url_for('crud.new', key='resident_documents', resident_id=r['id'], doc_type=t, next=request.path) }}">なし ＋</a>
+        {% elif d['expires_on'] and d['expires_on'] < today %}<a class="pill warn" href="{{ url_for('crud.view', key='resident_documents', rid=d['id']) }}">期限切れ</a>
+        {% else %}<a class="pill ok" href="{{ url_for('crud.view', key='resident_documents', rid=d['id']) }}">✓ {{ d['signed_on'] or '' }}</a>{% endif %}</td>
+    {% endfor %}</tr>
+  {% else %}<tr><td colspan="{{ types|length + 1 }}" class="empty">入居者がいません。</td></tr>{% endfor %}
+</table>
+</div>
+{% endblock %}

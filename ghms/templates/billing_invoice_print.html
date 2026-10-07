@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><title>{{ '領収書' if kind == 'receipt' else '請求書' }} {{ inv['rname'] }} {{ inv['ym'] }}</title>
+<style>
+body{font-family:"BIZ UDPMincho","BIZ UD明朝","Yu Mincho","MS Mincho",serif;color:#222;background:#eee;margin:0}
+.page{width:190mm;min-height:260mm;margin:10mm auto;background:#fff;padding:16mm;box-sizing:border-box}
+h1{text-align:center;letter-spacing:.5em;font-size:26px;margin:0 0 24px;border-bottom:3px double #222;padding-bottom:8px}
+.row{display:flex;justify-content:space-between;align-items:flex-end;gap:20px}
+.to{font-size:20px;border-bottom:1px solid #222;padding-bottom:4px;min-width:60%}
+.from{text-align:right;font-size:13px;line-height:1.8}
+.amount{margin:28px 0;font-size:22px;border:2px solid #222;padding:12px 18px;display:flex;justify-content:space-between}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+th,td{border:1px solid #555;padding:8px 10px}th{background:#f2f2f2}td.r{text-align:right}
+.note{font-size:13px;line-height:1.8;margin-top:18px}
+.stamp{width:22mm;height:22mm;border:1px solid #999;display:inline-block;margin-top:8px;text-align:center;line-height:22mm;color:#aaa;font-size:12px}
+.bar{text-align:center;padding:14px;font-family:sans-serif}
+.bar button,.bar a{font-size:16px;padding:10px 26px;margin:0 6px;border-radius:10px;border:2px solid #e86f1f;background:#ff8a3d;color:#fff;cursor:pointer;text-decoration:none;display:inline-block}
+.bar a{background:#fff;color:#333;border-color:#ccc}
+@media print{body{background:#fff}.page{margin:0;width:auto;min-height:auto}.bar{display:none}}
+</style></head><body>
+<div class="bar"><button onclick="window.print()">🖨️ 印刷する</button><a href="{{ url_for('billing.invoices', ym=inv['ym']) }}">もどる</a></div>
+<div class="page">
+  <h1>{{ '領 収 書' if kind == 'receipt' else '請 求 書' }}</h1>
+  <div class="row">
+    <div class="to">{{ inv['rname'] }} 様{% if inv['guardian'] %}<br><small>（{{ inv['guardian'] }} 様）</small>{% endif %}</div>
+    <div class="from">{{ (inv['paid_on'] or today.isoformat()) if kind == 'receipt' else (inv['issue_date'] or today.isoformat()) }}<br>
+      <b>{{ s.office_name }}</b><br>{% if s.office_address %}{{ s.office_address }}<br>{% endif %}{% if s.office_tel %}TEL {{ s.office_tel }}<br>{% endif %}
+      {% if s.office_no %}事業所番号 {{ s.office_no }}<br>{% endif %}<span class="stamp">印</span></div>
+  </div>
+  {% if kind == 'receipt' %}
+  <div class="amount"><span>金額</span><b>￥{{ '{:,}'.format(((inv['paid_amount'] or inv['total']) or 0)|int) }} −</b></div>
+  <p>但し　{{ first.strftime('%Y年%m月') }}分 利用料として、上記の金額を正に領収いたしました。</p>
+  {% else %}
+  <p>{{ first.strftime('%Y年%m月') }}分のご利用料を、下記のとおりご請求申し上げます。</p>
+  <div class="amount"><span>ご請求金額</span><b>￥{{ '{:,}'.format((inv['total'] or 0)|int) }} −</b></div>
+  {% endif %}
+  <table>
+    <thead><tr><th>内容</th><th style="width:35%">金額（円）</th></tr></thead>
+    {% for label, v in lines %}<tr><td>{{ label }}</td><td class="r">{{ '{:,}'.format(v|int) }}</td></tr>{% endfor %}
+    <tr><th>合計</th><td class="r"><b>{{ '{:,}'.format((inv['total'] or 0)|int) }}</b></td></tr>
+  </table>
+  {% if kind != 'receipt' %}
+  <div class="note">
+    {% if inv['due_date'] %}お支払い期限：{{ inv['due_date'] }}<br>{% endif %}
+    {% if inv['pay_method'] %}お支払い方法：{{ inv['pay_method'] }}<br>{% endif %}
+    {% if s.bank_info and inv['pay_method'] in (none, '', '振込') %}お振込先：{{ s.bank_info }}<br>{% endif %}
+    {% if inv['notes'] %}{{ inv['notes'] }}<br>{% endif %}
+    ※利用者負担額は、障害福祉サービス（共同生活援助）にかかる自己負担額です。
+  </div>
+  {% endif %}
+</div>
+</body></html>

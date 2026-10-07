@@ -13,6 +13,9 @@ bp = Blueprint("crud", __name__, url_prefix="/m")
 
 PAGE_SIZE = 100
 
+# 保存前に値を計算するフック {entity_key: fn(data) -> None}
+COMPUTE = {}
+
 
 def get_entity(key):
     ent = ENTITIES.get(key)
@@ -132,6 +135,8 @@ def audit(action, key, rid):
 
 
 def save(key, data, rid=None):
+    if key in COMPUTE:
+        COMPUTE[key](data)
     db = get_db()
     cols = list(data)
     if rid is None:

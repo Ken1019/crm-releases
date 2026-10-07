@@ -127,3 +127,16 @@ label.check { display:flex; gap:10px; align-items:flex-start; margin:6px 0; } la
   main { padding:0; } body { background:#fff; font-size:12px; } .card { border:none; padding:0; box-shadow:none; }
   .printonly { display:block; } a { color:inherit; text-decoration:none; }
 }
+.form h2.section { margin:14px 0 0; padding-top:14px; border-top:2px dashed var(--line); }
+/* 月のグリッド（実績・勤務表） */
+table.mgrid { border-collapse:collapse; font-size:.85em; }
+table.mgrid th, table.mgrid td { border:1px solid var(--line); padding:2px; text-align:center; }
+table.mgrid th { background:var(--pri-soft); font-weight:normal; min-width:2.6em; }
+table.mgrid th.sat { background:var(--sky-soft); } table.mgrid th.sun { background:var(--ng-soft); }
+table.mgrid .name { text-align:left; padding:6px 8px; min-width:150px; position:sticky; left:0; background:#fff; z-index:1; }
+table.mgrid select { min-height:34px; padding:0 2px; width:2.9em; border-width:1px; border-radius:6px; font-size:1em; text-align:center; }
+table.mgrid td.out { background:#eee; }
+table.mgrid tr.total td { background:#fff6ec; font-weight:bold; }
+.btn.mini { min-height:32px; padding:2px 10px; font-size:.8em; border-radius:8px; }
+.legend { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:.85em; color:var(--muted); }
+.legend b { color:var(--text); }

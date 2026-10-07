@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}勤務表{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>🗓️ 勤務表（{{ first.strftime('%Y年%m月') }}）</h1>
+  <a class="btn" href="{{ url_for('shift.export', ym=ym, home_id=home_id or '') }}">🖨️ 勤務形態一覧表をExcelで出す</a>
+  <a class="btn" href="{{ url_for('crud.index', key='shift_types') }}">🕘 勤務の種類を直す</a>
+</div>
+<p class="guide">職員ごとに勤務の記号をえらんで保存します。月の勤務時間と常勤換算（常勤の勤務時間 月{{ base|round(1) }}時間で計算）が自動で出ます。いちばん下の行で夜間の勤務者がいない日が分かります。</p>
+<form method="get" class="filters card">
+  <input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
+  <select name="home_id" onchange="this.form.submit()" aria-label="住居"><option value="">全住居</option>
+    {% for h in homes %}<option value="{{ h['id'] }}"{% if h['id'] == home_id %} selected{% endif %}>{{ h['name'] }}</option>{% endfor %}</select>
+  <span class="legend">{% for t in types %}<span><b>{{ t['code'] }}</b> {{ t['name'] }}</span>{% endfor %}</span>
+</form>
+<form method="post" data-guard>
+<input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}"><input type="hidden" name="home_id" value="{{ home_id or '' }}">
+<div class="tablewrap card">
+<table class="mgrid">
+  <thead><tr><th class="name">職員</th>
+    {% for d in days %}<th class="{{ 'sat' if d.weekday() == 5 else 'sun' if d.weekday() == 6 }}">{{ d.day }}<br><small>{{ WEEK[d.weekday()] }}</small></th>{% endfor %}
+    <th>時間</th><th>常勤換算</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr><td class="name"><b>{{ row.s['name'] }}</b><br><small class="muted">{{ row.s['job'] or '' }}・{{ row.s['employment'] or '' }}</small></td>
+    {% for c in row.cells %}<td><select name="s{{ row.s['id'] }}_{{ loop.index }}" aria-label="{{ row.s['name'] }} {{ loop.index }}日">
+      <option value=""></option>{% for t in types %}<option value="{{ t['code'] }}"{% if c == t['code'] %} selected{% endif %}>{{ t['code'] }}</option>{% endfor %}</select></td>{% endfor %}
+    <td class="num">{{ row.hours|round(1) }}</td><td class="num">{{ row.fte }}</td></tr>
+  {% else %}<tr><td colspan="{{ days|length + 3 }}" class="empty">職員が登録されていません。</td></tr>{% endfor %}
+  <tr class="total"><td class="name">夜間の勤務者</td>{% for n in night %}<td class="num {{ 'ng' if n == 0 }}">{{ n }}</td>{% endfor %}<td colspan="2"></td></tr>
+  </tbody>
+</table>
+</div>
+<section class="card"><h2>職種ごとの常勤換算</h2>
+  <table class="list">{% for job, v in by_job.items() %}<tr><td>{{ job }}</td><td class="num">{{ '%.2f'|format(v) }}</td></tr>{% else %}<tr><td class="muted">—</td></tr>{% endfor %}</table>
+  <p class="muted small">常勤の職員は1.0、非常勤は「月の勤務時間 ÷ 常勤の勤務時間」で計算します（上限1.0）。人員基準の確認は指定権者の基準に従ってください。</p>
+</section>
+<div class="actions sticky-save"><button class="btn primary big">💾 保存する</button></div>
+</form>
+{% endblock %}

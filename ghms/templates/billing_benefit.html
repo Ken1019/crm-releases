@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}給付費の概算{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>🧮 給付費の概算（{{ first.strftime('%Y年%m月') }}）</h1>
+  <a class="btn" href="{{ url_for('billing.benefit_export', ym=ym, home_id=home_id or '') }}">🖨️ 概算と実績記録をExcelで出す</a>
+</div>
+<p class="guide">国保連に請求する前の確認用です。実績の入れ忘れ・加算の漏れ・単位数の未設定がないかを見てください。<b>請求そのものは請求ソフトで行い、その結果を正としてください。</b></p>
+<form method="get" class="filters card">
+  <input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
+  <select name="home_id" onchange="this.form.submit()" aria-label="住居"><option value="">全住居</option>
+    {% for h in homes %}<option value="{{ h['id'] }}"{% if h['id'] == home_id %} selected{% endif %}>{{ h['name'] }}</option>{% endfor %}</select>
+  <span class="muted small">1単位 {{ price }}円・処遇改善加算 {{ rate }}%（{{ first.year if first.month >= 4 else first.year - 1 }}年度の計画）</span>
+</form>
+<div class="tiles">
+  <div class="tile"><b>{{ '{:,}'.format(total_yen) }}円</b><span>給付費の概算 合計</span></div>
+  <div class="tile"><b>{{ '{:,}'.format(total_burden) }}円</b><span>利用者負担の概算 合計</span></div>
+  <div class="tile"><b>{{ results|length }}名</b><span>この月の利用者</span></div>
+</div>
+{% for x in results %}
+<section class="card">
+  <div class="head"><h2>{{ x.r['name'] }} <small class="muted">{{ x.r['support_level'] or '区分未入力' }}・{{ x.r['hname'] or '' }}</small></h2>
+    <a href="{{ url_for('billing.attendance', ym=ym, home_id=x.r['home_id']) }}">実績を直す</a></div>
+  {% for w in x.warnings %}<p class="pill warn">！ {{ w }}</p> {% endfor %}
+  <table class="list">
+    <thead><tr><th>内容</th><th>単位</th><th>回数・日数</th><th>小計（単位）</th></tr></thead>
+    {% for name, u, n, t in x.lines %}
+    <tr><td>{{ name }}</td><td class="num">{{ u|int if u is not none else '' }}</td><td class="num">{{ ('%d%s'|format(n, '日' if t == '日' else '回')) if n is not none else '' }}</td>
+      <td class="num">{{ '{:,}'.format((u * n)|int) if u is not none else '{:,}'.format(x.shogu) }}</td></tr>
+    {% endfor %}
+    <tr class="total"><td colspan="3">合計 {{ '{:,}'.format(x.total_units) }} 単位 → 給付費 約 {{ '{:,}'.format(x.yen) }}円</td>
+      <td class="num">利用者負担 約 {{ '{:,}'.format(x.burden) }}円</td></tr>
+  </table>
+</section>
+{% else %}
+<p class="empty card">この月の利用者がいません。</p>
+{% endfor %}
+{% endblock %}

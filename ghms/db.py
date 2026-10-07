@@ -44,6 +44,15 @@ def init_db(path):
         "CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY, at TEXT, username TEXT,"
         " action TEXT, entity TEXT, record_id INTEGER)"
     )
+    # 月ごとのグリッド入力（在居・外泊などの実績、勤務表）
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS attendance (resident_id INTEGER, date TEXT, code TEXT,"
+        " updated_by TEXT, updated_at TEXT, PRIMARY KEY (resident_id, date))"
+    )
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS shifts (staff_id INTEGER, date TEXT, code TEXT,"
+        " updated_by TEXT, updated_at TEXT, PRIMARY KEY (staff_id, date))"
+    )
     for key, ent in ENTITIES.items():
         cols = ", ".join(f'"{f["name"]}" {SQL_TYPE.get(f["type"], "TEXT")}' for f in ent["fields"])
         con.execute(

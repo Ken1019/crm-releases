@@ -23,6 +23,7 @@ UNIT_TYPE = ["日", "月", "回"]
 ADDON_KIND = ["体制加算（事業所全体）", "個別加算（利用者ごと）"]
 MEETING_KIND = [
     "虐待防止委員会", "身体拘束適正化委員会", "感染症対策委員会", "業務継続計画(BCP)",
+    "避難訓練", "虐待防止研修", "身体拘束適正化研修", "感染症研修",
     "職員会議", "ケース会議", "地域連携推進会議", "その他",
 ]
 TRAINING_KIND = ["内部研修", "外部研修", "OJT", "資格取得"]
@@ -30,6 +31,15 @@ INCIDENT_KIND = ["ヒヤリハット", "事故", "苦情", "その他"]
 SHOGU_CATEGORY = ["Ⅰ", "Ⅱ", "Ⅲ", "Ⅳ"]
 PAY_METHOD = ["基本給", "手当（毎月）", "賞与・一時金"]
 PLAN_STATUS = ["作成中", "同意済", "モニタリング済", "終了"]
+INCOME_CLASS = ["生活保護", "低所得", "一般1", "一般2"]
+FOOD_TYPE = ["日額（食べた日数で計算）", "月額"]
+PAY_METHOD_RES = ["口座振替", "振込", "現金", "預り金から"]
+INVOICE_STATUS = ["未請求", "請求済", "入金済"]
+DEPOSIT_KIND = ["入金", "出金"]
+DOC_TYPE = [
+    "利用契約書", "重要事項説明書", "個人情報使用同意書", "個別支援計画への同意", "受給者証の写し",
+    "緊急連絡先届", "金銭管理（預り金）契約", "身体拘束等に関する同意", "その他",
+]
 TRAINING_PLAN_STATUS = ["予定", "実施済", "中止"]
 
 
@@ -90,6 +100,16 @@ ENTITIES = {
             F("emergency_tel", "緊急連絡先（電話）", list=False),
             F("guardian", "成年後見人等", list=False),
             F("notes", "特記事項", "textarea", list=False),
+            F("rent", "家賃（月額・円）", "number", list=False, section="利用料（請求書に使います）"),
+            F("rent_subsidy", "家賃助成（補足給付・月額・円）", "number", list=False,
+              help="特定障害者特別給付費など、家賃から差し引く額"),
+            F("utility", "光熱水費（月額・円）", "number", list=False),
+            F("daily_goods", "日用品費（月額・円）", "number", list=False),
+            F("food_type", "食費の計算方法", "select", options=FOOD_TYPE, list=False),
+            F("food_amount", "食費（円）", "number", list=False, help="日額なら1日分、月額なら1か月分"),
+            F("income_class", "所得区分", "select", options=INCOME_CLASS, list=False),
+            F("burden_cap", "利用者負担上限月額（円）", "number", list=False, help="受給者証に書かれている上限額"),
+            F("pay_method", "支払方法", "select", options=PAY_METHOD_RES, list=False),
         ],
     },
     "support_plans": {
@@ -377,11 +397,110 @@ ENTITIES = {
             F("notes", "備考", "textarea", list=False),
         ],
     },
+    # ---------------- 請求・お金 ----------------
+    "basic_units": {
+        "icon": "🧮",
+        "guide": "共同生活援助サービス費（基本報酬）の1日あたりの単位数です。最新の報酬告示で確認して入力してください。給付費の概算に使います。",
+        "title": "基本報酬の単位数",
+        "group": "請求・お金",
+        "display": "label",
+        "order": "home_type, support_level",
+        "fields": [
+            F("home_type", "類型", "select", options=HOME_TYPE),
+            F("support_level", "障害支援区分", "select", options=SUPPORT_LEVEL, required=True),
+            F("label", "名称（人員配置など）"),
+            F("units", "単位数（1日）", "number", required=True),
+            F("active", "使う", "check", default=1),
+        ],
+    },
+    "invoices": {
+        "icon": "🧾",
+        "guide": "利用料の請求です。「請求書を作る」画面で月ごとにまとめて作れます。入金があったら「状態」を「入金済」にしてください。",
+        "title": "利用料の請求",
+        "group": "請求・お金",
+        "display": "ym",
+        "order": "ym DESC, id",
+        "admin_only": True,
+        "fields": [
+            F("ym", "請求月（例 2026-10）", required=True),
+            F("resident_id", "入居者", "ref", ref="residents", required=True),
+            F("status", "状態", "select", options=INVOICE_STATUS, default="未請求"),
+            F("issue_date", "発行日", "date", list=False),
+            F("due_date", "支払期限", "date"),
+            F("rent", "家賃", "number", list=False),
+            F("rent_subsidy", "家賃助成（差引）", "number", list=False),
+            F("food", "食費", "number", list=False),
+            F("utility", "光熱水費", "number", list=False),
+            F("daily_goods", "日用品費", "number", list=False),
+            F("user_burden", "利用者負担額（障害福祉サービス）", "number", list=False),
+            F("other_label", "その他の内容", list=False),
+            F("other_amount", "その他の金額", "number", list=False),
+            F("total", "請求額（自動計算）", "number", help="保存すると自動で計算されます"),
+            F("paid_on", "入金日", "date"),
+            F("paid_amount", "入金額", "number", list=False),
+            F("pay_method", "支払方法", "select", options=PAY_METHOD_RES, list=False),
+            F("notes", "備考", "textarea", list=False),
+        ],
+    },
+    "deposits": {
+        "icon": "👛",
+        "guide": "入居者からお預かりしているお金の出し入れです。レシートは必ず保管し、定期的に本人・家族に残高を報告しましょう。",
+        "title": "預り金の出し入れ",
+        "group": "請求・お金",
+        "display": "date",
+        "order": "date DESC, id DESC",
+        "fields": [
+            F("date", "日付", "date", required=True, default="today"),
+            F("resident_id", "入居者", "ref", ref="residents", required=True),
+            F("kind", "入金／出金", "select", options=DEPOSIT_KIND, required=True),
+            F("amount", "金額（円）", "number", required=True),
+            F("purpose", "内容（買ったもの・入金元）"),
+            F("receipt", "レシートあり", "check"),
+            F("staff", "対応した職員"),
+            F("checker", "確認者", list=False),
+        ],
+    },
+    # ---------------- 勤務表 ----------------
+    "shift_types": {
+        "icon": "🕘",
+        "guide": "勤務表で使う勤務の種類です。時間数は常勤換算の計算に使います。",
+        "title": "勤務の種類",
+        "group": "職員・キャリアパス",
+        "display": "code",
+        "order": "sort, id",
+        "admin_only": True,
+        "fields": [
+            F("sort", "並び順", "number"),
+            F("code", "記号（1〜2文字）", required=True),
+            F("name", "名前", required=True),
+            F("start", "開始", "time"),
+            F("end", "終了", "time"),
+            F("hours", "勤務時間（休憩を除く）", "number", step="0.25"),
+            F("night", "夜間の勤務（夜勤・宿直）", "check"),
+        ],
+    },
+    # ---------------- 書類 ----------------
+    "resident_documents": {
+        "icon": "📑",
+        "guide": "契約書・同意書などの書類を登録します。「書類がそろっているか」の画面で、足りない書類が分かります。",
+        "title": "契約書・同意書",
+        "group": "入居者",
+        "display": "doc_type",
+        "order": "resident_id, doc_type",
+        "fields": [
+            F("resident_id", "入居者", "ref", ref="residents", required=True),
+            F("doc_type", "書類の種類", "select", options=DOC_TYPE, required=True),
+            F("signed_on", "署名・同意日", "date"),
+            F("expires_on", "有効期限・更新日", "date"),
+            F("place", "保管場所"),
+            F("notes", "備考", "textarea", list=False),
+        ],
+    },
 }
 
-GROUPS = ["入居者", "日誌・記録", "職員・キャリアパス", "加算・処遇改善", "基本情報"]
+GROUPS = ["入居者", "日誌・記録", "職員・キャリアパス", "加算・処遇改善", "請求・お金", "基本情報"]
 
-GROUP_ICONS = {"入居者": "👤", "日誌・記録": "📔", "職員・キャリアパス": "🧑‍💼", "加算・処遇改善": "💴", "基本情報": "🏠"}
+GROUP_ICONS = {"入居者": "👤", "日誌・記録": "📔", "職員・キャリアパス": "🧑‍💼", "加算・処遇改善": "💴", "請求・お金": "🧾", "基本情報": "🏠"}
 
 
 def entity(key):

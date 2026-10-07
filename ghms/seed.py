@@ -84,7 +84,42 @@ GRADES = [
 ]
 
 
+SHIFT_TYPES = [
+    (10, "日", "日勤", "09:00", "18:00", 8, 0),
+    (20, "早", "早番", "06:00", "10:00", 4, 0),
+    (30, "遅", "遅番", "15:00", "20:00", 5, 0),
+    (40, "夜", "夜勤", "16:00", "10:00", 16, 1),
+    (50, "宿", "宿直", "20:00", "07:00", 0, 1),
+    (60, "明", "夜勤明け", "", "", 0, 0),
+    (70, "休", "公休", "", "", 0, 0),
+    (80, "有", "有給休暇", "", "", 0, 0),
+]
+
+
 def seed(con):
+    _seed_v1(con)
+    _seed_v2(con)
+
+
+def _seed_v2(con):
+    """請求・勤務表の追加に伴う初期データ（既存のDBにも1回だけ追加）"""
+    if con.execute("SELECT value FROM settings WHERE key='seeded_v2'").fetchone():
+        return
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for sort, code, name, start, end, hours, night in SHIFT_TYPES:
+        con.execute(
+            "INSERT INTO shift_types (sort, code, name, \"start\", \"end\", hours, night, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (sort, code, name, start, end, hours, night, ts, ts),
+        )
+    for k, v in [("full_time_hours", "160"), ("invoice_due_day", "27"), ("bank_info", ""), ("office_address", ""),
+                 ("office_tel", "")]:
+        con.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+    con.execute("INSERT INTO settings (key, value) VALUES ('seeded_v2', '1')")
+    con.commit()
+
+
+def _seed_v1(con):
     done = con.execute("SELECT value FROM settings WHERE key='seeded'").fetchone()
     if done:
         return

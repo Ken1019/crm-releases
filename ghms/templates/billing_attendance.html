@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block title %}実績の入力{% endblock %}
+{% block content %}
+<h1>📅 実績を入れる（{{ first.strftime('%Y年%m月') }}）</h1>
+<p class="guide">入居者ごとに、その日どう過ごしたかを記号でえらびます。「この人を全部○にする」を押してから、外泊・入院の日だけ直すと早く入れられます。ここで入れた実績が、給付費の概算と食費の計算に使われます。</p>
+<form method="get" class="filters card">
+  <input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
+  <select name="home_id" onchange="this.form.submit()" aria-label="住居">
+    {% for h in homes %}<option value="{{ h['id'] }}"{% if h['id'] == home_id %} selected{% endif %}>{{ h['name'] }}</option>{% endfor %}
+  </select>
+  <noscript><button class="btn">表示</button></noscript>
+  <span class="legend">{% for c, label in CODES %}<span><b>{{ c }}</b> {{ label }}</span>{% endfor %}</span>
+</form>
+<form method="post" data-guard>
+<input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}"><input type="hidden" name="home_id" value="{{ home_id or '' }}">
+<div class="tablewrap card">
+<table class="mgrid">
+  <thead><tr><th class="name">氏名</th>
+    {% for d in days %}<th class="{{ 'sat' if d.weekday() == 5 else 'sun' if d.weekday() == 6 }}">{{ d.day }}<br><small>{{ WEEK[d.weekday()] }}</small></th>{% endfor %}
+    <th>算定</th><th>外泊</th><th>帰宅</th><th>入院</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr>
+    <td class="name"><b>{{ row.r['name'] }}</b><br><button type="button" class="btn mini" data-fill="{{ row.r['id'] }}">この人を全部○にする</button></td>
+    {% for d, v, inres in row.cells %}
+    <td class="{{ 'out' if not inres }}"><select name="a{{ row.r['id'] }}_{{ d.day }}" data-r="{{ row.r['id'] }}" data-in="{{ 1 if inres else 0 }}" aria-label="{{ row.r['name'] }} {{ d.day }}日">
+      <option value=""></option>{% for c, label in CODES %}<option value="{{ c }}"{% if v == c %} selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select></td>
+    {% endfor %}
+    <td class="num">{{ row.counts['○'] + row.counts['日'] }}</td><td class="num">{{ row.counts['外'] }}</td>
+    <td class="num">{{ row.counts['帰'] }}</td><td class="num">{{ row.counts['入'] }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="{{ days|length + 5 }}" class="empty">この月に入居している方がいません。</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted small">灰色のマスは入居日より前・退居日より後の日です。日数の集計は保存すると更新されます。</p>
+<div class="actions sticky-save"><button class="btn primary big">💾 保存する</button>
+  <a class="btn" href="{{ url_for('billing.benefit', ym=ym) }}">🧮 給付費の概算を見る</a></div>
+</form>
+<script>
+document.querySelectorAll('[data-fill]').forEach(function(b){b.addEventListener('click',function(){
+  document.querySelectorAll('select[data-r="'+b.dataset.fill+'"]').forEach(function(s){
+    if(s.dataset.in==='1'&&!s.value){s.value='○';}});
+  b.closest('form').dispatchEvent(new Event('input'));});});
+</script>
+{% endblock %}

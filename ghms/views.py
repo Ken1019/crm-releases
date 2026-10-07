@@ -17,7 +17,9 @@ from .hubs import HUB_BY_KEY, visible_hubs, visible_tasks
 bp = Blueprint("views", __name__)
 
 ACTIVE_RES = "status IS NULL OR status != '退居'"
-REQUIRED_MEETINGS = ["虐待防止委員会", "身体拘束適正化委員会", "感染症対策委員会", "業務継続計画(BCP)"]
+# (種別, この日数を過ぎたら注意)
+REQUIRED_MEETINGS = [("虐待防止委員会", 365), ("身体拘束適正化委員会", 365), ("感染症対策委員会", 365),
+                     ("業務継続計画(BCP)", 365), ("避難訓練", 183)]
 
 
 def parse_date(s, default=None):
@@ -76,13 +78,21 @@ def dashboard():
     for r in db.execute(f"SELECT * FROM residents WHERE ({ACTIVE_RES}) AND id NOT IN "
                         "(SELECT resident_id FROM support_plans WHERE status IS NULL OR status != '終了')"):
         alerts.append(("個別支援計画が未作成", r["name"], "", url_for("crud.new", key="support_plans", resident_id=r["id"])))
+    for d in db.execute("SELECT d.*, r.name AS rname FROM resident_documents d JOIN residents r ON r.id=d.resident_id "
+                        f"WHERE (r.{ACTIVE_RES.replace(' OR status', ' OR r.status')}) AND d.expires_on IS NOT NULL AND d.expires_on <= ?",
+                        (cert_limit,)):
+        alerts.append((f"{d['doc_type']}の更新", d["rname"], d["expires_on"], url_for("crud.view", key="resident_documents", rid=d["id"])))
+    if g.user["role"] == "admin":
+        for i in db.execute("SELECT i.*, r.name AS rname FROM invoices i JOIN residents r ON r.id=i.resident_id "
+                            "WHERE i.status != '入金済' AND i.due_date IS NOT NULL AND i.due_date < ?", (today.isoformat(),)):
+            alerts.append((f"{i['ym']}分の利用料が未入金", i["rname"], i["due_date"], url_for("crud.edit", key="invoices", rid=i["id"])))
     alerts.sort(key=lambda a: a[2] or "0000")
 
     meetings = []
-    for kind in REQUIRED_MEETINGS:
+    for kind, limit in REQUIRED_MEETINGS:
         row = db.execute("SELECT MAX(date) FROM meetings WHERE kind=?", (kind,)).fetchone()
         last = row[0]
-        meetings.append((kind, last, (not last) or parse_date(last, today) < today - timedelta(days=365)))
+        meetings.append((kind, last, (not last) or parse_date(last, today) < today - timedelta(days=limit)))
 
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
     logged = {r[0] for r in db.execute("SELECT home_id FROM daily_logs WHERE date=?", (today.isoformat(),))}
@@ -459,6 +469,11 @@ SETTINGS = [
     ("unit_price", "1単位あたりの単価（円・地域区分に応じて）"),
     ("cert_alert_days", "受給者証期限アラート（何日前から）"),
     ("plan_alert_days", "個別支援計画・モニタリングのアラート（何日前から）"),
+    ("office_address", "事業所の住所（請求書に印字）"),
+    ("office_tel", "事業所の電話番号（請求書に印字）"),
+    ("bank_info", "振込先（例：〇〇銀行 △△支店 普通 1234567 カ）〇〇）"),
+    ("invoice_due_day", "利用料の支払期限（翌月の何日）"),
+    ("full_time_hours", "常勤の勤務時間（月・時間）※常勤換算に使います"),
 ]
 
 

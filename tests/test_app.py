@@ -114,7 +114,8 @@ def test_staff_role_cannot_see_admin_pages(client, app):
     c.post("/login", data={"username": "worker", "password": "password123"})
     assert c.get("/").status_code == 200
     assert c.get("/m/residents/").status_code == 200
-    for path in ["/m/staff/", "/m/shogu_plans/", "/shogu/", "/career", "/users", "/backup"]:
+    for path in ["/m/staff/", "/m/shogu_plans/", "/shogu/", "/career", "/users", "/backup", "/billing/invoices",
+                 "/m/invoices/", "/shift/"]:
         assert c.get(path).status_code == 403, path
 
 
@@ -139,3 +140,86 @@ def test_purpose_menu(client, app):
     home = c.get("/").get_data(as_text=True)
     assert "職員のこと" not in home and "処遇改善の計画と配分を見る" not in home
     assert "今月の加算の要件をチェックする" in home
+
+
+def _setup_billing(client):
+    post(client, "/m/homes/new", {"name": "ひまわり", "home_type": "介護サービス包括型"})
+    post(client, "/m/residents/new", {
+        "name": "山田太郎", "home_id": "1", "status": "入居中", "support_level": "区分4", "move_in": "2026-09-01",
+        "rent": "40000", "rent_subsidy": "10000", "utility": "10000", "daily_goods": "3000",
+        "food_type": "日額（食べた日数で計算）", "food_amount": "800", "burden_cap": "9300", "pay_method": "振込"})
+    # 単位数はテスト用の仮の値
+    post(client, "/m/basic_units/new", {"home_type": "介護サービス包括型", "support_level": "区分4", "units": "500", "active": "1"})
+    post(client, "/m/addons/new", {"name": "日中支援加算（テスト）", "kind": "個別加算（利用者ごと）", "units": "100",
+                                   "unit_type": "日", "active": "1"})
+    addon_id = len(__import__("ghms.seed", fromlist=["ADDONS"]).ADDONS) + 1
+    post(client, "/m/resident_addons/new", {"resident_id": "1", "addon_id": str(addon_id)})
+    post(client, "/m/shogu_plans/new", {"fiscal_year": "2026", "category": "Ⅰ", "rate": "10", "revenue": "1"})
+    # 2026年10月：31日中 外泊3日・日中支援1日・残り在居
+    form = {f"a1_{d}": "○" for d in range(1, 32)}
+    form.update({"a1_5": "外", "a1_6": "外", "a1_7": "外", "a1_10": "日", "ym": "2026-10", "home_id": "1"})
+    assert post(client, "/billing/attendance", form).status_code == 302
+
+
+def test_benefit_and_invoice(client):
+    _setup_billing(client)
+    html = client.get("/billing/benefit?ym=2026-10").get_data(as_text=True)
+    # 基本 500×28日 + 日中支援 100×1日 = 14,100、処遇改善10% = 1,410 → 15,510単位 × 10円
+    assert "15,510" in html and "155,100" in html
+    assert "9,300" in html  # 上限額で頭打ち
+    assert client.get("/billing/benefit.xlsx?ym=2026-10").data[:2] == b"PK"
+
+    post(client, "/billing/invoices", {"ym": "2026-10"})
+    html = client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
+    # 家賃40,000 − 助成10,000 + 食費800×28 + 光熱水費10,000 + 日用品3,000 + 負担9,300 = 74,700
+    assert "74,700円" in html
+    # 2回押しても重複しない
+    post(client, "/billing/invoices", {"ym": "2026-10"})
+    assert client.get("/m/invoices/").get_data(as_text=True).count("✏️ 直す") == 1
+    printed = client.get("/billing/invoice/1/print").get_data(as_text=True)
+    assert "請 求 書" in printed and "74,700" in printed and "2026-11-27" in printed
+    assert "領 収 書" in client.get("/billing/invoice/1/print?kind=receipt").get_data(as_text=True)
+    assert client.get("/billing/invoices.xlsx?ym=2026-10").status_code == 200
+
+    # 手で直したら合計が再計算される
+    post(client, "/m/invoices/1/edit", {"ym": "2026-10", "resident_id": "1", "status": "入金済", "rent": "40000",
+                                        "rent_subsidy": "10000", "food": "0", "other_label": "行事費", "other_amount": "500"})
+    assert "30,500" in client.get("/m/invoices/1").get_data(as_text=True)
+
+
+def test_invoice_prorates_move_in(client):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "途中入居", "home_id": "1", "move_in": "2026-10-17", "rent": "31000",
+                                      "food_type": "月額", "food_amount": "31000"})
+    post(client, "/billing/invoices", {"ym": "2026-10"})
+    # 17日〜31日の15日分：31,000 × 15/31 = 15,000（家賃・食費とも）
+    assert "30,000円" in client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
+
+
+def test_deposits_documents_and_dashboard(client):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "status": "入居中"})
+    post(client, "/m/deposits/new", {"date": "2026-10-01", "resident_id": "1", "kind": "入金", "amount": "10000"})
+    post(client, "/m/deposits/new", {"date": "2026-10-02", "resident_id": "1", "kind": "出金", "amount": "1200", "purpose": "おやつ"})
+    html = client.get("/billing/deposits").get_data(as_text=True)
+    assert "8,800円" in html and "1件" in html  # レシートなし1件
+    assert client.get("/billing/deposits/1.xlsx").status_code == 200
+
+    html = client.get("/billing/documents").get_data(as_text=True)
+    assert html.count("なし ＋") == 6
+    post(client, "/m/resident_documents/new", {"resident_id": "1", "doc_type": "利用契約書", "signed_on": "2026-04-01",
+                                               "expires_on": "2026-10-10"})
+    assert client.get("/billing/documents").get_data(as_text=True).count("なし ＋") == 5
+    assert "利用契約書の更新" in client.get("/").get_data(as_text=True)
+    assert "避難訓練" in client.get("/").get_data(as_text=True)
+
+
+def test_shift_roster(client):
+    post(client, "/m/staff/new", {"name": "常勤さん", "status": "在籍", "job": "世話人", "employment": "常勤"})
+    post(client, "/m/staff/new", {"name": "パートさん", "status": "在籍", "job": "世話人", "employment": "パート"})
+    form = {"ym": "2026-10", "s1_1": "夜", "s1_2": "明"}
+    form.update({f"s2_{d}": "日" for d in range(1, 11)})  # 日勤8h×10日=80h
+    assert post(client, "/shift/", form).status_code == 302
+    html = client.get("/shift/?ym=2026-10").get_data(as_text=True)
+    assert "0.5" in html and "1.5" in html  # パート 80/160、世話人合計 1.5
+    assert client.get("/shift/export.xlsx?ym=2026-10").data[:2] == b"PK"

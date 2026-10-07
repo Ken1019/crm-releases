@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}預り金{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>👛 預り金の残高</h1>
+  <a class="btn primary" href="{{ url_for('crud.new', key='deposits', next=request.path) }}">＋ 出し入れを記録する</a>
+  <a class="btn" href="{{ url_for('crud.index', key='deposits') }}">📋 出し入れの一覧</a>
+</div>
+<p class="guide">お預かりしているお金の残高です。「出納帳」で入居者ごとの出納帳をExcelで出せます。本人・家族への定期的な報告に使ってください。</p>
+<table class="list">
+  <thead><tr><th>入居者</th><th>残高</th><th>最後の出し入れ</th><th>レシートなしの出金</th><th></th></tr></thead>
+  {% for r in rows %}
+  <tr><td><b>{{ r['name'] }}</b></td><td class="num {{ 'ng' if (r['bal'] or 0) < 0 }}"><b>{{ '{:,}'.format((r['bal'] or 0)|int) }}円</b></td>
+    <td>{{ r['last'] or '' }}</td><td>{% if r['noreceipt'] %}<span class="pill warn">{{ r['noreceipt'] }}件</span>{% else %}<span class="pill ok">なし</span>{% endif %}</td>
+    <td class="nowrap"><a class="btn mini" href="{{ url_for('crud.new', key='deposits', resident_id=r['id'], next=request.path) }}">＋ 記録</a>
+      <a class="btn mini" href="{{ url_for('billing.deposit_ledger', rid=r['id']) }}">出納帳</a></td></tr>
+  {% else %}<tr><td colspan="5" class="empty">まだ記録がありません。<br><a class="btn primary" href="{{ url_for('crud.new', key='deposits', next=request.path) }}">＋ 最初の出し入れを記録する</a></td></tr>{% endfor %}
+</table>
+{% endblock %}

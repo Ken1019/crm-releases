@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block title %}利用料の請求{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>🧾 利用料の請求書（{{ first.strftime('%Y年%m月') }}分）</h1>
+  <a class="btn" href="{{ url_for('billing.invoices_export', ym=ym) }}">🖨️ 請求一覧をExcelで出す</a>
+</div>
+<p class="guide">① 先に「実績を入れる」で外泊・入院を入れる → ② 「この月の請求書をまとめて作る」を押す → ③ 各行の「請求書」を開いて印刷。入金があったら「直す」から状態を「入金済」にします。金額は入居者の情報（家賃・食費など）から計算します。</p>
+<form method="get" class="filters card">
+  <input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
+</form>
+{% if missing %}
+<form method="post" class="card">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}">
+  <p>まだ請求書がない方が <b>{{ missing }}名</b> います。</p>
+  <button class="btn primary big">📝 この月の請求書をまとめて作る</button>
+  <p class="muted small">作成済みの請求書は上書きしません。</p>
+</form>
+{% endif %}
+<div class="tablewrap">
+<table class="list">
+  <thead><tr><th>入居者</th><th>入居日数</th><th>家賃</th><th>家賃助成</th><th>食費</th><th>光熱水費</th><th>日用品</th><th>利用者負担</th><th>請求額</th><th>状態</th><th></th></tr></thead>
+  <tbody>
+  {% for p in preview %}{% set v = p.inv or p.fees %}
+  <tr>
+    <td><b>{{ p.x.r['name'] }}</b></td><td class="num">{{ p.rdays }}日</td>
+    <td class="num">{{ '{:,}'.format((v['rent'] or 0)|int) }}</td><td class="num">{{ ('−' ~ '{:,}'.format(v['rent_subsidy']|int)) if v['rent_subsidy'] else '0' }}</td>
+    <td class="num">{{ '{:,}'.format((v['food'] or 0)|int) }}</td><td class="num">{{ '{:,}'.format((v['utility'] or 0)|int) }}</td>
+    <td class="num">{{ '{:,}'.format((v['daily_goods'] or 0)|int) }}</td><td class="num">{{ '{:,}'.format((v['user_burden'] or 0)|int) }}</td>
+    <td class="num"><b>{{ '{:,}'.format((v['total'] or 0)|int) }}円</b></td>
+    <td>{% if not p.inv %}<span class="pill warn">未作成（見込み）</span>{% elif p.inv['status'] == '入金済' %}<span class="pill ok">入金済</span>{% else %}<span class="pill ng">{{ p.inv['status'] }}</span>{% endif %}</td>
+    <td class="nowrap">{% if p.inv %}
+      <a class="btn mini" href="{{ url_for('billing.invoice_print', iid=p.inv['id']) }}">請求書</a>
+      <a class="btn mini" href="{{ url_for('billing.invoice_print', iid=p.inv['id'], kind='receipt') }}">領収書</a>
+      <a class="btn mini" href="{{ url_for('crud.edit', key='invoices', rid=p.inv['id'], next=request.full_path) }}">✏️ 直す</a>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="11" class="empty">この月の入居者がいません。</td></tr>{% endfor %}
+  </tbody>
+  <tfoot><tr class="total"><td colspan="8">合計</td><td class="num">{{ '{:,}'.format(total|int) }}円</td><td colspan="2"></td></tr></tfoot>
+</table>
+</div>
+{% if unpaid %}
+<section class="card">
+  <h2>💡 前の月で入金がまだのもの</h2>
+  <table class="list">
+  {% for i in unpaid %}<tr><td>{{ i['ym'] }}</td><td>{{ i['rname'] }}</td><td class="num">{{ '{:,}'.format((i['total'] or 0)|int) }}円</td>
+    <td>支払期限 {{ i['due_date'] or '' }}</td><td><a href="{{ url_for('crud.edit', key='invoices', rid=i['id'], next=request.full_path) }}">入金を記録する</a></td></tr>{% endfor %}
+  </table>
+</section>
+{% endif %}
+{% endblock %}
