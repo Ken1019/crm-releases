@@ -1,0 +1,116 @@
+name: Windowsインストーラーを作る
+
+# ・どのブランチに push しても：Windowsでテスト → GHMS.exe とインストーラーを作って動作確認（成果物として保存）
+# ・v1.2.3 のようなタグを push したとき：上に加えて GitHub のリリースとして公開
+#   （各事業所のGHMSは、公開された latest.json を見て更新を知らせる）
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 必要な部品を入れる
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pytest pillow
+
+      - name: テスト（Windows）
+        run: python -m pytest -q
+
+      - name: 版の番号を確認
+        id: ver
+        run: |
+          $v = python -c "import ghms; print(ghms.VERSION)"
+          if ($env:GITHUB_REF -like 'refs/tags/v*' -and $env:GITHUB_REF_NAME -ne "v$v") {
+            throw "タグ $env:GITHUB_REF_NAME と ghms/__init__.py の VERSION（$v）が一致しません"
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: GHMS.exe を作る（PyInstaller）
+        run: |
+          python packaging/make_icon.py packaging/ghms.ico
+          pyinstaller --noconfirm --clean --windowed --name GHMS --icon packaging/ghms.ico `
+            --add-data "ghms/templates;ghms/templates" --add-data "ghms/static;ghms/static" run.py
+
+      - name: GHMS.exe の動作確認（起動 → 応答 → 停止）
+        run: |
+          $env:GHMS_HOME = Join-Path $env:RUNNER_TEMP "ghms_smoke"
+          New-Item -ItemType Directory -Force $env:GHMS_HOME | Out-Null
+          Start-Process -FilePath "dist\GHMS\GHMS.exe" -ArgumentList "--no-browser"
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try { $r = Invoke-RestMethod http://127.0.0.1:8000/__ping -TimeoutSec 2; if ($r.ok) { $ok = $true; break } } catch {}
+            Start-Sleep -Seconds 1
+          }
+          if (-not $ok) { Get-ChildItem -Recurse $env:GHMS_HOME | Out-String | Write-Host; throw "GHMS.exe が起動しませんでした" }
+          if ($r.version -ne "${{ steps.ver.outputs.version }}") { throw "版が違います: $($r.version)" }
+          (Invoke-WebRequest http://127.0.0.1:8000/setup -UseBasicParsing).StatusCode
+          Start-Process -FilePath "dist\GHMS\GHMS.exe" -ArgumentList "--stop" -Wait
+          Start-Sleep -Seconds 2
+          try { Invoke-RestMethod http://127.0.0.1:8000/__ping -TimeoutSec 2; throw "止まっていません" } catch { if ($_.Exception.Message -eq "止まっていません") { throw } }
+          Write-Host "GHMS.exe OK"
+
+      - name: インストーラーを作る（Inno Setup）
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "インストーラーを作れませんでした" }
+
+      - name: インストーラーの動作確認（入れる → 起動 → 止める → アンインストール）
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          Start-Process -FilePath "dist\GHMS-Setup-$v.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/MERGETASKS=!desktopicon,!startup" -Wait
+          $exe = Join-Path $env:ProgramFiles "GHMS\GHMS.exe"
+          if (-not (Test-Path $exe)) { throw "インストールされていません" }
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try { $r = Invoke-RestMethod http://127.0.0.1:8000/__ping -TimeoutSec 2; if ($r.ok) { $ok = $true; break } } catch {}
+            Start-Sleep -Seconds 1
+          }
+          if (-not $ok) { Start-Process -FilePath $exe -ArgumentList "--no-browser"; Start-Sleep -Seconds 10; $r = Invoke-RestMethod http://127.0.0.1:8000/__ping }
+          Write-Host "installed version: $($r.version)"
+          if (-not (Test-Path (Join-Path $env:ProgramData "GHMS\data\ghms.sqlite3"))) { throw "データが ProgramData に作られていません" }
+          Start-Process -FilePath $exe -ArgumentList "--stop" -Wait
+          Start-Process -FilePath (Join-Path $env:ProgramFiles "GHMS\unins000.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path $exe) { throw "アンインストールできていません" }
+          if (-not (Test-Path (Join-Path $env:ProgramData "GHMS\data\ghms.sqlite3"))) { throw "アンインストールでデータが消えています" }
+          Write-Host "installer OK"
+
+      - name: 更新情報（latest.json）を作る
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          python packaging/make_manifest.py $v "dist/GHMS-Setup-$v.exe" dist/latest.json "${{ github.repository }}"
+          python -c "import sys; sys.path.insert(0,'packaging'); from make_manifest import notes_for; open('dist/notes.md','w',encoding='utf-8').write(notes_for('$v') or 'GHMS $v')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GHMS-Setup-${{ steps.ver.outputs.version }}
+          path: |
+            dist/GHMS-Setup-*.exe
+            dist/latest.json
+
+      - name: リリースとして公開（タグのときだけ）
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          gh release create $env:GITHUB_REF_NAME "dist/GHMS-Setup-$v.exe" dist/latest.json --title "GHMS $v" --notes-file dist/notes.md

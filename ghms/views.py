@@ -118,8 +118,14 @@ def dashboard():
     }
     recent = db.execute("SELECT i.*, r.name AS rname FROM incidents i LEFT JOIN residents r ON r.id=i.resident_id "
                         "ORDER BY i.date DESC, i.id DESC LIMIT 5").fetchall()
+    update_available = None
+    if g.user["role"] == "admin":
+        from .updater import cached_latest, maybe_check_in_background
+
+        maybe_check_in_background(current_app._get_current_object())
+        update_available = cached_latest()
     all_tasks = [dict(t, hub=h) for h in visible_hubs() for t in visible_tasks(h)]
-    return render_template("dashboard.html", all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
+    return render_template("dashboard.html", update_available=update_available, all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
                            recent=recent, today=today)
 
 
@@ -555,4 +561,5 @@ AUDIT_ACTIONS = {
     "user_enable": "ユーザー再開", "user_unlock": "ロック解除", "reauth": "管理者画面の本人確認",
     "pin_set": "PINの設定", "pin_clear": "PINを消した", "user_pin_clear": "PINを消した（管理者）",
     "device_add": "PIN端末の登録", "device_remove": "PIN端末の解除",
+    "update_check": "更新の確認", "update_install": "更新の開始", "update_failed": "更新の失敗",
 }

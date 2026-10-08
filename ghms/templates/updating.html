@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}更新しています{% endblock %}
+{% block content %}
+<div class="auth card" style="text-align:center">
+  <h1>⏳ {{ version }} に更新しています</h1>
+  <p>Windowsの確認画面が出たら「はい」を押してください。<br>終わると自動でこの画面が切り替わります（1〜2分）。</p>
+  <p class="muted small" id="state">待っています…</p>
+</div>
+<script>
+(function(){
+  var target='{{ version }}',el=document.getElementById('state'),n=0;
+  function poll(){fetch('/__ping',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+      if(j.version===target){el.textContent='更新が終わりました。';setTimeout(function(){location.href='/';},800);}
+      else{el.textContent='更新の準備をしています…';setTimeout(poll,3000);}})
+    .catch(function(){el.textContent='入れ替えています…（'+(++n)+'）';setTimeout(poll,3000);});}
+  setTimeout(poll,4000);
+})();
+</script>
+{% endblock %}

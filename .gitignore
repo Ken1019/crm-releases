@@ -4,3 +4,7 @@ __pycache__/
 data/
 backup/
 .pytest_cache/
+packaging/ghms.ico
+dist/
+build/
+*.spec

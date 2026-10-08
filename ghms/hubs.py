@@ -97,7 +97,7 @@ HUBS = [
     },
     {
         "key": "settings", "icon": "⚙️", "title": "設定", "desc": "事業所・住居・ログインする人・バックアップ",
-        "entities": ["homes"], "endpoints": ["views.settings", "auth.users", "views.audit_log"],
+        "entities": ["homes"], "endpoints": ["views.settings", "auth.users", "views.audit_log", "system.update", "auth.reauth"],
         "tasks": [
             ("住居（ユニット）を登録・変更する", "ホームの名前・定員・住所", lambda: url_for("crud.index", key="homes"), False),
             ("事業所の情報を変える", "事業所名・番号・単価・お知らせの日数", lambda: url_for("views.settings"), True),
@@ -105,6 +105,7 @@ HUBS = [
             ("自分のパスワードを変える", "", lambda: url_for("auth.my_password"), False),
             ("バックアップを保存する", "データをファイルに保存（毎日のバックアップは backup.bat）", lambda: url_for("views.backup"), True),
             ("だれが何をしたか見る", "操作の記録", lambda: url_for("views.audit_log"), True),
+            ("ソフトを最新の版に更新する", "新しい版の確認・ネット経由で更新", lambda: url_for("system.update"), True),
         ],
     },
 ]

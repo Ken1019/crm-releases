@@ -4,6 +4,9 @@
 <h1>{{ g.user['display_name'] }} さん、おつかれさまです 🌼</h1>
 <p class="hello muted">今日は {{ today.strftime('%Y年%m月%d日') }}（{{ '月火水木金土日'[today.weekday()] }}）です。したいことを下のボタンからえらんでください。</p>
 
+{% if update_available %}
+<p class="flash ok">🎁 ソフトの新しい版 {{ update_available['version'] }} があります。<a href="{{ url_for('system.update') }}">内容を見て更新する</a></p>
+{% endif %}
 <div class="bigmenu">
   <a class="main" href="{{ url_for('views.journal') }}"><span class="ic">📝</span><b>今日の日誌を書く</b><small>いちばんよく使う画面です</small></a>
   {% for h in hubs %}

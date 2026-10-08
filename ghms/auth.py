@@ -25,7 +25,7 @@ from .db import get_db, get_setting, now
 
 bp = Blueprint("auth", __name__)
 
-PUBLIC = {"auth.login", "auth.setup", "auth.pin_login", "static"}
+PUBLIC = {"auth.login", "auth.setup", "auth.pin_login", "static", "system.ping", "system.shutdown"}
 # パスワード変更が必要な人でも開ける画面
 WHILE_MUST_CHANGE = {"auth.my_password", "auth.logout", "static"}
 MAX_FAILS = 5

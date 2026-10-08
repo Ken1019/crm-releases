@@ -476,3 +476,98 @@ def test_removed_device_and_short_timeout(client, app):
     with dev.session_transaction() as s:
         s["seen"] = s["seen"] - 16 * 60
     assert dev.get("/").status_code == 302
+
+
+# ---------------------------------------------------------------- ネット経由の更新
+import hashlib  # noqa: E402
+import io  # noqa: E402
+import json as _json  # noqa: E402
+
+
+def _fake_opener(files):
+    """URL → 中身（bytes）の辞書で、urlopen の代わりをする"""
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def opener(req, timeout=None):
+        url = req.full_url if hasattr(req, "full_url") else req
+        if url not in files:
+            raise OSError("not found")
+        return Resp(files[url])
+    return opener
+
+
+def test_version_compare():
+    from ghms.updater import is_newer, parse_version
+    assert parse_version("v1.2.10") == (1, 2, 10)
+    assert is_newer("1.0.1", "1.0.0") and is_newer("1.10.0", "1.9.9")
+    assert not is_newer("1.0.0", "1.0.0") and not is_newer("0.9.9", "1.0.0")
+
+
+def test_update_check_and_download(app, tmp_path):
+    from ghms import VERSION, updater
+    exe = b"MZ fake installer"
+    good = {"version": "99.0.0", "installer": "https://example.com/GHMS-Setup-99.0.0.exe",
+            "sha256": hashlib.sha256(exe).hexdigest(), "notes": "新機能"}
+    files = {updater.DEFAULT_URL: _json.dumps(good).encode(), good["installer"]: exe}
+    with app.app_context():
+        m, err = updater.check(_fake_opener(files))
+        assert err is None and updater.cached_latest()["version"] == "99.0.0"
+        path = updater.download_installer(m, str(tmp_path), _fake_opener(files))
+        assert open(path, "rb").read() == exe
+        # 中身が違えば（改ざん・破損）止める
+        bad = dict(good, sha256="0" * 64)
+        try:
+            updater.download_installer(bad, str(tmp_path / "x"), _fake_opener(files))
+            assert False, "should fail"
+        except ValueError as e:
+            assert "正しくありません" in str(e)
+        # https 以外は使わない
+        try:
+            updater.download_installer(dict(good, installer="http://example.com/a.exe"), str(tmp_path), _fake_opener(files))
+            assert False
+        except ValueError:
+            pass
+        # ネットにつながらなくても落ちない
+        m, err = updater.check(_fake_opener({}))
+        assert m is None and "取得できませんでした" in err
+        # 同じ版なら「新しい版」は出さない
+        updater.check(_fake_opener({updater.DEFAULT_URL: _json.dumps(dict(good, version=VERSION)).encode()}))
+        assert updater.cached_latest() is None
+
+
+def test_update_page_and_banner(client, app):
+    from ghms import updater
+    with app.app_context():
+        from ghms.db import get_db
+        get_db().execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('update_latest', ?)",
+                         (_json.dumps({"version": "99.0.0", "notes": "新しい画面を追加"}),))
+        get_db().commit()
+    assert "新しい版 99.0.0 があります" in client.get("/").get_data(as_text=True)
+    page = client.get("/update").get_data(as_text=True)
+    assert "新しい画面を追加" in page and "インストーラーで入れたものではない" in page
+    # 開発版（インストーラーでない）では更新を実行しない
+    post(client, "/update", {"action": "install"})
+    assert updater.VERSION in client.get("/update").get_data(as_text=True)
+
+
+def test_update_page_is_admin_only(client, app):
+    c = staff_client(client, app)
+    assert c.get("/update").status_code == 403
+    assert "新しい版" not in c.get("/").get_data(as_text=True)
+
+
+def test_shutdown_needs_token(client, app, tmp_path, monkeypatch):
+    from ghms import runtime
+    monkeypatch.setattr(runtime, "token_path", lambda: str(tmp_path / "run.token"))
+    (tmp_path / "run.token").write_text("secret-token")
+    c = app.test_client()
+    assert c.post("/__shutdown").status_code == 403
+    assert c.post("/__shutdown", headers={"X-GHMS-Token": "wrong"}).status_code == 403
+    assert c.post("/__shutdown", headers={"X-GHMS-Token": "secret-token"},
+                  environ_base={"REMOTE_ADDR": "192.168.1.20"}).status_code == 403
+    assert c.get("/__ping").get_json()["ok"] is True

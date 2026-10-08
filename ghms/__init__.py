@@ -5,7 +5,7 @@ from flask import Flask, g
 
 from . import db
 
-VERSION = "0.1.0"
+VERSION = "1.0.0"
 
 
 def _secret_key(instance_path):
@@ -18,7 +18,9 @@ def _secret_key(instance_path):
 
 
 def create_app(test_config=None):
-    data_dir = os.environ.get("GHMS_DATA_DIR") or os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+    from .runtime import data_dir as _data_dir
+
+    data_dir = _data_dir()
     app = Flask(__name__, instance_path=os.path.abspath(data_dir))
     os.makedirs(app.instance_path, exist_ok=True)
     app.config.update(
@@ -33,7 +35,7 @@ def create_app(test_config=None):
     db.init_db(app.config["DATABASE"])
     app.teardown_appcontext(db.close_db)
 
-    from . import absences, auth, billing, crud, shift, views
+    from . import absences, auth, billing, crud, shift, updater, views
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(crud.bp)
@@ -41,6 +43,7 @@ def create_app(test_config=None):
     app.register_blueprint(billing.bp)
     app.register_blueprint(shift.bp)
     app.register_blueprint(absences.bp)
+    app.register_blueprint(updater.bp)
     auth.install(app)
 
     from .entities import ENTITIES, GROUP_ICONS, GROUPS

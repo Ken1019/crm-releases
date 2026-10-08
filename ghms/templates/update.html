@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block title %}ソフトの更新{% endblock %}
+{% block content %}
+<h1>⬆️ ソフトの更新</h1>
+<div class="tiles">
+  <div class="tile"><b>{{ version }}</b><span>いま使っている版</span></div>
+  <div class="tile"><b>{{ latest['version'] if latest else '—' }}</b><span>新しい版</span></div>
+  <div class="tile"><b class="small">{{ checked_at or 'まだ確認していません' }}</b><span>最後に確認した日時</span></div>
+</div>
+
+{% if latest %}
+<section class="card">
+  <h2>🎁 新しい版 {{ latest['version'] }} があります{% if latest.get('date') %} <small class="muted">（{{ latest['date'] }}）</small>{% endif %}</h2>
+  {% if latest.get('notes') %}<div class="pre notes">{{ latest['notes'] }}</div>{% endif %}
+  {% if not installed %}
+    <p class="guide">この版はインストーラーで入れたものではないため、自動では更新できません。新しいインストーラーで入れ直してください（データはそのまま使えます）。</p>
+  {% elif not local %}
+    <p class="guide">更新は、システムを動かしている<b>サーバーのPC</b>の画面から行ってください（Windowsの確認画面がそのPCに出るためです）。</p>
+  {% else %}
+  <form method="post" onsubmit="return confirm('更新を始めます。数分のあいだシステムが使えなくなります。よろしいですか？')">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="install">
+    <ol class="steps-mini">
+      <li>新しい版をダウンロードし、改ざん・破損がないか確認します</li>
+      <li>念のため、データをバックアップします</li>
+      <li>Windowsの確認画面が出たら「はい」を押してください</li>
+      <li>1〜2分で新しい版が自動で起動します</li>
+    </ol>
+    <button class="btn primary big">⬆️ 今すぐ更新する</button>
+  </form>
+  <p class="muted small">職員が入力中でないときに行ってください。</p>
+  {% endif %}
+</section>
+{% else %}
+<section class="card">
+  {% if error %}<p class="flash error">前回の確認では更新情報を取得できませんでした（インターネットの接続を確認してください）。</p>
+  {% else %}<p class="allgood">✔ 最新の版を使っています。</p>{% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="actions">
+    <form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="check">
+      <button class="btn">🔄 更新を確認する</button></form>
+    <form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="auto">
+      <label class="check"><input type="checkbox" name="on" value="1"{% if auto %} checked{% endif %} onchange="this.form.submit()"> 1日1回、自動で新しい版を確認する</label></form>
+  </div>
+  <p class="muted small">確認で送るのはソフトの版の番号だけです。入居者などのデータが外に送られることはありません。データの保存場所：{{ data_dir }}</p>
+</section>
+{% endblock %}
