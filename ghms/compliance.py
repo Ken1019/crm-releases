@@ -31,6 +31,7 @@ CHECKS = [
     ("staff_info", "職員の情報（勤務体制の書類）", "職種・雇用形態・週の勤務時間がそろっているか（勤務形態一覧表・常勤換算）", None),
     ("timecard", "タイムカードの退勤忘れ", "勤務の実績（出勤簿）に抜けがないか", "timecard"),
     ("shift_match", "勤務表とタイムカードのちがい", "勤務表（勤務形態一覧表）と実際の勤務（出勤簿）が合っているか。人員配置・夜間支援の体制の根拠", "timecard"),
+    ("leave5", "有給の年5日の取得", "10日以上付与した職員が、付与から1年以内に5日取っているか（労働基準法39条7項）", "timecard"),
     ("health", "職員の体調", "37.5℃以上・体調不良で出勤した職員がいないか（感染症対策）", "timecard"),
     ("payroll", "給与の確定", "先月の給与が確定しているか", "payroll"),
 ]
@@ -219,6 +220,17 @@ def run_checks(staff_id=None):
                 items.append(_item("warn", "shift_match", s["name"], msg,
                                    url_for("work.timecards", ym=latest.strftime("%Y-%m"), staff_id=s["id"]) if not staff_id
                                    else url_for("work.timecards", ym=latest.strftime("%Y-%m"))))
+    if on("leave5"):
+        from .leave import my_balance
+
+        for s in staff_rows:
+            b = my_balance(s["id"])
+            for f in (b or {}).get("five", []):
+                left = (f["deadline"] - today).days
+                if f["took"] < 5 and f["grant"] <= today and left <= 120:
+                    items.append(_item("ng" if left < 0 else "warn", "leave5", s["name"],
+                                       f"{f['grant']}付与の有給：{f['deadline']}までに5日のうち {f['took']}日" + ("（期限切れ）" if left < 0 else f"（あと{left}日）"),
+                                       url_for("leave.staff", sid=s["id"]) if not staff_id else url_for("work.my_shift")))
     if on("health") and not staff_id:
         from .work import is_unwell
 

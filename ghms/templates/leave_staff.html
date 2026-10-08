@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}有給休暇 {{ s['name'] }}{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('leave.index') }}">◀ 有給休暇の一覧へ</a></p>
+<h1>🌴 {{ s['name'] }} さんの有給休暇</h1>
+<p class="guide">残り <b>{{ b.remaining|round(1) }}日</b>{% if b.next %}・次の付与 {{ b.next }}{% endif %}。入職日 {{ s['hire_date'] or '未入力' }}・週の勤務時間 {{ s['weekly_hours'] or '未入力' }}・有給の区分 {{ s['leave_class'] or '通常' }}</p>
+{% if b.unassigned %}<p class="flash error">付与の残りがないのに「有」になっている日があります：{{ b.unassigned|join('、') }}</p>{% endif %}
+<form method="post" class="card"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="save">
+  <h2>付与</h2>
+  <div class="tablewrap"><table class="list">
+    <thead><tr><th>付与日</th><th>日数</th><th>使った</th><th>残り</th><th>時効</th><th>決め方</th><th>消す</th></tr></thead>
+    {% for gr in b.grants %}<tr><td>{{ gr.grant_date }}</td><td><input type="number" name="days_{{ gr.id }}" value="{{ gr.days }}" step="0.5" min="0" class="w5"></td>
+      <td>{{ gr.used }}</td><td><b>{{ (gr.days or 0) - gr.used }}</b></td><td>{{ gr.expires }}</td><td class="small muted">{{ gr.basis or '' }}</td>
+      <td><input type="checkbox" name="del_{{ gr.id }}" value="1" aria-label="消す"></td></tr>
+    {% else %}<tr><td colspan="7" class="empty">まだ付与はありません（入職から6か月で最初の付与）。</td></tr>{% endfor %}
+  </table></div>
+  <div class="actions"><button class="btn primary">💾 保存する</button></div>
+</form>
+<form method="post" class="form card"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="add">
+  <h2 class="wide">＋ 付与を足す（前のソフトからの残り・特別な付与など）</h2>
+  <label><span>付与日（この日から2年で時効）</span><input type="date" name="grant_date" required></label>
+  <label><span>日数</span><input type="number" name="days" step="0.5" min="0" class="w5" required></label>
+  <label class="wide"><span>メモ</span><input name="basis" placeholder="例：前の給与ソフトからの繰り越し"></label>
+  <div class="actions wide"><button class="btn">＋ 足す</button></div>
+</form>
+<section class="card"><h2>取った日（勤務表の「有」）</h2>
+  <p>{% for d in taken %}{{ d.strftime('%Y/%m/%d') }}{% if not loop.last %}、{% endif %}{% else %}まだありません。{% endfor %}</p>
+  <p class="muted small">有給を入れるときは「職員のこと → 勤務表」でその日を「有」にしてください。</p></section>
+{% endblock %}

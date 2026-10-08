@@ -99,7 +99,7 @@ HUBS = [
     {
         "key": "work", "icon": "⏰", "title": "勤怠・給与", "desc": "出勤・退勤・体温・タイムカード・給与明細", "staff_menu": True,
         "entities": [], "endpoints": ["work.clock", "work.timecards", "work.health", "payroll.index", "payroll.edit",
-                                      "payroll.mine", "payroll.settings", "work.my_shift"],
+                                      "payroll.mine", "payroll.settings", "work.my_shift", "leave.index", "leave.staff"],
         "tasks": [
             ("出勤・退勤を打刻する", "出勤のときに体温と体調も記録します", lambda: url_for("work.clock"), False),
             ("自分の勤務表（シフト）を見る", "管理者が組んだ勤務。見るだけ", lambda: url_for("work.my_shift"), "staff"),
@@ -108,6 +108,7 @@ HUBS = [
             ("自分の給与明細を見る", "管理者が見せた月だけ出ます", lambda: url_for("payroll.mine"), "staff"),
             ("職員のタイムカードを見る・直す", "打刻のまちがい・退勤忘れを直す。出勤簿をExcelで", lambda: url_for("work.timecards"), True),
             ("今日の職員の体温を見る", "37.5℃以上・体調不良の人が上に出ます", lambda: url_for("work.health"), True),
+            ("有給の残り・付与を見る", "勤続年数と出勤日数から自動で付与。年5日の取得もチェック", lambda: url_for("leave.index"), True),
             ("給与を計算する・明細を出す", "タイムカードから自動計算。直して確定・職員に見せる", lambda: url_for("payroll.index"), True),
             ("賃金台帳をExcelで出す", "1年分・職員ごと", lambda: url_for("payroll.ledger"), True),
             ("給与・保険料率の設定", "所定労働時間・割増・保険料率・勤務の上限", lambda: url_for("payroll.settings"), True),

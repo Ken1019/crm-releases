@@ -3,10 +3,16 @@
 {% block content %}
 <h1>⚙️ 給与・タイムカードの設定</h1>
 <p class="guide">保険料率は毎年変わります（健康保険・介護保険は毎年3月、雇用保険は4月など）。協会けんぽ・ハローワークのお知らせで確かめて直してください。所得税は概算です。</p>
+<form method="post" class="filters card">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="prefecture">
+  <label>都道府県 <select name="prefecture">{% for p in PREFECTURES %}<option{% if p == (prefecture or '北海道') %} selected{% endif %}>{{ p }}</option>{% endfor %}</select></label>
+  <button class="btn">この都道府県の保険料率を入れる（{{ RATE_YEAR }}）</button>
+  <span class="muted small">健康保険（協会けんぽ）・介護保険・子ども・子育て支援金の料率が入ります。健康保険組合に入っている事業所は、組合の料率を下に入れてください。</span>
+</form>
 <form method="post" class="form card">
   <input type="hidden" name="_csrf" value="{{ csrf_token }}">
   {% for k, label, d, help in PAY_SETTINGS %}
-  <label><span>{{ label }}</span>{% if k == 'pay_yakin_mode' %}<select name="{{ k }}">{% for o in ['1回いくら', '時間で計算'] %}<option{% if values[k] == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+  <label><span>{{ label }}</span>{% if k in ('pay_yakin_mode', 'pay_leave_method') %}<select name="{{ k }}">{% for o in (['1回いくら', '時間で計算'] if k == 'pay_yakin_mode' else ['平均賃金', '通常の賃金']) %}<option{% if values[k] == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>
     {% else %}<input name="{{ k }}" value="{{ values[k] }}" placeholder="{{ d }}">{% endif %}{% if help %}<small class="muted">{{ help }}</small>{% endif %}</label>
   {% endfor %}
   <label class="chip wide"><input type="checkbox" name="pay_health_required" value="1"{% if health_required %} checked{% endif %}> 出勤のとき体温の入力を必ずにする</label>

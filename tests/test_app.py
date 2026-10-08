@@ -962,3 +962,39 @@ def test_shift_view_for_staff_and_differences(client, app):
     post(client, "/shift/", {"ym": t.strftime("%Y-%m"), f"s1_{t.day}": "夜"})
     home = staff.get("/").get_data(as_text=True)
     assert "自分の勤務（これから2週間）" in home and "夜勤" in home
+
+
+def test_paid_leave_grants_balance_and_pay(client, app):
+    post(client, "/m/staff/new", {"name": "佐藤 一郎", "status": "在籍", "hire_date": "2025-03-01", "weekly_hours": "40",
+                                  "pay_type": "月給", "base_salary": "220000"})
+    post(client, "/m/staff/new", {"name": "田中 恵", "status": "在籍", "hire_date": "2026-01-15", "weekly_hours": "20",
+                                  "pay_type": "時給", "hourly_wage": "1100"})
+    # 田中さん：入職から6か月、週3日ペースで出勤（タイムカード）
+    from datetime import date as _d, timedelta as _td
+
+    with app.app_context():
+        from ghms.db import get_db
+        db = get_db()
+        d = _d(2026, 1, 15)
+        while d < _d(2026, 8, 31):
+            if d.weekday() in (0, 2, 4):
+                db.execute("INSERT INTO timecards (staff_id, date, clock_in, clock_out, break_min) VALUES (2, ?, '09:00', '13:00', 0)",
+                           (d.isoformat(),))
+            d += _td(days=1)
+        db.commit()
+    # 勤務表で有給：佐藤さん 9/10・9/11、田中さん 8/3
+    post(client, "/shift/", {"ym": "2026-09", "s1_10": "有", "s1_11": "有"})
+    post(client, "/shift/", {"ym": "2026-08", "s2_3": "有"})
+    page = client.get("/leave/").get_data(as_text=True)
+    assert "19.0日" in page            # 佐藤：2025/9/1 に10日＋2026/9/1 に11日 − 2日
+    page = client.get("/leave/2").get_data(as_text=True)
+    assert "2026-07-15" in page and "週3日相当" in page and 'value="5.0"' in page
+    # 時給の人は有給の日に賃金（平均賃金）。月給の人は基本給のまま
+    page = client.get("/payroll/2/2026-08").get_data(as_text=True)
+    assert "有給休暇の賃金" in page and 'name="e_leave" value="0"' not in page
+    assert 'name="e_leave" value="0"' in client.get("/payroll/1/2026-09").get_data(as_text=True)
+    # 年5日：最初の付与（2025/9/1）から1年で0日 → 実地指導チェックに出る
+    assert "5日のうち 0日" in client.get("/compliance/").get_data(as_text=True)
+    # 付与を直す・足す
+    post(client, "/leave/1", {"action": "add", "grant_date": "2025-04-01", "days": "3", "basis": "前のソフトからの繰り越し"})
+    assert "前のソフトからの繰り越し" in client.get("/leave/1").get_data(as_text=True)

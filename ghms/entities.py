@@ -33,6 +33,7 @@ ACTIVITY_KIND = ["外出", "誕生日会", "バーベキュー", "季節の行�
 SHOGU_CATEGORY = ["Ⅰ", "Ⅱ", "Ⅲ", "Ⅳ"]
 PAY_METHOD = ["基本給", "手当（毎月）", "賞与・一時金"]
 PAY_TYPE = ["月給", "時給", "日給"]
+LEAVE_CLASS = ["通常（週5日以上・週30時間以上）", "週4日", "週3日", "週2日", "週1日"]
 COMMUTE_TYPE = ["支給しない", "毎月定額", "1日あたり×出勤日数"]
 EXPENSE_KIND = ["家賃・地代", "水道光熱費", "食材費", "日用品・消耗品", "車両・ガソリン", "修繕費", "通信費", "保険料", "研修費", "委託料", "その他"]
 PLAN_STATUS = ["作成中", "同意済", "モニタリング済", "終了"]
@@ -351,6 +352,8 @@ ENTITIES = {
             F("social_insurance", "社会保険（健康保険・厚生年金）に加入", "check", list=False),
             F("std_monthly", "標準報酬月額（円）", "number", list=False, help="空欄なら毎月の総支給額で計算します（概算）"),
             F("employment_insurance", "雇用保険に加入", "check", list=False),
+            F("leave_class", "有給の区分（タイムカードが3か月分ないとき）", "select", options=LEAVE_CLASS, default=LEAVE_CLASS[0], list=False,
+              help="有給の日数はタイムカードの出勤日数から自動で決めます。記録が少ないあいだだけ、この区分を使います"),
         ],
     },
     "trainings": {

@@ -509,5 +509,8 @@ def my_shift():
     rows = [{"d": d, "w": WEEK[d.weekday()], "code": plan.get(d.isoformat(), ""), "t": tmap.get(plan.get(d.isoformat(), ""))}
             for d in month_days(first, last)]
     hours = sum((r["t"]["hours"] or 0) for r in rows if r["t"])
+    from .leave import my_balance
+
     return render_template("work_my_shift.html", rows=rows, first=first, ym=first.strftime("%Y-%m"), linked=bool(sid),
+                           leave=my_balance(sid) if sid else None,
                            hours=hours, today=date.today(), types=list(tmap.values()))

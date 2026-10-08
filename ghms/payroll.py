@@ -29,16 +29,18 @@ PAY_SETTINGS = [
     ("pay_ot_rate", "時間外の割増（%）", "25", "1日8時間をこえた分"),
     ("pay_yakin_mode", "夜勤の払い方", "1回いくら", "「1回いくら」：夜勤は深夜手当もふくめて1回の金額だけ払う（時給・時間外・深夜の計算に入れない）／「時間で計算」：時給などで計算し、夜勤手当を上乗せ"),
     ("pay_yakin_flat", "夜勤1回の金額（円）", "10000", "職員の情報の「夜勤手当（1回）」が空欄の人に使います"),
-    ("pay_min_wage", "最低賃金（時間額・円）", "1075", "北海道 令和7年10月からの例。夜勤1回の金額が最低賃金と割増を下回らないかの確認に使います。0にすると確認しません（宿直の許可を受けている場合など）"),
+    ("pay_min_wage", "最低賃金（時間額・円）", "1131", "北海道 令和8年10月1日からの例（答申額）。都道府県・年度で変わるので厚生労働省・労働局の発表で確認してください。夜勤1回の金額が最低賃金と割増を下回らないかの確認に使います。0にすると確認しません（宿直の許可を受けている場合など）"),
     ("pay_night_start", "深夜手当の時間帯（はじまり）", "22:00", "法律の深夜割増は22時〜翌5時。それより広くするのはかまいません"),
     ("pay_night_end", "深夜手当の時間帯（おわり）", "09:00", "例：09:00（翌朝9時まで）。就業規則・賃金規程と同じにしてください"),
     ("pay_night_rate", "深夜の割増（%）", "25", "上の時間帯に働いた分"),
     ("pay_break_default", "休憩の目安（分）", "60", "6時間をこえる勤務で退勤するときの初期値"),
     ("pay_max_shift_hours", "1回の勤務の上限（時間）", "20", "これをこえると退勤を押せず「退勤忘れ」として管理者が直します（夜勤に合わせて）"),
     ("pay_fever", "体温のお知らせ（℃以上）", "37.5", ""),
+    ("pay_leave_method", "有給1日分の賃金（時給・日給の人）", "平均賃金", "「平均賃金」：直近3か月の賃金÷暦日数（最低保障は÷労働日数×60%）／「通常の賃金」：時給×1日の所定時間、日給。就業規則に合わせてください"),
     ("pay_late_grace", "遅刻・早退とみなすずれ（分）", "10", "勤務表の時刻とタイムカードがこの分数よりずれたら、タイムカードと実地指導チェックに出します"),
-    ("ins_health", "健康保険料率（%・労使合計）", "10.31", "協会けんぽ北海道 令和7年度の例。毎年3月に変わるので確認してください"),
-    ("ins_care", "介護保険料率（%・労使合計）", "1.59", "40〜64歳の人だけ"),
+    ("ins_health", "健康保険料率（%・労使合計）", "10.28", "協会けんぽ北海道 令和8年度の例。上の「都道府県」をえらぶと入ります。毎年3月に変わるので確認してください"),
+    ("ins_care", "介護保険料率（%・労使合計）", "1.62", "40〜64歳の人だけ。令和8年度・全国一律"),
+    ("ins_kodomo", "子ども・子育て支援金率（%・労使合計）", "0.23", "令和8年4月分の保険料から（5月の給与から引く）。社会保険に入っている人"),
     ("ins_pension", "厚生年金保険料率（%・労使合計）", "18.3", ""),
     ("ins_emp_ee", "雇用保険料率（%・本人）", "0.55", "令和7年度・一般の事業の例"),
     ("ins_emp_er", "雇用保険料率（%・事業所）", "0.9", ""),
@@ -48,10 +50,10 @@ PAY_SETTINGS = [
 ]
 
 EARNINGS = [("base", "基本給"), ("ot", "時間外手当"), ("night", "深夜手当"), ("yakin", "夜勤手当"), ("qual", "資格手当"),
-            ("shogu", "処遇改善手当"), ("other", "その他手当"), ("commute", "交通費（非課税）")]
-DEDUCTIONS = [("health", "健康保険"), ("care", "介護保険"), ("pension", "厚生年金"), ("emp", "雇用保険"),
+            ("shogu", "処遇改善手当"), ("other", "その他手当"), ("leave", "有給休暇の賃金"), ("commute", "交通費（非課税）")]
+DEDUCTIONS = [("health", "健康保険"), ("care", "介護保険"), ("kodomo", "子ども・子育て支援金"), ("pension", "厚生年金"), ("emp", "雇用保険"),
               ("itax", "所得税"), ("rtax", "住民税"), ("other_ded", "その他控除")]
-WORK_ITEMS = [("days", "出勤日数", "日"), ("hours", "実働時間", ""), ("ot_h", "時間外", ""), ("night_h", "深夜", ""), ("yakin_n", "夜勤", "回")]
+WORK_ITEMS = [("days", "出勤日数", "日"), ("hours", "実働時間", ""), ("ot_h", "時間外", ""), ("night_h", "深夜", ""), ("yakin_n", "夜勤", "回"), ("leave_n", "有給", "日")]
 
 
 def pset(key):
@@ -124,9 +126,12 @@ def shogu_monthly(staff_id, first):
     return int(row[0] or 0)
 
 
-def compute_pay(s, first, last, earnings=None):
+def compute_pay(s, first, last, earnings=None, leave=True):
     """1人1か月分。earnings を渡すと、その支給額から保険料・税を計算しなおす"""
     sm = month_summary(s["id"], first, last)
+    from .leave import leave_day_pay, leave_days_in
+
+    leave_n = leave_days_in(s["id"], first, last)
     hours, over_h, night_h = sm["total"] / 60, sm["over"] / 60, sm["night"] / 60
     flat = (get_setting("pay_yakin_mode", pset("pay_yakin_mode")) or "").startswith("1回")
     per_yakin = int(s["night_allowance"] or setting_num("pay_yakin_flat", pset("pay_yakin_flat"))) if flat else int(s["night_allowance"] or 0)
@@ -157,11 +162,12 @@ def compute_pay(s, first, last, earnings=None):
         commute = (s["commute"] or 0) if ctype == "毎月定額" else (s["commute"] or 0) * sm["days"] if ctype.startswith("1日") else 0
         earnings = {"base": base, "ot": round(unit * over_h * ot_factor), "night": round(unit * night_h * rate("pay_night_rate")),
                     "yakin": per_yakin * sm["yakin"], "qual": int(s["allowance_qual"] or 0),
-                    "shogu": shogu_monthly(s["id"], first), "other": int(s["allowance_other"] or 0), "commute": int(commute)}
+                    "shogu": shogu_monthly(s["id"], first), "other": int(s["allowance_other"] or 0), "commute": int(commute),
+                    "leave": leave_n * leave_day_pay(s, first) if leave and leave_n else 0}
     gross = sum(int(earnings.get(k) or 0) for k, _ in EARNINGS)
     commute = int(earnings.get("commute") or 0)
     ded = {k: 0 for k, _ in DEDUCTIONS}
-    er = {"health": 0, "care": 0, "pension": 0, "emp": 0, "child": 0, "rosai": round((gross - commute) * rate("ins_rosai"))}
+    er = {"health": 0, "care": 0, "kodomo": 0, "pension": 0, "emp": 0, "child": 0, "rosai": round((gross - commute) * rate("ins_rosai"))}
     if s["social_insurance"]:
         std = s["std_monthly"] or (gross - commute)
         ded["health"] = half_down(std * rate("ins_health") / 2)
@@ -169,16 +175,20 @@ def compute_pay(s, first, last, earnings=None):
         if age is not None and 40 <= age < 65:
             ded["care"] = half_down(std * rate("ins_care") / 2)
         ded["pension"] = half_down(std * rate("ins_pension") / 2)
-        er.update(health=ded["health"], care=ded["care"], pension=ded["pension"], child=round(std * rate("ins_child")))
+        if (first.year, first.month) >= (2026, 5):  # 4月分の保険料（5月の給与）から
+            ded["kodomo"] = half_down(std * rate("ins_kodomo") / 2)
+        er.update(health=ded["health"], care=ded["care"], pension=ded["pension"], kodomo=ded["kodomo"],
+                  child=round(std * rate("ins_child")))
     if s["employment_insurance"]:
         ded["emp"] = half_down(gross * rate("ins_emp_ee"))
         er["emp"] = round(gross * rate("ins_emp_er"))
-    social = ded["health"] + ded["care"] + ded["pension"] + ded["emp"]
+    social = ded["health"] + ded["care"] + ded["kodomo"] + ded["pension"] + ded["emp"]
     ded["itax"] = income_tax(gross - commute - social, s["dependents"], first.year)
     ded["rtax"] = int(s["resident_tax"] or 0)
     total_ded = sum(ded.values())
     return {"earnings": {k: int(earnings.get(k) or 0) for k, _ in EARNINGS}, "deductions": ded,
-            "work": {"days": sm["days"], "hours": sm["total"], "ot_h": sm["over"], "night_h": sm["night"], "yakin_n": sm["yakin"]},
+            "work": {"days": sm["days"], "hours": sm["total"], "ot_h": sm["over"], "night_h": sm["night"], "yakin_n": sm["yakin"],
+                     "leave_n": leave_n},
             "missing": sm["missing"], "warnings": warnings, "gross": gross, "total_ded": total_ded, "net": gross - total_ded,
             "employer": er, "employer_total": sum(er.values()), "pay_type": pt, "unit": round(unit)}
 
@@ -195,6 +205,10 @@ def load_slip(staff_id, ym):
     if not row:
         return None
     data = json.loads(row["data"])
+    for k, _ in EARNINGS:
+        data.setdefault("earnings", {}).setdefault(k, 0)
+    for k, _, _ in WORK_ITEMS:
+        data.setdefault("work", {}).setdefault(k, 0)
     data.update(status=row["status"], updated_by=row["updated_by"], updated_at=row["updated_at"])
     return data
 
@@ -379,6 +393,15 @@ def ledger():
 @bp.route("/settings", methods=["GET", "POST"])
 @admin_required
 def settings():
+    if request.method == "POST" and request.form.get("action") == "prefecture":
+        from .presets import apply_prefecture
+
+        done = apply_prefecture(request.form.get("prefecture"), set_setting)
+        log_event("settings", "payroll", None, f"都道府県 {request.form.get('prefecture')}")
+        get_db().commit()
+        flash("入れました：" + "、".join(done) + "。最低賃金は都道府県の発表を見て入れてください。" if done else "都道府県をえらんでください。",
+              "ok" if done else "error")
+        return redirect(url_for("payroll.settings"))
     if request.method == "POST":
         for k, _, d, _ in PAY_SETTINGS:
             v = (request.form.get(k) or "").strip()
@@ -389,7 +412,10 @@ def settings():
         flash("給与の設定を保存しました。", "ok")
         return redirect(url_for("payroll.settings"))
     values = {k: get_setting(k, d) for k, _, d, _ in PAY_SETTINGS}
-    return render_template("payroll_settings.html", PAY_SETTINGS=PAY_SETTINGS, values=values,
+    from .presets import PREFECTURES, RATE_YEAR
+
+    return render_template("payroll_settings.html", PAY_SETTINGS=PAY_SETTINGS, values=values, PREFECTURES=PREFECTURES,
+                           RATE_YEAR=RATE_YEAR, prefecture=get_setting("prefecture", ""),
                            health_required=get_setting("pay_health_required", "1") == "1")
 
 

@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}有給休暇{% endblock %}
+{% block content %}
+<h1>🌴 有給休暇</h1>
+<p class="guide">入職日から自動で付与しています（6か月で最初の付与、その後1年ごと）。日数は勤続年数と、前の期間のタイムカードの出勤日数から決めます。取った日は勤務表の「有」です。古い付与から使い、2年で時効になります。名前を押すと付与の日数を直したり、前のソフトからの残りを足したりできます。</p>
+<div class="tablewrap card"><table class="list">
+  <thead><tr><th>職員</th><th>入職日</th><th class="num">残り</th><th class="num">3か月以内に時効</th><th class="num">これまで取った日</th><th>次の付与</th><th>年5日</th></tr></thead>
+  {% for r in rows %}{% set b = r.b %}
+  <tr><td><a href="{{ url_for('leave.staff', sid=r.s['id']) }}"><b>{{ r.s['name'] }}</b></a></td><td>{{ r.s['hire_date'] or '（入職日が未入力）' }}</td>
+    <td class="num"><b>{{ b.remaining|round(1) }}日</b></td><td class="num">{% if b.expiring %}<span class="pill warn">{{ b.expiring|round(1) }}日</span>{% endif %}</td>
+    <td class="num">{{ b.taken }}日</td><td>{{ b.next or '' }}</td>
+    <td>{% for f in b.five[-1:] %}{% if f.took >= 5 %}<span class="pill ok">{{ f.took }}/5日</span>{% elif f.deadline < today %}<span class="pill ng">{{ f.took }}/5日（期限切れ）</span>{% else %}<span class="pill warn">{{ f.took }}/5日（{{ f.deadline }}まで）</span>{% endif %}{% endfor %}</td></tr>
+  {% else %}<tr><td colspan="7" class="empty">職員が登録されていません。</td></tr>{% endfor %}
+</table></div>
+<p class="muted small">出勤率8割の要件は自動では見ていません。満たさない人は、名前を押して付与の日数を0にしてください。</p>
+{% endblock %}

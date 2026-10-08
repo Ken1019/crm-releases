@@ -6,6 +6,7 @@
 {% else %}
 <form method="get" class="filters card"><input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
   <span class="muted">勤務表は管理者が組みます（見るだけ）。この月の予定 {{ hours|round(1) }}時間</span></form>
+{% if leave %}<p class="guide">🌴 有給の残り <b>{{ leave.remaining|round(1) }}日</b>{% if leave.expiring %}（3か月以内に時効 {{ leave.expiring|round(1) }}日）{% endif %}{% if leave.next %}・次の付与 {{ leave.next }}{% endif %}。有給を取りたいときは管理者に伝えてください（勤務表に「有」が入ります）。</p>{% endif %}
 <div class="tablewrap card"><table class="list">
   <thead><tr><th>日</th><th>勤務</th><th>時間</th></tr></thead>
   {% for r in rows %}<tr class="{{ 'sat' if r.d.weekday() == 5 else 'sun' if r.d.weekday() == 6 }}{{ ' today' if r.d == today }}">

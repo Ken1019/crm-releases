@@ -82,7 +82,9 @@ def init_db(path):
                 " temp REAL, symptoms TEXT, note TEXT, updated_by TEXT, updated_at TEXT)")
     con.execute("CREATE TABLE IF NOT EXISTS payslips (staff_id INTEGER, ym TEXT, data TEXT, gross INTEGER, deductions INTEGER,"
                 " net INTEGER, status TEXT, updated_by TEXT, updated_at TEXT, PRIMARY KEY (staff_id, ym))")
-    _ensure_columns(con, "users", {"staff_id": "INTEGER"})  # ログインする人と職員の情報をつなぐ
+    _ensure_columns(con, "users", {"staff_id": "INTEGER"})
+    con.execute("CREATE TABLE IF NOT EXISTS leave_grants (id INTEGER PRIMARY KEY, staff_id INTEGER, grant_date TEXT, days REAL,"
+                " basis TEXT, auto INTEGER, updated_by TEXT, updated_at TEXT)")  # ログインする人と職員の情報をつなぐ
     # 事業所ごとのカスタマイズ（選択肢・独自の項目）
     con.execute("CREATE TABLE IF NOT EXISTS choice_options (field TEXT, value TEXT, sort INTEGER, active INTEGER DEFAULT 1,"
                 " track_days INTEGER, PRIMARY KEY (field, value))")
