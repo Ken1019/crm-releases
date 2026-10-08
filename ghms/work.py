@@ -19,7 +19,6 @@ bp = Blueprint("work", __name__, url_prefix="/work")
 
 SYMPTOMS = ["せき", "のどの痛み", "鼻水", "だるさ", "頭痛", "下痢", "吐き気・おう吐", "味やにおいがわかりにくい"]
 WEEK = "月火水木金土日"
-NIGHT_WINDOWS = [(-120, 300), (1320, 1740), (2760, 3180)]  # 22時〜翌5時（分。出勤日の0時が0）
 
 
 def setting_num(key, default):
@@ -33,6 +32,26 @@ def fever_line():
     return setting_num("pay_fever", 37.5)
 
 
+def night_band():
+    """深夜手当の時間帯（設定。初期は22時〜翌9時。法律の深夜割増は22時〜翌5時で、それより広くするのはよい）"""
+    s = _min(get_setting("pay_night_start", "22:00"))
+    e = _min(get_setting("pay_night_end", "09:00"))
+    return (22 * 60 if s is None else s), (9 * 60 if e is None else e)
+
+
+def night_windows():
+    """出勤日の0時を0とした分で、深夜の時間帯を前の日〜翌々日の分まで並べる"""
+    s, e = night_band()
+    if e <= s:
+        return [(k * 1440 + s, (k + 1) * 1440 + e) for k in (-1, 0, 1)]
+    return [(k * 1440 + s, k * 1440 + e) for k in (0, 1, 2)]
+
+
+def night_label():
+    s, e = night_band()
+    return f"{s // 60}時{f'{s % 60}分' if s % 60 else ''}〜{'翌' if e <= s else ''}{e // 60}時{f'{e % 60}分' if e % 60 else ''}"
+
+
 def _min(hhmm):
     try:
         h, m = (hhmm or "").split(":")[:2]
@@ -42,7 +61,7 @@ def _min(hhmm):
 
 
 def work_minutes(card):
-    """1回の勤務の 実働・残業（1日8時間をこえた分）・深夜（22〜5時）・夜勤かどうか"""
+    """1回の勤務の 実働・残業（1日8時間をこえた分）・深夜（設定の時間帯）・夜勤かどうか"""
     start, end = _min(card["clock_in"]), _min(card["clock_out"])
     if start is None or end is None:
         return None
@@ -50,7 +69,7 @@ def work_minutes(card):
         end += 1440
     brk = card["break_min"] or 0
     total = max(0, end - start - brk)
-    night = sum(max(0, min(end, b) - max(start, a)) for a, b in NIGHT_WINDOWS)
+    night = sum(max(0, min(end, b) - max(start, a)) for a, b in night_windows())
     return {"total": total, "over": max(0, total - 480), "night": max(0, night), "yakin": end > 1440 or night >= 240}
 
 
@@ -329,7 +348,8 @@ def timecards():
             cs = by_day.get(d.isoformat(), [])
             rows.append({"d": d, "cards": [{"c": c, "w": work_minutes(c)} for c in cs], "health": temps.get(d.isoformat())})
     return render_template("work_timecards.html", staff=staff, staff_list=staff_list, rows=rows, ym=ym, first=first, WEEK=WEEK,
-                           hm=hm, summary=month_summary(sid, first, last) if staff else None, admin=admin, fever=fever_line())
+                           hm=hm, summary=month_summary(sid, first, last) if staff else None, admin=admin, fever=fever_line(),
+                           night_label=night_label())
 
 
 @bp.route("/timecards.xlsx")

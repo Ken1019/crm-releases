@@ -865,9 +865,13 @@ def test_timecard_kiosk_and_payroll(client, app):
                                     "in_new_2": "09:00", "out_new_2": "18:30", "br_new_2": "60"})
     page = admin.get("/work/timecards?ym=2026-10&staff_id=1").get_data(as_text=True)
     assert "23:30" in page and "夜勤 1回" in page
-    # 時給1200円：基本 28,200＋時間外(7.5h×25%) 2,250＋深夜(7h×25%) 2,100＋夜勤 5,000＋交通費 600 ＝ 38,150、雇用保険 210
+    # 時給1200円：基本 28,200＋時間外(7.5h×25%) 2,250＋深夜(22〜翌9時の11h×25%) 3,300＋夜勤 5,000＋交通費 600 ＝ 39,350、雇用保険 216
     page = admin.get("/payroll/?ym=2026-10").get_data(as_text=True)
-    assert "38,150" in page and "37,940" in page
+    assert "39,350" in page and "39,134" in page
+    # 深夜を法律どおり22〜翌5時にすると 7h → 2,100
+    post(admin, "/payroll/settings", {"pay_night_start": "22:00", "pay_night_end": "05:00"})
+    assert "38,150" in admin.get("/payroll/?ym=2026-10").get_data(as_text=True)
+    post(admin, "/payroll/settings", {"pay_night_start": "22:00", "pay_night_end": "09:00"})
     post(admin, "/payroll/?ym=2026-10", {"action": "save_all", "ym": "2026-10"})
     form = {f"e_{k}": v for k, v in [("base", 28200), ("ot", 2250), ("night", 2100), ("yakin", 5000), ("qual", 0), ("shogu", 0),
                                      ("other", 3000), ("commute", 600)]}

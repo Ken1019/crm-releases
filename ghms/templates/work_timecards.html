@@ -10,7 +10,7 @@
 </form>
 {% if not staff %}<div class="card"><p>{% if admin %}職員が登録されていません。{% else %}このログインが職員の情報とつながっていません。管理者に連絡してください。{% endif %}</p></div>
 {% else %}
-<p class="guide">{{ staff['name'] }} さん：出勤 <b>{{ summary.days }}</b>日・実働 <b>{{ hm(summary.total) or '0:00' }}</b>・残業 {{ hm(summary.over) or '0:00' }}・深夜（22〜5時） {{ hm(summary.night) or '0:00' }}・夜勤 {{ summary.yakin }}回{% if summary.missing %}・<b style="color:#c00">退勤の打刻がない日 {{ summary.missing }}回</b>{% endif %}
+<p class="guide">{{ staff['name'] }} さん：出勤 <b>{{ summary.days }}</b>日・実働 <b>{{ hm(summary.total) or '0:00' }}</b>・残業 {{ hm(summary.over) or '0:00' }}・深夜（{{ night_label }}） {{ hm(summary.night) or '0:00' }}・夜勤 {{ summary.yakin }}回{% if summary.missing %}・<b style="color:#c00">退勤の打刻がない日 {{ summary.missing }}回</b>{% endif %}
   {% if admin %}<br>打刻のまちがいはこの表で直せます（直した人と日時が記録されます）。打刻がない日は、出勤・退勤を入れると追加できます。{% endif %}</p>
 <form method="post" data-guard>
 <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}"><input type="hidden" name="staff_id" value="{{ staff['id'] }}">
