@@ -276,9 +276,12 @@ pages["/login"] = c.get("/login").get_data(as_text=True)
 pages["/pin/2"] = c.get("/pin/2").get_data(as_text=True)
 
 names = {"/": "p_home.html", "/login": "p_login.html", "/pin/2": "p_pin.html"}
-for i, url in enumerate(u for u in pages if u not in names):
-    slug = re.sub(r"[^a-zA-Z0-9]+", "_", url).strip("_")[:50]
-    names[url] = f"p{i:03d}_{slug}.html"
+import hashlib  # noqa: E402
+
+for url in (u for u in pages if u not in names):
+    # 画面のアドレスだけから決まる名前（画面を足しても他のページの名前が変わらないように）
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", url).strip("_")[:40]
+    names[url] = f"p_{slug}_{hashlib.sha1(url.encode()).hexdigest()[:6]}.html"
 
 INJECT = """
 <div class="demo-bar" title="表示しているのはすべて架空のサンプルデータで、入力しても保存されません">🧪 デモ版（保存されません）<span class="demo-msg" hidden></span></div>
