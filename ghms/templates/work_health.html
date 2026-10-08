@@ -6,7 +6,7 @@
 <p class="guide">出勤のときに入れた体温の記録です。勤務中の体温は「出勤・退勤」の画面から記録できます。</p>
 <div class="tablewrap card"><table class="list">
   <thead><tr><th>日付</th><th>時刻</th><th>体温</th><th>体調</th></tr></thead>
-  {% for h in rows %}<tr><td>{{ h['date'] }}</td><td>{{ h['time'] }}</td><td>{% if (h['temp'] or 0) >= fever %}<span class="pill ng">{{ h['temp'] }}</span>{% else %}{{ h['temp'] or '' }}{% endif %}</td><td>{{ h['symptoms'] or '' }}</td></tr>
+  {% for h in rows %}<tr><td>{{ h['date'] }}</td><td>{{ h['time'] }}</td><td>{% if (h['temp'] or 0) >= fever %}<span class="pill ng">{{ '%.1f'|format(h['temp']) }}</span>{% else %}{{ '%.1f'|format(h['temp']) if h['temp'] else '' }}{% endif %}</td><td>{{ h['symptoms'] or '' }}</td></tr>
   {% else %}<tr><td colspan="4" class="empty">まだ記録がありません。</td></tr>{% endfor %}
 </table></div>
 <div class="actions"><a class="btn primary" href="{{ url_for('work.clock') }}">⏰ 出勤・退勤の画面へ</a></div>
@@ -22,7 +22,7 @@
   {% for x in rows %}{% set bad = x.checks|selectattr('temp')|list %}
   <tr>
     <td><b>{{ x.s['name'] }}</b></td><td>{% if x.on %}<span class="pill ok">出勤</span>{% endif %}</td>
-    <td>{% for h in x.checks %}<span class="{{ 'pill ng' if is_unwell(h) }}">{{ h['time'] }} {{ h['temp'] or '—' }}℃</span> {% else %}{% if x.on %}<span class="pill warn">未記録</span>{% else %}<span class="muted">—</span>{% endif %}{% endfor %}</td>
+    <td>{% for h in x.checks %}<span class="{{ 'pill ng' if is_unwell(h) }}">{{ h['time'] }} {{ '%.1f'|format(h['temp']) if h['temp'] else '—' }}℃</span> {% else %}{% if x.on %}<span class="pill warn">未記録</span>{% else %}<span class="muted">—</span>{% endif %}{% endfor %}</td>
     <td>{% for h in x.checks %}{{ h['symptoms'] }}{% if h['note'] %} {{ h['note'] }}{% endif %} {% endfor %}</td>
   </tr>
   {% endfor %}

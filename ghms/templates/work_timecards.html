@@ -25,7 +25,7 @@
         <td><input type="number" name="br_{{ c['id'] }}" value="{{ c['break_min'] if c['break_min'] is not none else '' }}" min="0" class="w5"></td>
       {% else %}<td>{{ c['clock_in'] }}</td><td>{{ c['clock_out'] or '—' }}</td><td>{{ c['break_min'] or 0 }}</td>{% endif %}
       <td>{{ hm(x.w.total) if x.w else '' }}{% if not c['clock_out'] %}<span class="pill ng">退勤なし</span>{% endif %}</td><td>{{ hm(x.w.over) if x.w else '' }}</td><td>{{ hm(x.w.night) if x.w else '' }}</td>
-      <td>{% if loop.first and r.health %}<span class="{{ 'pill ng' if (r.health['temp'] or 0) >= fever or r.health['symptoms'] }}">{{ r.health['temp'] or '' }}{% if r.health['symptoms'] %} {{ r.health['symptoms'] }}{% endif %}</span>{% endif %}</td>
+      <td>{% if loop.first and r.health %}<span class="{{ 'pill ng' if (r.health['temp'] or 0) >= fever or r.health['symptoms'] }}">{{ '%.1f'|format(r.health['temp']) if r.health['temp'] else '' }}{% if r.health['symptoms'] %} {{ r.health['symptoms'] }}{% endif %}</span>{% endif %}</td>
       <td>{% if admin %}<input name="note_{{ c['id'] }}" value="{{ c['note'] or '' }}">{% else %}{{ c['note'] or '' }}{% endif %}</td>
       {% if admin %}<td><input type="checkbox" name="del_{{ c['id'] }}" value="1" aria-label="消す"></td>{% endif %}
     </tr>

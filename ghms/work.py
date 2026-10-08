@@ -174,6 +174,7 @@ def is_unwell(h):
 
 def _save_health(staff_id, form, username):
     temp = form.get("temp", type=float)
+    temp = round(temp, 1) if temp is not None else None
     symptoms = "、".join(s for s in SYMPTOMS if form.get(f"sym::{s}"))
     if temp is None and not symptoms and not form.get("health_note"):
         return None

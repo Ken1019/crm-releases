@@ -15,13 +15,6 @@
   {% if feature_on('payroll') %}<a href="{{ url_for('payroll.mine') }}"><span class="ic">💴</span><b>自分の給与明細</b><small>見せてもらった月だけ</small></a>{% endif %}
 </div>
 
-{% if comp %}
-<section class="card comp warn">
-  <h2>🔔 書きもれ・受けていない研修（{{ comp|length }}件）</h2>
-  <ul class="todo">{% for x in comp[:10] %}<li><a href="{{ x.url }}"><span class="pill {{ x.level }}">{{ x.name }}</span><span><b>{{ x.who }}</b>：{{ x.msg }}</span><span class="when">▶</span></a></li>{% endfor %}</ul>
-</section>
-{% endif %}
-
 {% if shifts %}
 <section class="card">
   <h2>📅 自分の勤務（これから2週間）</h2>
@@ -31,6 +24,15 @@
   <p><a href="{{ url_for('work.my_shift') }}">月の勤務表を見る</a>　<span class="muted small">勤務表は管理者が組みます。変えたいときは管理者に相談してください。</span></p>
 </section>
 {% endif %}
+
+{% if comp %}
+<section class="card comp warn">
+  <h2>🔔 書きもれ・受けていない研修（{{ comp|length }}件）</h2>
+  <ul class="todo">{% for x in comp[:10] %}<li><a href="{{ x.url }}"><span class="pill {{ x.level }}">{{ x.name }}</span><span><b>{{ x.who }}</b>：{{ x.msg }}</span><span class="when">▶</span></a></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+
 
 <div class="cols">
 <section class="card">
