@@ -31,5 +31,6 @@
 <form method="post" class="actions"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="save_all"><input type="hidden" name="ym" value="{{ ym }}">
   <button class="btn primary">💾 自動計算の人を全員、下書きとして保存する</button>
   <a class="btn" href="{{ url_for('payroll.profit') }}">📊 事業所の収支を見る</a></form>
-<p class="muted small">人件費（総支給＋事業所負担）{{ '{:,}'.format(total.gross + total.employer_total) }}円。給与の締めは月末、時間外は1日8時間をこえた分として計算しています。</p>
+<p class="muted small">人件費（総支給＋事業所負担）{{ '{:,}'.format(total.gross + total.employer_total) }}円。給与の締めは月末、時間外は1日8時間をこえた分として計算しています。
+  <br>週40時間をこえた分の時間外と、変形労働時間制（1か月単位など）は自動では計算していません。当てはまる人は、名前を押して時間外手当を直してください。</p>
 {% endblock %}

@@ -8,9 +8,9 @@
   {% for r in rows %}{% set b = r.b %}
   <tr><td><a href="{{ url_for('leave.staff', sid=r.s['id']) }}"><b>{{ r.s['name'] }}</b></a></td><td>{{ r.s['hire_date'] or '（入職日が未入力）' }}</td>
     <td class="num"><b>{{ b.remaining|round(1) }}日</b></td><td class="num">{% if b.expiring %}<span class="pill warn">{{ b.expiring|round(1) }}日</span>{% endif %}</td>
-    <td class="num">{{ b.taken }}日</td><td>{{ b.next or '' }}</td>
-    <td>{% for f in b.five[-1:] %}{% if f.took >= 5 %}<span class="pill ok">{{ f.took }}/5日</span>{% elif f.deadline < today %}<span class="pill ng">{{ f.took }}/5日（期限切れ）</span>{% else %}<span class="pill warn">{{ f.took }}/5日（{{ f.deadline }}まで）</span>{% endif %}{% endfor %}</td></tr>
+    <td class="num">{{ b.taken }}日{% if b.planned %}<br><small class="muted">予定 {{ b.planned }}日</small>{% endif %}</td><td>{{ b.next or '' }}</td>
+    <td>{% set f = b.five_show %}{% if f %}{% if f.took >= 5 %}<span class="pill ok">{{ f.took }}/5日</span>{% elif f.deadline < today %}<span class="pill ng">{{ f.took }}/5日（{{ f.deadline }}まで・期限切れ）</span>{% else %}<span class="pill warn">{{ f.took }}/5日（{{ f.deadline }}まで）</span>{% endif %}{% if f.planned %} <small class="muted">ほかに予定 {{ f.planned }}日</small>{% endif %}{% endif %}</td></tr>
   {% else %}<tr><td colspan="7" class="empty">職員が登録されていません。</td></tr>{% endfor %}
 </table></div>
-<p class="muted small">出勤率8割の要件は自動では見ていません。満たさない人は、名前を押して付与の日数を0にしてください。</p>
+<p class="muted small">出勤率8割の要件は自動では見ていません。満たさない人は、名前を押して付与の日数を0にしてください。年5日は、今日までに取った日だけを数えます（これからの「有」は予定として別に出します）。</p>
 {% endblock %}

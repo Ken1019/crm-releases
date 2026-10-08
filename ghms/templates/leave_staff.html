@@ -24,6 +24,7 @@
   <div class="actions wide"><button class="btn">＋ 足す</button></div>
 </form>
 <section class="card"><h2>取った日（勤務表の「有」）</h2>
-  <p>{% for d in taken %}{{ d.strftime('%Y/%m/%d') }}{% if not loop.last %}、{% endif %}{% else %}まだありません。{% endfor %}</p>
+  <p>{% for d in taken %}{{ d.strftime('%Y/%m/%d') }}{% if d > today %}<small class="pill">予定</small>{% endif %}{% if not loop.last %}、{% endif %}{% else %}まだありません。{% endfor %}</p>
+  {% for f in b.five %}<p class="small">{{ f.grant }}付与の年5日：{{ f.deadline }}までに <b>{{ f.took }}日</b>／5日{% if f.planned %}（ほかに予定 {{ f.planned }}日）{% endif %}</p>{% endfor %}
   <p class="muted small">有給を入れるときは「職員のこと → 勤務表」でその日を「有」にしてください。</p></section>
 {% endblock %}

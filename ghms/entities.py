@@ -350,7 +350,7 @@ ENTITIES = {
             F("dependents", "扶養親族等の数（源泉徴収）", "number", list=False, help="扶養控除等申告書の人数。所得税の概算に使います"),
             F("resident_tax", "住民税（月額・円）", "number", list=False, help="市区町村からの特別徴収税額通知書の金額"),
             F("social_insurance", "社会保険（健康保険・厚生年金）に加入", "check", list=False),
-            F("std_monthly", "標準報酬月額（円）", "number", list=False, help="空欄なら毎月の総支給額で計算します（概算）"),
+            F("std_monthly", "標準報酬月額（円）", "number", list=False, help="空欄なら毎月の総支給額（交通費をふくむ）から標準報酬月額の等級表で決めます"),
             F("employment_insurance", "雇用保険に加入", "check", list=False),
             F("leave_class", "有給の区分（タイムカードが3か月分ないとき）", "select", options=LEAVE_CLASS, default=LEAVE_CLASS[0], list=False,
               help="有給の日数はタイムカードの出勤日数から自動で決めます。記録が少ないあいだだけ、この区分を使います"),

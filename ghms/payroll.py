@@ -9,7 +9,8 @@
 
 import json
 import math
-from datetime import date
+from datetime import date, timedelta
+from decimal import ROUND_HALF_DOWN, Decimal, InvalidOperation
 
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 from openpyxl import Workbook
@@ -64,9 +65,49 @@ def rate(key):
     return setting_num(key, pset(key)) / 100
 
 
+def pct(key):
+    """料率（%）を、小数の誤差が出ないように Decimal で（例 "10.15" → 0.1015）"""
+    raw = (get_setting(key, pset(key)) or "").strip()
+    try:
+        return Decimal(raw) / 100
+    except InvalidOperation:
+        return Decimal(pset(key)) / 100
+
+
 def half_down(x):
-    """社会保険料の本人負担：50銭以下切り捨て、50銭をこえたら切り上げ"""
-    return max(0, math.ceil(x - 0.5))
+    """社会保険料の本人負担：50銭以下切り捨て、50銭をこえたら切り上げ（ちょうど50銭は切り捨て）"""
+    d = x if isinstance(x, Decimal) else Decimal(repr(float(x)))
+    return max(0, int(d.to_integral_value(rounding=ROUND_HALF_DOWN)))
+
+
+# 健康保険の標準報酬月額の等級（1〜50級）：(報酬月額がこの額以上, 標準報酬月額)
+HEALTH_GRADES = [(0, 58000), (63000, 68000), (73000, 78000), (83000, 88000), (93000, 98000), (101000, 104000),
+                 (107000, 110000), (114000, 118000), (122000, 126000), (130000, 134000), (138000, 142000), (146000, 150000),
+                 (155000, 160000), (165000, 170000), (175000, 180000), (185000, 190000), (195000, 200000), (210000, 220000),
+                 (230000, 240000), (250000, 260000), (270000, 280000), (290000, 300000), (310000, 320000), (330000, 340000),
+                 (350000, 360000), (370000, 380000), (395000, 410000), (425000, 440000), (455000, 470000), (485000, 500000),
+                 (515000, 530000), (545000, 560000), (575000, 590000), (605000, 620000), (635000, 650000), (665000, 680000),
+                 (695000, 710000), (730000, 750000), (770000, 790000), (810000, 830000), (855000, 880000), (905000, 930000),
+                 (955000, 980000), (1005000, 1030000), (1055000, 1090000), (1115000, 1150000), (1175000, 1210000),
+                 (1235000, 1270000), (1295000, 1330000), (1355000, 1390000)]
+PENSION_MIN, PENSION_MAX = 88000, 650000
+
+
+def health_grade(amount):
+    """報酬月額 → 健康保険の標準報酬月額"""
+    std = HEALTH_GRADES[0][1]
+    for lo, v in HEALTH_GRADES:
+        if amount >= lo:
+            std = v
+    return std
+
+
+def std_monthly(s, gross):
+    """標準報酬月額（健康保険・厚生年金）。職員の情報に入っていればそれ、なければ今月の総支給額（交通費こみ）を等級に当てはめる"""
+    entered = s["std_monthly"]
+    health = int(entered) if entered else health_grade(gross)
+    pension = min(PENSION_MAX, max(PENSION_MIN, health))
+    return {"health": health, "pension": pension, "source": "職員の情報に入力" if entered else f"今月の総支給額 {gross:,}円から"}
 
 
 def income_tax(amount, dependents, year):
@@ -112,11 +153,21 @@ def income_tax(amount, dependents, year):
     return 0
 
 
-def _age_at(birth, d):
+def _birthday_minus1(b, years):
+    """years 歳の誕生日の前日（この日に年齢が上がる。2月29日生まれは2月28日）"""
+    try:
+        bd = date(b.year + years, b.month, b.day)
+    except ValueError:
+        bd = date(b.year + years, 3, 1)
+    return bd - timedelta(days=1)
+
+
+def care_applies(birth, last):
+    """介護保険料を引く月か：40歳になる日（誕生日の前日）がある月から、65歳になる日がある月の前の月まで"""
     b = parse_date(birth)
     if not b:
-        return None
-    return d.year - b.year - ((d.month, d.day) < (b.month, b.day))
+        return False
+    return _birthday_minus1(b, 40) <= last < _birthday_minus1(b, 65)
 
 
 def shogu_monthly(staff_id, first):
@@ -134,7 +185,11 @@ def compute_pay(s, first, last, earnings=None, leave=True):
     leave_n = leave_days_in(s["id"], first, last)
     hours, over_h, night_h = sm["total"] / 60, sm["over"] / 60, sm["night"] / 60
     flat = (get_setting("pay_yakin_mode", pset("pay_yakin_mode")) or "").startswith("1回")
-    per_yakin = int(s["night_allowance"] or setting_num("pay_yakin_flat", pset("pay_yakin_flat"))) if flat else int(s["night_allowance"] or 0)
+    na = s["night_allowance"]
+    na_blank = na is None or str(na).strip() == ""
+    # 職員の情報の「夜勤手当（1回）」が空欄のときだけ設定の金額。0と入れた人は0のまま
+    per_yakin = int(setting_num("pay_yakin_flat", pset("pay_yakin_flat")) if na_blank else float(na)) if flat \
+        else (0 if na_blank else int(float(na)))
     days_for_pay = sm["days"]
     warnings = []
     if flat:
@@ -149,12 +204,15 @@ def compute_pay(s, first, last, earnings=None, leave=True):
                                 f"最低賃金と割増で {round(need):,}円 以上が必要です（1回 {per_yakin:,}円）")
     pt = s["pay_type"] or "月給"
     base_salary, hourly, daily = s["base_salary"] or 0, s["hourly_wage"] or 0, s["daily_wage"] or 0
+    shogu = shogu_monthly(s["id"], first)
+    # 残業代・深夜手当の時間単価には、通勤手当以外の毎月の手当（資格手当・その他手当・処遇改善手当）も入れる
+    allowances = (s["allowance_qual"] or 0) + (s["allowance_other"] or 0) + shogu
     if pt == "時給":
-        unit = hourly
+        unit = hourly + allowances / max(hours, 1)
     elif pt == "日給":
-        unit = daily / 8
+        unit = daily / 8 + allowances / max(hours, 1)
     else:
-        unit = (base_salary + (s["allowance_qual"] or 0)) / (setting_num("pay_monthly_hours", 160) or 160)
+        unit = (base_salary + allowances) / (setting_num("pay_monthly_hours", 160) or 160)
     if earnings is None:
         base = round(hourly * hours) if pt == "時給" else round(daily * days_for_pay) if pt == "日給" else int(base_salary)
         ot_factor = rate("pay_ot_rate") + (0 if pt == "時給" else 1)
@@ -162,25 +220,27 @@ def compute_pay(s, first, last, earnings=None, leave=True):
         commute = (s["commute"] or 0) if ctype == "毎月定額" else (s["commute"] or 0) * sm["days"] if ctype.startswith("1日") else 0
         earnings = {"base": base, "ot": round(unit * over_h * ot_factor), "night": round(unit * night_h * rate("pay_night_rate")),
                     "yakin": per_yakin * sm["yakin"], "qual": int(s["allowance_qual"] or 0),
-                    "shogu": shogu_monthly(s["id"], first), "other": int(s["allowance_other"] or 0), "commute": int(commute),
+                    "shogu": shogu, "other": int(s["allowance_other"] or 0), "commute": int(commute),
                     "leave": leave_n * leave_day_pay(s, first) if leave and leave_n else 0}
     gross = sum(int(earnings.get(k) or 0) for k, _ in EARNINGS)
     commute = int(earnings.get("commute") or 0)
     ded = {k: 0 for k, _ in DEDUCTIONS}
-    er = {"health": 0, "care": 0, "kodomo": 0, "pension": 0, "emp": 0, "child": 0, "rosai": round((gross - commute) * rate("ins_rosai"))}
+    # 労災保険は賃金の総額（交通費もふくむ）
+    er = {"health": 0, "care": 0, "kodomo": 0, "pension": 0, "emp": 0, "child": 0, "rosai": round(gross * rate("ins_rosai"))}
+    std = None
     if s["social_insurance"]:
-        std = s["std_monthly"] or (gross - commute)
-        ded["health"] = half_down(std * rate("ins_health") / 2)
-        age = _age_at(s["birthdate"], last)
-        if age is not None and 40 <= age < 65:
-            ded["care"] = half_down(std * rate("ins_care") / 2)
-        ded["pension"] = half_down(std * rate("ins_pension") / 2)
+        std = std_monthly(s, gross)
+        hs, ps = Decimal(std["health"]), Decimal(std["pension"])
+        ded["health"] = half_down(hs * pct("ins_health") / 2)
+        if care_applies(s["birthdate"], last):
+            ded["care"] = half_down(hs * pct("ins_care") / 2)
+        ded["pension"] = half_down(ps * pct("ins_pension") / 2)
         if (first.year, first.month) >= (2026, 5):  # 4月分の保険料（5月の給与）から
-            ded["kodomo"] = half_down(std * rate("ins_kodomo") / 2)
+            ded["kodomo"] = half_down(hs * pct("ins_kodomo") / 2)
         er.update(health=ded["health"], care=ded["care"], pension=ded["pension"], kodomo=ded["kodomo"],
-                  child=round(std * rate("ins_child")))
+                  child=round(std["pension"] * rate("ins_child")))
     if s["employment_insurance"]:
-        ded["emp"] = half_down(gross * rate("ins_emp_ee"))
+        ded["emp"] = half_down(Decimal(gross) * pct("ins_emp_ee"))
         er["emp"] = round(gross * rate("ins_emp_er"))
     social = ded["health"] + ded["care"] + ded["kodomo"] + ded["pension"] + ded["emp"]
     ded["itax"] = income_tax(gross - commute - social, s["dependents"], first.year)
@@ -190,7 +250,7 @@ def compute_pay(s, first, last, earnings=None, leave=True):
             "work": {"days": sm["days"], "hours": sm["total"], "ot_h": sm["over"], "night_h": sm["night"], "yakin_n": sm["yakin"],
                      "leave_n": leave_n},
             "missing": sm["missing"], "warnings": warnings, "gross": gross, "total_ded": total_ded, "net": gross - total_ded,
-            "employer": er, "employer_total": sum(er.values()), "pay_type": pt, "unit": round(unit)}
+            "employer": er, "employer_total": sum(er.values()), "pay_type": pt, "unit": round(unit), "std": std}
 
 
 def _totals(data):
@@ -207,6 +267,8 @@ def load_slip(staff_id, ym):
     data = json.loads(row["data"])
     for k, _ in EARNINGS:
         data.setdefault("earnings", {}).setdefault(k, 0)
+    for k, _ in DEDUCTIONS:  # 前に保存した明細には、あとから増えた控除（子ども・子育て支援金など）がない
+        data.setdefault("deductions", {}).setdefault(k, 0)
     for k, _, _ in WORK_ITEMS:
         data.setdefault("work", {}).setdefault(k, 0)
     data.update(status=row["status"], updated_by=row["updated_by"], updated_at=row["updated_at"])
@@ -216,17 +278,21 @@ def load_slip(staff_id, ym):
 def save_slip(staff_id, ym, data, status):
     _totals(data)
     keep = {k: data[k] for k in ("earnings", "deductions", "work", "gross", "total_ded", "net", "employer", "employer_total",
-                                 "pay_type", "unit", "shared", "memo", "warnings") if k in data}
+                                 "pay_type", "unit", "std", "shared", "memo", "warnings") if k in data}
     get_db().execute("INSERT OR REPLACE INTO payslips (staff_id, ym, data, gross, deductions, net, status, updated_by, updated_at)"
                      " VALUES (?,?,?,?,?,?,?,?,?)", (staff_id, ym, json.dumps(keep, ensure_ascii=False), data["gross"],
                                                      data["total_ded"], data["net"], status, g.user["username"], now()))
 
 
 def payroll_staff(first, last):
-    """その月に在籍していた職員（退職者もその月までの分は出す）"""
-    return get_db().execute("SELECT * FROM staff WHERE (status IS NULL OR status != '退職' OR id IN "
-                            "(SELECT staff_id FROM timecards WHERE date BETWEEN ? AND ?)) ORDER BY kana, name",
-                            (first.isoformat(), last.isoformat())).fetchall()
+    """その月に在籍していた職員。入職日がその月の末日より後の人は出さない（入職日が空欄の人は出す）。
+    退職した人は、その月にタイムカードか保存した給与があるときだけ出す"""
+    ym = first.strftime("%Y-%m")
+    return get_db().execute(
+        "SELECT * FROM staff WHERE ((hire_date IS NULL OR hire_date = '' OR hire_date <= ?) AND "
+        "(status IS NULL OR status != '退職' OR id IN (SELECT staff_id FROM timecards WHERE date BETWEEN ? AND ?)))"
+        " OR id IN (SELECT staff_id FROM payslips WHERE ym = ?) ORDER BY kana, name",
+        (last.isoformat(), first.isoformat(), last.isoformat(), ym)).fetchall()
 
 
 def month_payroll(first, last):
