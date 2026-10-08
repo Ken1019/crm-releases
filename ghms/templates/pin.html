@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}PINを入れる{% endblock %}
+{% block content %}
+<div class="pinpad-wrap">
+  <p><a href="{{ url_for('auth.login') }}">◀ 名前をえらび直す</a></p>
+  <h1><span class="avatar">{{ person['display_name'][:1] }}</span> {{ person['display_name'] }} さん</h1>
+  <p class="hello">4桁のPINを入れてください。</p>
+  <form method="post" id="pinform">
+    <input type="hidden" name="pin" id="pin">
+    <div class="dots" aria-live="polite"><span></span><span></span><span></span><span></span></div>
+    <noscript><input name="pin" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" required> <button class="btn primary">OK</button></noscript>
+    <div class="pinpad">
+      {% for n in [1,2,3,4,5,6,7,8,9] %}<button type="button" data-n="{{ n }}">{{ n }}</button>{% endfor %}
+      <button type="button" data-clear class="sub">けす</button><button type="button" data-n="0">0</button><button type="button" data-back class="sub">⌫</button>
+    </div>
+  </form>
+  <p class="muted small">キーボードの数字でも入力できます。5回続けて間違えるとしばらくロックされます。</p>
+</div>
+<script>
+(function(){
+  var v='',input=document.getElementById('pin'),dots=document.querySelectorAll('.dots span'),f=document.getElementById('pinform');
+  function show(){dots.forEach(function(d,i){d.classList.toggle('on',i<v.length);});
+    if(v.length===4){input.value=v;document.querySelectorAll('.pinpad button').forEach(function(b){b.disabled=true;});f.submit();}}
+  function add(n){if(v.length<4){v+=n;show();}}
+  document.querySelectorAll('[data-n]').forEach(function(b){b.addEventListener('click',function(){add(b.dataset.n);});});
+  document.querySelector('[data-clear]').addEventListener('click',function(){v='';show();});
+  document.querySelector('[data-back]').addEventListener('click',function(){v=v.slice(0,-1);show();});
+  document.addEventListener('keydown',function(e){if(/^[0-9]$/.test(e.key))add(e.key);else if(e.key==='Backspace'){v=v.slice(0,-1);show();}});
+})();
+</script>
+{% endblock %}

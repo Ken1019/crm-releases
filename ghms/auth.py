@@ -7,9 +7,12 @@
 - 退職者などのアカウントは「停止」にできる
 - ログイン・閲覧・登録・変更・削除・Excel出力を操作の記録に残す
 - 職員のExcel出力は管理者が許可したときだけ
+- 管理者が登録した事業所の端末では、名前をえらんで4桁のPINで交代ログインできる
+  （PINで入った管理者は、管理者の画面を開くときにパスワードを聞かれる）
 """
 
 import functools
+import hashlib
 import re
 import secrets
 import time
@@ -22,12 +25,35 @@ from .db import get_db, get_setting, now
 
 bp = Blueprint("auth", __name__)
 
-PUBLIC = {"auth.login", "auth.setup", "static"}
+PUBLIC = {"auth.login", "auth.setup", "auth.pin_login", "static"}
 # パスワード変更が必要な人でも開ける画面
 WHILE_MUST_CHANGE = {"auth.my_password", "auth.logout", "static"}
 MAX_FAILS = 5
 LOCK_MINUTES = 15
 ROLES = {"admin": "管理者", "staff": "職員"}
+DEVICE_COOKIE = "ghms_device"
+DEVICE_DAYS = 400
+
+
+def _hash_token(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def current_device():
+    """この端末が、PINでログインできる端末として登録されていればその行"""
+    if "device" not in g:
+        token = request.cookies.get(DEVICE_COOKIE)
+        g.device = get_db().execute("SELECT * FROM devices WHERE token_hash=? AND active=1",
+                                    (_hash_token(token),)).fetchone() if token else None
+    return g.device
+
+
+def pin_problem(pin):
+    if not re.fullmatch(r"[0-9]{4}", pin or ""):
+        return "PINは4桁の数字にしてください。"
+    if len(set(pin)) == 1 or pin in "0123456789" or pin in "9876543210" or pin[:2] == pin[2:]:
+        return "「1111」「1234」「1212」のような推測されやすいPINは使えません。"
+    return None
 
 
 def log_event(action, entity=None, record_id=None, detail=None, username=None):
@@ -52,10 +78,11 @@ def password_problem(pw, username=""):
 
 
 def timeout_seconds():
+    key, default = ("pin_timeout_min", 15) if session.get("via") == "pin" else ("session_timeout_min", 30)
     try:
-        return max(int(get_setting("session_timeout_min", "30") or 30), 1) * 60
+        return max(int(get_setting(key, str(default)) or default), 1) * 60
     except ValueError:
-        return 30 * 60
+        return default * 60
 
 
 def can_export():
@@ -113,28 +140,41 @@ def install(app):
         if "csrf" not in session:
             session["csrf"] = secrets.token_hex(16)
         return {"csrf_token": session["csrf"], "is_admin": is_admin(), "can_export": can_export() if g.get("user") else False,
-                "ROLES": ROLES}
+                "ROLES": ROLES, "this_device": current_device(), "via_pin": session.get("via") == "pin"}
 
 
 def is_admin():
     return bool(g.get("user")) and g.user["role"] == "admin"
 
 
+def require_admin():
+    """管理者でなければ403。PINで入った管理者はパスワードの確認へ"""
+    if not is_admin():
+        abort(403)
+    if session.get("via") == "pin":
+        abort(redirect(url_for("auth.reauth", next=request.full_path.rstrip("?"))))
+
+
 def admin_required(view):
     @functools.wraps(view)
     def wrapped(*a, **kw):
-        if not is_admin():
-            abort(403)
+        require_admin()
         return view(*a, **kw)
 
     return wrapped
 
 
-def _login(user):
+def _login(user, via="password"):
     session.clear()
     session["uid"] = user["id"]
     session["csrf"] = secrets.token_hex(16)
     session["seen"] = time.time()
+    session["via"] = via
+
+
+def _safe_next(default="views.dashboard"):
+    nxt = request.args.get("next", "")
+    return nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for(default)
 
 
 @bp.route("/setup", methods=["GET", "POST"])
@@ -179,20 +219,123 @@ def login():
             g.user = user
             log_event("login")
             db.commit()
-            nxt = request.args.get("next", "")
-            return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("views.dashboard"))
+            return redirect(_safe_next())
         if locked:
             flash(f"パスワードを続けて間違えたため、しばらくログインできません。{LOCK_MINUTES}分ほど待つか、管理者にロック解除を頼んでください。", "error")
         else:
             flash("ユーザー名またはパスワードが違います。", "error")
-            if user and user["active"]:
-                fails = (user["failed_count"] or 0) + 1
-                until = (datetime.now() + timedelta(minutes=LOCK_MINUTES)).strftime("%Y-%m-%d %H:%M:%S") if fails >= MAX_FAILS else None
-                db.execute("UPDATE users SET failed_count=?, locked_until=? WHERE id=?",
-                           (0 if until else fails, until, user["id"]))
-        log_event("login_failed", username=username[:50], detail="ロック中" if locked else None)
+        if user and user["active"] and not locked:
+            _fail(user, None)
+        else:
+            log_event("login_failed", username=username[:50], detail="ロック中" if locked else None)
         db.commit()
-    return render_template("login.html")
+    device = current_device()
+    people = get_db().execute("SELECT id, display_name, role FROM users WHERE active=1 AND pin_hash IS NOT NULL "
+                              "ORDER BY role DESC, display_name").fetchall() if device else []
+    return render_template("login.html", device=device, people=people)
+
+
+def _fail(user, detail):
+    fails = (user["failed_count"] or 0) + 1
+    until = (datetime.now() + timedelta(minutes=LOCK_MINUTES)).strftime("%Y-%m-%d %H:%M:%S") if fails >= MAX_FAILS else None
+    get_db().execute("UPDATE users SET failed_count=?, locked_until=? WHERE id=?", (0 if until else fails, until, user["id"]))
+    log_event("login_failed", username=user["username"], detail=detail)
+
+
+@bp.route("/pin/<int:uid>", methods=["GET", "POST"])
+def pin_login(uid):
+    device = current_device()
+    if device is None:
+        flash("この端末はPINでのログインに登録されていません。ユーザー名とパスワードでログインしてください。", "error")
+        return redirect(url_for("auth.login"))
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id=? AND active=1 AND pin_hash IS NOT NULL", (uid,)).fetchone()
+    if user is None:
+        return redirect(url_for("auth.login"))
+    if request.method == "POST":
+        locked = user["locked_until"] and user["locked_until"] > now()
+        if locked:
+            flash(f"続けて間違えたため、しばらくログインできません。{LOCK_MINUTES}分ほど待つか、管理者にロック解除を頼んでください。", "error")
+            log_event("login_failed", username=user["username"], detail=f"PIN・ロック中（{device['name']}）")
+        elif check_password_hash(user["pin_hash"], request.form.get("pin", "")):
+            db.execute("UPDATE users SET failed_count=0, locked_until=NULL, last_login=? WHERE id=?", (now(), uid))
+            db.execute("UPDATE devices SET last_used=? WHERE id=?", (now(), device["id"]))
+            _login(user, via="pin")
+            g.user = user
+            log_event("login", detail=f"PIN（{device['name']}）")
+            db.commit()
+            return redirect(url_for("views.dashboard"))
+        else:
+            _fail(user, f"PIN（{device['name']}）")
+            flash("PINが違います。", "error")
+        db.commit()
+    return render_template("pin.html", person=user, device=device)
+
+
+@bp.route("/reauth", methods=["GET", "POST"])
+def reauth():
+    """PINで入った管理者が、管理者の画面を開く前にパスワードで本人確認"""
+    if not is_admin():
+        abort(403)
+    if request.method == "POST":
+        if check_password_hash(g.user["password_hash"], request.form.get("password", "")):
+            session["via"] = "password"
+            log_event("reauth")
+            get_db().commit()
+            return redirect(_safe_next())
+        _fail(g.user, "管理者画面の確認")
+        get_db().commit()
+        flash("パスワードが違います。", "error")
+    return render_template("reauth.html")
+
+
+@bp.route("/devices", methods=["POST"])
+@admin_required
+def devices():
+    db = get_db()
+    action = request.form.get("action")
+    resp = redirect(url_for("auth.users"))
+    if action == "register":
+        name = request.form.get("name", "").strip() or "名前のない端末"
+        token = secrets.token_urlsafe(32)
+        cur = db.execute("INSERT INTO devices (name, token_hash, active, created_by, created_at) VALUES (?,?,1,?,?)",
+                         (name, _hash_token(token), g.user["username"], now()))
+        resp.set_cookie(DEVICE_COOKIE, token, max_age=DEVICE_DAYS * 86400, httponly=True, samesite="Lax")
+        log_event("device_add", "devices", cur.lastrowid, name)
+        flash(f"この端末を「{name}」としてPIN対応にしました。", "ok")
+    elif action == "remove":
+        did = request.form.get("id", type=int)
+        row = db.execute("SELECT * FROM devices WHERE id=?", (did,)).fetchone()
+        if row:
+            db.execute("UPDATE devices SET active=0 WHERE id=?", (did,))
+            log_event("device_remove", "devices", did, row["name"])
+            flash(f"「{row['name']}」をPIN対応から外しました。", "ok")
+    db.commit()
+    return resp
+
+
+@bp.route("/my-pin", methods=["POST"])
+def my_pin():
+    db = get_db()
+    if not check_password_hash(g.user["password_hash"], request.form.get("current", "")):
+        flash("今のパスワードが違います。", "error")
+    elif request.form.get("action") == "clear":
+        db.execute("UPDATE users SET pin_hash=NULL WHERE id=?", (g.user["id"],))
+        log_event("pin_clear")
+        flash("PINを消しました。", "ok")
+    else:
+        pin = request.form.get("pin", "")
+        problem = pin_problem(pin)
+        if problem:
+            flash(problem, "error")
+        elif pin != request.form.get("pin2", ""):
+            flash("確認のために入れたPINが一致しません。", "error")
+        else:
+            db.execute("UPDATE users SET pin_hash=? WHERE id=?", (generate_password_hash(pin), g.user["id"]))
+            log_event("pin_set")
+            flash("PINを設定しました。登録された事業所の端末で、名前をえらんでPINでログインできます。", "ok")
+    db.commit()
+    return redirect(url_for("auth.my_password"))
 
 
 @bp.route("/logout", methods=["POST"])
@@ -262,6 +405,10 @@ def users():
                 db.execute("UPDATE users SET active=?, updated_at=? WHERE id=?", (1 if action == "enable" else 0, now(), uid))
                 log_event("user_" + action, "users", uid, target["username"])
                 flash(f"「{target['username']}」を{'使えるように' if action == 'enable' else '停止'}しました。", "ok")
+        elif action == "clear_pin":
+            db.execute("UPDATE users SET pin_hash=NULL WHERE id=?", (uid,))
+            log_event("user_pin_clear", "users", uid, target["username"])
+            flash(f"「{target['username']}」のPINを消しました。本人が設定し直します。", "ok")
         elif action == "unlock":
             db.execute("UPDATE users SET failed_count=0, locked_until=NULL WHERE id=?", (uid,))
             log_event("user_unlock", "users", uid, target["username"])
@@ -269,7 +416,8 @@ def users():
         db.commit()
         return redirect(url_for("auth.users"))
     rows = db.execute("SELECT * FROM users ORDER BY active DESC, role, id").fetchall()
-    return render_template("users.html", rows=rows, now=now(), MAX_FAILS=MAX_FAILS)
+    devs = db.execute("SELECT * FROM devices WHERE active=1 ORDER BY id").fetchall()
+    return render_template("users.html", rows=rows, now=now(), MAX_FAILS=MAX_FAILS, devs=devs)
 
 
 @bp.route("/password", methods=["GET", "POST"])
@@ -293,4 +441,4 @@ def my_password():
             db.commit()
             flash("パスワードを変更しました。", "ok")
             return redirect(url_for("views.dashboard"))
-    return render_template("password.html", must=bool(g.user["must_change"]))
+    return render_template("password.html", must=bool(g.user["must_change"]), has_pin=bool(g.user["pin_hash"]))

@@ -21,7 +21,7 @@
   <span class="who">{{ g.user['display_name'] }} さん <span class="pill {{ 'warn' if is_admin else 'ok' }}">{{ ROLES[g.user['role']] }}</span></span>
   <a href="{{ url_for('auth.my_password') }}">パスワード変更</a>
   <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
-    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="link">ログアウト</button>
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="{{ 'btn mini' if this_device else 'link' }}">{{ '👥 交代する' if this_device else 'ログアウト' }}</button>
   </form>
 </header>
 <div class="layout">

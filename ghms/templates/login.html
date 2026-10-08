@@ -1,15 +1,28 @@
 {% extends 'base.html' %}
 {% block title %}ログイン{% endblock %}
 {% block content %}
+{% if device %}
+<div class="pinlogin">
+  <h1>🌼 {{ office_name }}</h1>
+  <p class="hello">自分の名前を押して、4桁のPINを入れてください。</p>
+  <div class="people">
+    {% for p in people %}<a class="person" href="{{ url_for('auth.pin_login', uid=p['id']) }}"><span class="avatar">{{ p['display_name'][:1] }}</span>
+      <b>{{ p['display_name'] }}</b>{% if p['role'] == 'admin' %}<small>管理者</small>{% endif %}</a>
+    {% else %}<p class="guide">まだPINを設定した人がいません。ユーザー名とパスワードでログインし、「パスワード変更」の画面でPINを設定してください。</p>{% endfor %}
+  </div>
+  <p class="muted small">この端末：{{ device['name'] }}（PINでログインできる端末）</p>
+  <details class="card"{% if request.method == 'POST' %} open{% endif %}>
+    <summary>ユーザー名とパスワードでログインする</summary>
+    {% include '_password_login.html' %}
+  </details>
+</div>
+{% else %}
 <div class="auth card">
   <h1>🌼 {{ office_name }}</h1>
   <p class="muted" style="text-align:center">管理者も職員も、この画面からログインします。<br>自分のユーザー名とパスワードを入れてください。</p>
-  <form method="post">
-    <label><span>ユーザー名</span><input name="username" required autofocus autocomplete="username"></label>
-    <label><span>パスワード</span><input type="password" name="password" required autocomplete="current-password"></label>
-    <button class="btn primary big">ログイン</button>
-  </form>
+  {% include '_password_login.html' %}
   <p class="muted small" style="margin-top:16px">🔒 入居者の大切な個人情報を扱います。パスワードは人に教えず、使い終わったら必ず「ログアウト」してください。
     パスワードを忘れたときは管理者に再設定を頼んでください。</p>
 </div>
+{% endif %}
 {% endblock %}

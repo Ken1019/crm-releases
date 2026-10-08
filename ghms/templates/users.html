@@ -17,7 +17,7 @@
 <section class="card">
   <h2>アカウント一覧</h2>
   <div class="tablewrap"><table class="list">
-  <thead><tr><th>ユーザー名</th><th>名前</th><th>権限</th><th>状態</th><th>最後のログイン</th><th>パスワード再設定</th><th></th></tr></thead>
+  <thead><tr><th>ユーザー名</th><th>名前</th><th>権限</th><th>状態</th><th>PIN</th><th>最後のログイン</th><th>パスワード再設定</th><th></th></tr></thead>
   {% for u in rows %}
   {% set locked = u['locked_until'] and u['locked_until'] > now %}
   <tr>
@@ -28,6 +28,10 @@
       <select name="role" onchange="this.form.submit()" aria-label="権限">{% for k, v in ROLES.items() %}<option value="{{ k }}"{% if u['role'] == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></form></td>
     <td>{% if not u['active'] %}<span class="pill ng">停止中</span>{% elif locked %}<span class="pill warn">ロック中</span>
         {% elif u['must_change'] %}<span class="pill warn">パスワード変更待ち</span>{% else %}<span class="pill ok">使用中</span>{% endif %}</td>
+    <td class="nowrap">{% if u['pin_hash'] %}<span class="pill ok">設定済み</span>
+      <form method="post" class="inline" onsubmit="return confirm('{{ u['username'] }} のPINを消しますか？')"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <input type="hidden" name="action" value="clear_pin"><input type="hidden" name="id" value="{{ u['id'] }}"><button class="btn mini">消す</button></form>
+      {% else %}<span class="muted">—</span>{% endif %}</td>
     <td class="nowrap">{{ u['last_login'] or '—' }}</td>
     <td><form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <input type="hidden" name="action" value="password"><input type="hidden" name="id" value="{{ u['id'] }}">
@@ -44,6 +48,28 @@
   {% endfor %}
   </table></div>
   <p class="muted small">パスワードを{{ MAX_FAILS }}回続けて間違えると、しばらくロックされます。再設定した仮のパスワードは、本人が次のログインで必ず変更します。</p>
+</section>
+
+<section class="card">
+  <h2>🔢 PINでログインできる端末</h2>
+  <p class="guide">ホームのPC・タブレットなど、事業所の中で使う端末を登録すると、その端末では名前を押して4桁のPINでログインできます（PINは本人が「パスワード変更」の画面で設定します）。
+    登録していない端末（家のPCなど）ではPINは使えず、ユーザー名とパスワードが必要です。PINで入った管理者は、管理者の画面を開くときにパスワードを聞かれます。</p>
+  <table class="list">
+    {% for d in devs %}<tr><td><b>{{ d['name'] }}</b>{% if this_device and this_device['id'] == d['id'] %} <span class="pill ok">この端末</span>{% endif %}</td>
+      <td class="muted small">登録 {{ d['created_at'] }}（{{ d['created_by'] }}）・最後に使った日時 {{ d['last_used'] or '—' }}</td>
+      <td><form method="post" action="{{ url_for('auth.devices') }}" class="inline" onsubmit="return confirm('「{{ d['name'] }}」をPIN対応から外しますか？')">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="remove"><input type="hidden" name="id" value="{{ d['id'] }}">
+        <button class="btn mini danger">外す</button></form></td></tr>
+    {% else %}<tr><td class="muted">まだ登録された端末はありません。</td></tr>{% endfor %}
+  </table>
+  {% if not this_device %}
+  <form method="post" action="{{ url_for('auth.devices') }}" class="filters" style="margin-top:10px">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="register">
+    <input name="name" placeholder="端末の名前（例：第1ホーム リビングのPC）" required style="min-width:22em">
+    <button class="btn primary">📌 いま使っているこの端末を登録する</button>
+  </form>
+  <p class="muted small">盗難・紛失したときや使わなくなったときは「外す」を押してください。すぐにPINで入れなくなります。</p>
+  {% endif %}
 </section>
 
 <section class="card">

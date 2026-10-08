@@ -163,6 +163,16 @@ post("/shift/", shift)
 # ログインする人（職員のアカウント）
 post("/users", {"action": "add", "username": "suzuki", "display_name": "鈴木 由美", "password": "temppass1", "role": "staff"})
 post("/users", {"action": "add", "username": "takahashi", "display_name": "高橋 誠", "password": "temppass1", "role": "staff"})
+# PIN：この端末を登録し、管理者と職員がPINを設定（職員は初回のパスワード変更から）
+post("/my-pin", {"current": "password123", "pin": "4826", "pin2": "4826"})
+post("/devices", {"action": "register", "name": "第1ホーム リビングのPC（デモ）"})
+for u in ("suzuki", "takahashi"):
+    c2 = app.test_client()
+    c2.post("/login", data={"username": u, "password": "temppass1"})
+    t2 = re.search(r'name="_csrf" value="([0-9a-f]+)"', c2.get("/password").get_data(as_text=True)).group(1)
+    c2.post("/password", data={"_csrf": t2, "current": "temppass1", "password": "mypass2026", "password2": "mypass2026"})
+    t2 = re.search(r'name="_csrf" value="([0-9a-f]+)"', c2.get("/password").get_data(as_text=True)).group(1)
+    c2.post("/my-pin", data={"_csrf": t2, "current": "mypass2026", "pin": "5937", "pin2": "5937"})
 
 # サンプル登録で溜まった「登録しました」の表示を消しておく
 c.get("/m/homes/")
@@ -227,8 +237,13 @@ while queue and len(pages) < MAX_PAGES:
             seen.add(link)
             queue.append(link)
 
-names = {"/": "p_home.html"}
-for i, url in enumerate(u for u in pages if u != "/"):
+# 最後に「交代する」を押した後の、名前をえらぶ画面とPINの画面
+c.post("/logout", data={"_csrf": TOKEN})
+pages["/login"] = c.get("/login").get_data(as_text=True)
+pages["/pin/2"] = c.get("/pin/2").get_data(as_text=True)
+
+names = {"/": "p_home.html", "/login": "p_login.html", "/pin/2": "p_pin.html"}
+for i, url in enumerate(u for u in pages if u not in names):
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", url).strip("_")[:50]
     names[url] = f"p{i:03d}_{slug}.html"
 
@@ -243,6 +258,7 @@ INJECT = """
   var msg=document.querySelector('.demo-msg'),t;
   function say(s){msg.textContent=s;msg.hidden=false;clearTimeout(t);t=setTimeout(function(){msg.hidden=true;},3500);}
   document.querySelectorAll('form').forEach(function(f){f.addEventListener('submit',function(e){e.preventDefault();e.stopImmediatePropagation();
+    if(f.dataset.demoGo){location.href=f.dataset.demoGo;return;}
     say(f.method.toLowerCase()==='post'?'デモ版のため保存はされません':'デモ版のため絞り込み・月の切り替えはできません');},true);});
   document.querySelectorAll('[data-demo-off]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();
     say(a.getAttribute('data-demo-off'));});});
@@ -259,6 +275,8 @@ def rewrite(text):
             return f'{attr}="{link.rsplit("/", 1)[1]}"'
         if link in names:
             return f'{attr}="{names[link]}"'
+        if attr == "action" and link == "/logout":
+            return f'{attr}="p_login.html" data-demo-go="p_login.html"'
         if attr == "action":
             return f'{attr}="#"'
         why = "デモ版ではExcelのダウンロードはできません" if ".xlsx" in link else "デモ版ではこの画面は省略しています"
@@ -266,6 +284,8 @@ def rewrite(text):
 
     text = HREF.sub(sub, text)
     text = text.replace(" data-guard", "")
+    # PINの画面：4桁入れたらホームへ（デモではPINの確認はしない）
+    text = text.replace("f.submit();", "location.href='p_home.html';")
     return text.replace("</body>", INJECT + "</body>")
 
 

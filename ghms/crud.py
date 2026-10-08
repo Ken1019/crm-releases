@@ -5,7 +5,7 @@ from datetime import date
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 
 from . import excel
-from .auth import is_admin
+from .auth import is_admin, require_admin
 from .db import get_db, now
 from .entities import ENTITIES
 
@@ -27,8 +27,8 @@ def get_entity(key):
     ent = ENTITIES.get(key)
     if ent is None:
         abort(404)
-    if ent.get("admin_only") and not is_admin():
-        abort(403)
+    if ent.get("admin_only"):
+        require_admin()
     return ent
 
 

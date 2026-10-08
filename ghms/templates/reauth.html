@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}パスワードの確認{% endblock %}
+{% block content %}
+<div class="auth card">
+  <h1>🔒 管理者の画面です</h1>
+  <p class="muted">PINでログインしているため、給与・設定などの管理者の画面を開く前に、パスワードを入れて本人確認をしてください。</p>
+  <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label><span>{{ g.user['display_name'] }} さんのパスワード</span><input type="password" name="password" required autofocus autocomplete="current-password"></label>
+    <button class="btn primary big">確認して開く</button>
+  </form>
+  <p><a href="{{ url_for('views.dashboard') }}">やめてホームにもどる</a></p>
+</div>
+{% endblock %}

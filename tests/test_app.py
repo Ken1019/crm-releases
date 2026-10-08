@@ -384,3 +384,95 @@ def test_audit_records_views_exports_and_failures(client, app):
     assert "閲覧" in html and "Excel出力" in html and "ログイン失敗" in html and "/m/residents/export.xlsx" in html
     r = client.get("/m/residents/1")
     assert r.headers["Cache-Control"] == "no-store" and r.headers["X-Frame-Options"] == "DENY"
+
+
+# ---------------------------------------------------------------- PINでの交代ログイン
+def _register_device(admin):
+    r = post(admin, "/devices", {"action": "register", "name": "第1ホーム リビングPC"})
+    assert r.status_code == 302
+
+
+def _logout(c):
+    post(c, "/logout", {})
+
+
+def test_pin_rules_and_setting(client, app):
+    c = staff_client(client, app)
+    for bad in ["1111", "1234", "9876", "1212", "12a4", "123"]:
+        post(c, "/my-pin", {"current": "mypass2026", "pin": bad, "pin2": bad})
+        assert "まだ設定していません" in c.get("/password").get_data(as_text=True), bad
+    post(c, "/my-pin", {"current": "wrong", "pin": "4826", "pin2": "4826"})
+    assert "まだ設定していません" in c.get("/password").get_data(as_text=True)
+    post(c, "/my-pin", {"current": "mypass2026", "pin": "4826", "pin2": "4826"})
+    page = c.get("/password").get_data(as_text=True)
+    assert "設定済み" in page
+    # PINの欄は本文に表示されている（<title> の中ではない）
+    title = page.split("<title>")[1].split("</title>")[0]
+    assert "PIN" not in title and 'action="/my-pin"' in page.split("<main>")[1]
+
+
+def test_pin_login_only_on_registered_device(client, app):
+    staff = staff_client(client, app)
+    post(staff, "/my-pin", {"current": "mypass2026", "pin": "4826", "pin2": "4826"})
+    # 登録していない端末ではPINの画面に入れない
+    other = app.test_client()
+    r = other.post("/pin/2", data={"pin": "4826"})
+    assert r.status_code == 302 and "/login" in r.headers["Location"]
+    assert other.get("/").status_code == 302
+
+    # 管理者がこの端末（client）を登録 → ログアウトすると名前が並ぶ
+    _register_device(client)
+    _logout(client)
+    page = client.get("/login").get_data(as_text=True)
+    assert "自分の名前を押して" in page and "worker" in page
+    r = client.post("/pin/2", data={"pin": "4826"})
+    assert r.status_code == 302
+    home = client.get("/").get_data(as_text=True)
+    assert "worker さん" in home and "交代する" in home
+
+
+def test_pin_lockout(client, app):
+    staff = staff_client(client, app)
+    post(staff, "/my-pin", {"current": "mypass2026", "pin": "4826", "pin2": "4826"})
+    _register_device(client)
+    _logout(client)
+    for _ in range(5):
+        client.post("/pin/2", data={"pin": "0000"})
+    r = client.post("/pin/2", data={"pin": "4826"})
+    assert "しばらくログインできません" in r.get_data(as_text=True)
+
+
+def test_admin_via_pin_must_confirm_password(client, app):
+    post(client, "/my-pin", {"current": "password123", "pin": "4826", "pin2": "4826"})
+    _register_device(client)
+    _logout(client)
+    client.post("/pin/1", data={"pin": "4826"})
+    assert client.get("/").status_code == 200
+    r = client.get("/users")
+    assert r.status_code == 302 and "/reauth" in r.headers["Location"]
+    assert client.get("/m/staff/").status_code == 302  # 給与など管理者だけの一覧も
+    post(client, "/reauth?next=/users", {"password": "wrong"})
+    assert client.get("/users").status_code == 302
+    r = post(client, "/reauth?next=/users", {"password": "password123"})
+    assert r.headers["Location"].endswith("/users")
+    assert client.get("/users").status_code == 200
+
+
+def test_removed_device_and_short_timeout(client, app):
+    staff = staff_client(client, app)
+    post(staff, "/my-pin", {"current": "mypass2026", "pin": "4826", "pin2": "4826"})
+    _register_device(client)
+    post(client, "/devices", {"action": "remove", "id": "1"})
+    _logout(client)
+    assert "自分の名前を押して" not in client.get("/login").get_data(as_text=True)
+    assert client.post("/pin/2", data={"pin": "4826"}).headers["Location"].endswith("/login")
+
+    # PINで入ったときは15分で自動ログアウト（パスワードは30分）
+    dev = app.test_client()
+    dev.post("/login", data={"username": "admin", "password": "password123"})
+    _register_device(dev)
+    _logout(dev)
+    dev.post("/pin/2", data={"pin": "4826"})
+    with dev.session_transaction() as s:
+        s["seen"] = s["seen"] - 16 * 60
+    assert dev.get("/").status_code == 302

@@ -486,9 +486,10 @@ SETTINGS = [
     ("invoice_due_day", "利用料の支払期限（翌月の何日）"),
     ("full_time_hours", "常勤の勤務時間（月・時間）※常勤換算に使います"),
     ("session_timeout_min", "自動ログアウトまでの時間（分）※操作がないとき", ["10", "15", "30", "60", "120"]),
+    ("pin_timeout_min", "PINでログインしたときの自動ログアウト（分）", ["5", "10", "15", "30", "60"]),
     ("staff_can_export", "職員のExcel出力・バックアップ", [("0", "許可しない（管理者だけ）"), ("1", "許可する")]),
 ]
-SETTING_DEFAULTS = {"session_timeout_min": "30", "staff_can_export": "0"}
+SETTING_DEFAULTS = {"session_timeout_min": "30", "staff_can_export": "0", "pin_timeout_min": "15"}
 
 
 @bp.route("/settings", methods=["GET", "POST"])
@@ -551,5 +552,7 @@ AUDIT_ACTIONS = {
     "login": "ログイン", "logout": "ログアウト", "login_failed": "ログイン失敗", "view": "閲覧", "export": "Excel出力・ダウンロード",
     "create": "登録", "update": "更新", "delete": "削除", "password_change": "パスワード変更", "settings": "設定の変更",
     "user_add": "ユーザー追加", "user_password": "パスワード再設定", "user_role": "権限の変更", "user_disable": "ユーザー停止",
-    "user_enable": "ユーザー再開", "user_unlock": "ロック解除",
+    "user_enable": "ユーザー再開", "user_unlock": "ロック解除", "reauth": "管理者画面の本人確認",
+    "pin_set": "PINの設定", "pin_clear": "PINを消した", "user_pin_clear": "PINを消した（管理者）",
+    "device_add": "PIN端末の登録", "device_remove": "PIN端末の解除",
 }

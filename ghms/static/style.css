@@ -156,3 +156,22 @@ table.mgrid tr.total td { background:#fff6ec; font-weight:bold; }
 .away { background:var(--warn-soft); border-radius:12px; padding:10px 16px; margin-bottom:16px; }
 .away a { font-weight:bold; }
 .cols h3 { margin:0 0 8px; font-size:1em; }
+/* PINでのログイン */
+.pinlogin { max-width:920px; margin:30px auto; display:grid; gap:14px; }
+.pinlogin h1 { text-align:center; } .pinlogin .hello { text-align:center; }
+.people { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px; }
+.person { display:flex; flex-direction:column; align-items:center; gap:6px; padding:16px 10px; background:#fff; border:2px solid var(--line);
+  border-radius:18px; color:var(--text); text-decoration:none; box-shadow:0 3px 0 rgba(200,160,110,.18); }
+.person:hover { border-color:var(--pri); text-decoration:none; } .person small { color:var(--muted); }
+.avatar { display:inline-grid; place-items:center; width:2.4em; height:2.4em; border-radius:50%; background:var(--pri-soft); color:var(--pri-dark); font-weight:bold; font-size:1.2em; }
+.pinpad-wrap { max-width:360px; margin:30px auto; text-align:center; }
+.pinpad-wrap h1 { display:flex; gap:10px; align-items:center; justify-content:center; }
+.dots { display:flex; gap:16px; justify-content:center; margin:14px 0 18px; }
+.dots span { width:18px; height:18px; border-radius:50%; border:2px solid var(--pri); }
+.dots span.on { background:var(--pri); }
+.pinpad { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
+.pinpad button { font:inherit; font-size:1.6em; font-weight:bold; min-height:68px; border-radius:16px; border:2px solid var(--line); background:#fff; cursor:pointer; color:var(--text); }
+.pinpad button:hover { border-color:var(--pri); } .pinpad button:active { background:var(--pri-soft); }
+.pinpad button.sub { font-size:1em; color:var(--muted); }
+.pwform { display:flex; flex-direction:column; gap:12px; margin-top:10px; }
+.pwform label { display:flex; flex-direction:column; gap:4px; font-weight:bold; }
