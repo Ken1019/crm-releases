@@ -229,12 +229,10 @@ for i, url in enumerate(u for u in pages if u != "/"):
     names[url] = f"p{i:03d}_{slug}.html"
 
 INJECT = """
-<div class="demo-bar">🧪 デモ版です。表示しているのはすべて架空のサンプルデータで、入力しても保存されません。<span class="demo-msg" hidden></span></div>
+<div class="demo-bar" title="表示しているのはすべて架空のサンプルデータで、入力しても保存されません">🧪 デモ版（保存されません）<span class="demo-msg" hidden></span></div>
 <style>
-.demo-bar{position:fixed;left:0;right:0;bottom:0;z-index:50;background:#2b2b2b;color:#fff;font-size:14px;padding:8px 16px;text-align:center}
-.demo-msg{display:inline-block;margin-left:12px;background:#ff8a3d;color:#fff;border-radius:8px;padding:2px 10px}
-main{padding-bottom:110px!important}
-.sticky-save{bottom:40px!important}
+.demo-bar{position:fixed;left:12px;bottom:12px;z-index:50;background:rgba(43,43,43,.88);color:#fff;font-size:12px;padding:4px 12px;border-radius:99px}
+.demo-msg{display:inline-block;margin-left:10px;background:#ff8a3d;color:#fff;border-radius:8px;padding:1px 8px}
 </style>
 <script>
 (function(){

@@ -15,7 +15,7 @@
 </form>
 <form method="post" data-guard>
 <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}"><input type="hidden" name="home_id" value="{{ home_id or '' }}">
-<div class="tablewrap card">
+<div class="gridwrap card">
 <table class="mgrid">
   <thead><tr><th class="name">職員</th>
     {% for d in days %}<th class="{{ 'sat' if d.weekday() == 5 else 'sun' if d.weekday() == 6 }}">{{ d.day }}<br><small>{{ WEEK[d.weekday()] }}</small></th>{% endfor %}
