@@ -155,7 +155,8 @@ def record_sheet_data(first, last, rid=None):
     amap = attendance_map(first, last)
     mmap = marks_map(first, last)
     cols = record_columns()
-    labels = {"○": "在居", "日": "在居（日中支援）", "外": "外泊", "帰": "帰宅", "入": "入院"}  # 書類向けの短い言い方
+    # 様式18-1の記載例に合わせ、ふつうに支援した日は空欄。帰宅（帰省）は「外泊」と書き、帰宅時支援の欄に記号を入れる
+    labels = {"○": "", "日": "", "外": "外泊", "帰": "外泊", "入": "入院"}
     sheets = []
     for r in residents:
         rows = []

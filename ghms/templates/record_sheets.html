@@ -9,7 +9,7 @@
 <a class="b" href="{{ url_for('docs.record_sheets_export', ym=ym, rid=rid or '') }}">Excelで出す</a>
 <a class="b" href="{{ url_for('docs.record_marks', ym=ym) }}">✅ 夜間支援などを入れる</a>
 <a class="b" href="{{ url_for('docs.record_columns_settings') }}">➕ 項目を増やす・変える</a>
-<span class="note">実績は「請求・お金」→「実績を入れる」の内容です。自治体の様式がある場合は、この内容をもとに確認してください。</span>
+<span class="note">実績は「請求・お金」→「実績を入れる」の内容です。様式18-1の記載例に合わせ、ふつうに支援した日の「サービス提供の状況」は空欄です。</span>
 {% endblock %}
 {% block pages %}
 {% for sh in sheets %}{% set r = sh.r %}
