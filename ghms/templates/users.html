@@ -17,12 +17,15 @@
 <section class="card">
   <h2>アカウント一覧</h2>
   <div class="tablewrap"><table class="list">
-  <thead><tr><th>ユーザー名</th><th>名前</th><th>権限</th><th>状態</th><th>PIN</th><th>最後のログイン</th><th>パスワード再設定</th><th></th></tr></thead>
+  <thead><tr><th>ユーザー名</th><th>名前</th><th>職員の情報</th><th>権限</th><th>状態</th><th>PIN</th><th>最後のログイン</th><th>パスワード再設定</th><th></th></tr></thead>
   {% for u in rows %}
   {% set locked = u['locked_until'] and u['locked_until'] > now %}
   <tr>
     <td><b>{{ u['username'] }}</b>{% if u['id'] == g.user['id'] %} <small class="muted">（自分）</small>{% endif %}</td>
     <td>{{ u['display_name'] }}</td>
+    <td><form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="staff"><input type="hidden" name="id" value="{{ u['id'] }}">
+      <select name="staff_id" onchange="this.form.submit()" aria-label="職員の情報"><option value="">（つながっていない）</option>{% for s in staff %}<option value="{{ s['id'] }}"{% if u['staff_id'] == s['id'] %} selected{% endif %}>{{ s['name'] }}</option>{% endfor %}</select></form></td>
     <td><form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <input type="hidden" name="action" value="role"><input type="hidden" name="id" value="{{ u['id'] }}">
       <select name="role" onchange="this.form.submit()" aria-label="権限">{% for k, v in ROLES.items() %}<option value="{{ k }}"{% if u['role'] == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></form></td>
@@ -81,6 +84,8 @@
     <label><span>仮のパスワード<span class="must">必須</span></span><input type="password" name="password" minlength="8" required autocomplete="new-password">
       <small class="muted">8文字以上・英字と数字の両方。本人に伝え、最初のログインで変えてもらいます。</small></label>
     <label><span>権限</span><select name="role"><option value="staff">職員</option><option value="admin">管理者</option></select></label>
+    <label><span>職員の情報</span><select name="staff_id"><option value="">（あとで）</option>{% for s in staff %}<option value="{{ s['id'] }}">{{ s['name'] }}</option>{% endfor %}</select>
+      <small class="muted">つなぐと、その人のタイムカード・体温・給与明細になります。</small></label>
     <div class="actions wide"><button class="btn primary">＋ 追加する</button></div>
   </form>
 </section>

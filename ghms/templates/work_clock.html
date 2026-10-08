@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}出勤・退勤{% endblock %}
+{% block content %}
+<h1>⏰ 出勤・退勤</h1>
+{% if not staff %}
+<div class="card"><p>このログインは、まだ<b>職員の情報</b>とつながっていません。管理者に「設定 → ログインする人」で、あなたの職員の情報をえらんでもらってください。</p></div>
+{% else %}
+<div class="clockbox card">
+  <p class="clock-now"><span id="now">{{ now_time.strftime('%H:%M') }}</span><small>{{ now_time.strftime('%Y年%m月%d日') }}（{{ '月火水木金土日'[now_time.weekday()] }}）</small></p>
+  <p class="muted">{{ staff['name'] }} さん</p>
+  {% if card %}
+  <p class="pill ok big">{{ card['date'][5:].replace('-', '/') }} {{ card['clock_in'] }} から勤務中</p>
+  <form method="post" class="form clockform">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="out">
+    <label><span>休憩した時間（分）</span><input type="number" name="break_min" min="0" max="600" value="{{ default_break }}" class="w5">
+      <small class="muted">6時間をこえる勤務のときの目安は {{ default_break }}分です。とれなかったら 0 にしてください。</small></label>
+    <div class="actions wide"><button class="btn primary huge">🏠 退勤する</button></div>
+  </form>
+  {% else %}
+  <form method="post" class="form clockform">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="in">
+    <label><span>今朝の体温 <span class="must">必須</span></span><input type="number" name="temp" step="0.1" min="34" max="42" inputmode="decimal" placeholder="36.5" class="w5" required> ℃</label>
+    <fieldset class="wide"><legend>体調で気になること（あればチェック）</legend>
+      {% for s in SYMPTOMS %}<label class="chip"><input type="checkbox" name="sym::{{ s }}" value="1"> {{ s }}</label>{% endfor %}</fieldset>
+    <label class="wide"><span>ひとこと（任意）</span><input name="note" placeholder="例：通院のため1時間おくれました"></label>
+    <div class="actions wide"><button class="btn primary huge">☀️ 出勤する</button></div>
+  </form>
+  <p class="muted small">{{ fever }}℃以上、または体調にチェックがあると、管理者のホームにお知らせが出ます。</p>
+  {% endif %}
+</div>
+
+{% if card %}
+<details class="card"><summary><b>🌡️ 勤務中の体温を記録する</b>（夜勤の途中など）</summary>
+  <form method="post" class="form"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="health">
+    <label><span>体温</span><input type="number" name="temp" step="0.1" min="34" max="42" class="w5"> ℃</label>
+    <fieldset class="wide"><legend>体調</legend>{% for s in SYMPTOMS %}<label class="chip"><input type="checkbox" name="sym::{{ s }}" value="1"> {{ s }}</label>{% endfor %}</fieldset>
+    <div class="actions wide"><button class="btn">記録する</button></div></form>
+</details>
+{% endif %}
+
+<section class="card">
+  <h2>今月の勤務</h2>
+  <p>出勤 <b>{{ summary.days }}</b>日・実働 <b>{{ hm(summary.total) or '0:00' }}</b>・残業 {{ hm(summary.over) or '0:00' }}・深夜 {{ hm(summary.night) or '0:00' }}・夜勤 {{ summary.yakin }}回</p>
+  <div class="tablewrap"><table class="list">
+    <thead><tr><th>日付</th><th>出勤</th><th>退勤</th><th>休憩</th><th>実働</th></tr></thead>
+    {% for x in cards %}<tr><td>{{ x.c['date'][5:].replace('-', '/') }}</td><td>{{ x.c['clock_in'] }}</td><td>{{ x.c['clock_out'] or '勤務中' }}</td>
+      <td>{{ x.c['break_min'] or 0 }}分</td><td>{{ hm(x.w.total) if x.w else '' }}</td></tr>
+    {% else %}<tr><td colspan="5" class="empty">今月の打刻はまだありません。</td></tr>{% endfor %}
+  </table></div>
+  <div class="actions"><a class="btn" href="{{ url_for('work.timecards') }}">📅 今月のタイムカードを全部見る</a>
+    <a class="btn" href="{{ url_for('work.health') }}">🌡️ 体温の記録</a>
+    {% if feature_on('payroll') %}<a class="btn" href="{{ url_for('payroll.mine') }}">💴 自分の給与明細</a>{% endif %}</div>
+  <p class="muted small">打刻をまちがえたときは、管理者に直してもらってください。</p>
+</section>
+{% endif %}
+<script>setInterval(function(){var d=new Date();var e=document.getElementById('now');if(e)e.textContent=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);},10000);</script>
+{% endblock %}

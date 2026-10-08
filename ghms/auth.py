@@ -387,9 +387,10 @@ def users():
             else:
                 role = "admin" if request.form.get("role") == "admin" else "staff"
                 cur = db.execute(
-                    "INSERT INTO users (username, display_name, password_hash, role, active, must_change, created_at, updated_at)"
-                    " VALUES (?,?,?,?,1,1,?,?)",
-                    (username, request.form.get("display_name") or username, generate_password_hash(pw), role, now(), now()),
+                    "INSERT INTO users (username, display_name, password_hash, role, active, must_change, created_at, updated_at,"
+                    " staff_id) VALUES (?,?,?,?,1,1,?,?,?)",
+                    (username, request.form.get("display_name") or username, generate_password_hash(pw), role, now(), now(),
+                     request.form.get("staff_id", type=int)),
                 )
                 log_event("user_add", "users", cur.lastrowid, f"{username}（{ROLES[role]}）")
                 flash(f"「{username}」を追加しました。最初のログインでパスワードを変えてもらいます。", "ok")
@@ -424,6 +425,10 @@ def users():
             db.execute("UPDATE users SET pin_hash=NULL WHERE id=?", (uid,))
             log_event("user_pin_clear", "users", uid, target["username"])
             flash(f"「{target['username']}」のPINを消しました。本人が設定し直します。", "ok")
+        elif action == "staff":
+            db.execute("UPDATE users SET staff_id=?, updated_at=? WHERE id=?", (request.form.get("staff_id", type=int), now(), uid))
+            log_event("user_staff", "users", uid, target["username"])
+            flash(f"「{target['username']}」を職員の情報とつなぎました。タイムカード・給与明細に使います。", "ok")
         elif action == "unlock":
             db.execute("UPDATE users SET failed_count=0, locked_until=NULL WHERE id=?", (uid,))
             log_event("user_unlock", "users", uid, target["username"])
@@ -432,7 +437,8 @@ def users():
         return redirect(url_for("auth.users"))
     rows = db.execute("SELECT * FROM users ORDER BY active DESC, role, id").fetchall()
     devs = db.execute("SELECT * FROM devices WHERE active=1 ORDER BY id").fetchall()
-    return render_template("users.html", rows=rows, now=now(), MAX_FAILS=MAX_FAILS, devs=devs)
+    staff = db.execute("SELECT id, name FROM staff WHERE status IS NULL OR status != '退職' ORDER BY kana, name").fetchall()
+    return render_template("users.html", rows=rows, now=now(), MAX_FAILS=MAX_FAILS, devs=devs, staff=staff)
 
 
 @bp.route("/password", methods=["GET", "POST"])

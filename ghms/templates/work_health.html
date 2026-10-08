@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}職員の体温{% endblock %}
+{% block content %}
+<h1>🌡️ 職員の体温・体調</h1>
+{% if mine %}
+<p class="guide">出勤のときに入れた体温の記録です。勤務中の体温は「出勤・退勤」の画面から記録できます。</p>
+<div class="tablewrap card"><table class="list">
+  <thead><tr><th>日付</th><th>時刻</th><th>体温</th><th>体調</th></tr></thead>
+  {% for h in rows %}<tr><td>{{ h['date'] }}</td><td>{{ h['time'] }}</td><td>{% if (h['temp'] or 0) >= fever %}<span class="pill ng">{{ h['temp'] }}</span>{% else %}{{ h['temp'] or '' }}{% endif %}</td><td>{{ h['symptoms'] or '' }}</td></tr>
+  {% else %}<tr><td colspan="4" class="empty">まだ記録がありません。</td></tr>{% endfor %}
+</table></div>
+<div class="actions"><a class="btn primary" href="{{ url_for('work.clock') }}">⏰ 出勤・退勤の画面へ</a></div>
+{% else %}
+<form method="get" class="filters card">
+  <a class="btn" href="{{ url_for('work.health', date=prev) }}">◀ 前の日</a>
+  <input type="date" name="date" value="{{ day.isoformat() }}" onchange="this.form.submit()" aria-label="日付">
+  <a class="btn" href="{{ url_for('work.health', date=next) }}">次の日 ▶</a>
+</form>
+<p class="guide">{{ day.strftime('%Y年%m月%d日') }}の記録です。{{ fever }}℃以上、または体調にチェックがある人を上に出しています。出勤したのに記録がない人は「未記録」と出ます（感染症対策の記録として保管できます）。</p>
+<div class="tablewrap card"><table class="list">
+  <thead><tr><th>職員</th><th>出勤</th><th>時刻と体温</th><th>体調・メモ</th></tr></thead>
+  {% for x in rows %}{% set bad = x.checks|selectattr('temp')|list %}
+  <tr>
+    <td><b>{{ x.s['name'] }}</b></td><td>{% if x.on %}<span class="pill ok">出勤</span>{% endif %}</td>
+    <td>{% for h in x.checks %}<span class="{{ 'pill ng' if is_unwell(h) }}">{{ h['time'] }} {{ h['temp'] or '—' }}℃</span> {% else %}{% if x.on %}<span class="pill warn">未記録</span>{% else %}<span class="muted">—</span>{% endif %}{% endfor %}</td>
+    <td>{% for h in x.checks %}{{ h['symptoms'] }}{% if h['note'] %} {{ h['note'] }}{% endif %} {% endfor %}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+{% endblock %}

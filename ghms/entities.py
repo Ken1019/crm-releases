@@ -32,6 +32,8 @@ ACTIVITY_KIND = ["外出", "誕生日会", "バーベキュー", "季節の行�
                  "地域の行事", "その他"]
 SHOGU_CATEGORY = ["Ⅰ", "Ⅱ", "Ⅲ", "Ⅳ"]
 PAY_METHOD = ["基本給", "手当（毎月）", "賞与・一時金"]
+PAY_TYPE = ["月給", "時給", "日給"]
+EXPENSE_KIND = ["家賃・地代", "水道光熱費", "食材費", "日用品・消耗品", "車両・ガソリン", "修繕費", "通信費", "保険料", "研修費", "委託料", "その他"]
 PLAN_STATUS = ["作成中", "同意済", "モニタリング済", "終了"]
 INCOME_CLASS = ["生活保護", "低所得", "一般1", "一般2"]
 FOOD_TYPE = ["日額（食べた日数で計算）", "月額"]
@@ -336,6 +338,17 @@ ENTITIES = {
             F("certified_trainings", "修了した研修（研修名と修了日）", "textarea", list=False,
               help="例：サービス管理責任者等基礎研修 2020年11月修了／実践研修 2022年12月修了"),
             F("weekly_hours", "1週間の勤務時間（時間）", "number", list=False, help="勤務体制一覧表・従業者の一覧に使います"),
+            F("pay_type", "給与の形", "select", options=PAY_TYPE, default="月給", list=False, section="給与計算に使う情報"),
+            F("daily_wage", "日給（円）", "number", list=False),
+            F("allowance_qual", "資格手当（月額・円）", "number", list=False),
+            F("allowance_other", "その他の手当（月額・円）", "number", list=False),
+            F("commute", "通勤手当（月額・円・非課税）", "number", list=False),
+            F("night_allowance", "夜勤手当（1回・円）", "number", list=False, help="タイムカードで日をまたいだ勤務（夜勤）1回ごとに付きます"),
+            F("dependents", "扶養親族等の数（源泉徴収）", "number", list=False, help="扶養控除等申告書の人数。所得税の概算に使います"),
+            F("resident_tax", "住民税（月額・円）", "number", list=False, help="市区町村からの特別徴収税額通知書の金額"),
+            F("social_insurance", "社会保険（健康保険・厚生年金）に加入", "check", list=False),
+            F("std_monthly", "標準報酬月額（円）", "number", list=False, help="空欄なら毎月の総支給額で計算します（概算）"),
+            F("employment_insurance", "雇用保険に加入", "check", list=False),
         ],
     },
     "trainings": {
@@ -491,6 +504,24 @@ ENTITIES = {
             F("label", "名称（人員配置など）"),
             F("units", "単位数（1日）", "number", required=True),
             F("active", "使う", "check", default=1),
+        ],
+    },
+    "expenses": {
+        "icon": "🧮",
+        "guide": "給与以外にかかったお金（住居の家賃・光熱水費・食材費など）を記録します。「事業所の収支」に使います。",
+        "title": "経費",
+        "group": "請求・お金",
+        "display": "item",
+        "order": "date DESC, id DESC",
+        "admin_only": True,
+        "fields": [
+            F("date", "日付", "date", required=True, default="today"),
+            F("kind", "費目", "select", options=EXPENSE_KIND, required=True),
+            F("item", "内容", required=True, help="例：10月分 電気代"),
+            F("amount", "金額（円）", "number", required=True),
+            F("home_id", "住居", "ref", ref="homes"),
+            F("payee", "支払先", list=False),
+            F("notes", "備考", "textarea", list=False),
         ],
     },
     "invoices": {

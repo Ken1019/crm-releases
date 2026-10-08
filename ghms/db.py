@@ -74,6 +74,15 @@ def init_db(path):
     _ensure_columns(con, "record_columns", {"mark": "TEXT", "unit": "TEXT"})  # 記録票に出す記号（1・○など）
     con.execute("CREATE TABLE IF NOT EXISTS record_marks (resident_id INTEGER, date TEXT, col_id INTEGER, value TEXT,"
                 " updated_by TEXT, updated_at TEXT, PRIMARY KEY (resident_id, date, col_id))")
+    # タイムカード・体温（健康チェック）・給与明細
+    con.execute("CREATE TABLE IF NOT EXISTS timecards (id INTEGER PRIMARY KEY, staff_id INTEGER, date TEXT, clock_in TEXT,"
+                " clock_out TEXT, break_min INTEGER, note TEXT, updated_by TEXT, updated_at TEXT)")
+    con.execute("CREATE INDEX IF NOT EXISTS timecards_staff_date ON timecards (staff_id, date)")
+    con.execute("CREATE TABLE IF NOT EXISTS health_checks (id INTEGER PRIMARY KEY, staff_id INTEGER, date TEXT, time TEXT,"
+                " temp REAL, symptoms TEXT, note TEXT, updated_by TEXT, updated_at TEXT)")
+    con.execute("CREATE TABLE IF NOT EXISTS payslips (staff_id INTEGER, ym TEXT, data TEXT, gross INTEGER, deductions INTEGER,"
+                " net INTEGER, status TEXT, updated_by TEXT, updated_at TEXT, PRIMARY KEY (staff_id, ym))")
+    _ensure_columns(con, "users", {"staff_id": "INTEGER"})  # ログインする人と職員の情報をつなぐ
     # 事業所ごとのカスタマイズ（選択肢・独自の項目）
     con.execute("CREATE TABLE IF NOT EXISTS choice_options (field TEXT, value TEXT, sort INTEGER, active INTEGER DEFAULT 1,"
                 " track_days INTEGER, PRIMARY KEY (field, value))")
