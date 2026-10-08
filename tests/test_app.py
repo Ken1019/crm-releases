@@ -14,7 +14,7 @@ def app(tmp_path, monkeypatch):
 
 
 def csrf(client, path="/"):
-    html = client.get(path).get_data(as_text=True)
+    html = client.get(path, follow_redirects=True).get_data(as_text=True)
     m = re.search(r'name="_csrf" value="([0-9a-f]+)"', html)
     return m.group(1)
 
@@ -24,6 +24,15 @@ def client(app):
     c = app.test_client()
     r = c.post("/setup", data={"office_name": "テストホーム", "username": "admin", "password": "password123"})
     assert r.status_code == 302
+    return c
+
+
+def staff_client(admin, app, username="worker"):
+    """管理者が職員アカウントを作り、職員が初回ログインでパスワードを変えた状態のクライアント"""
+    post(admin, "/users", {"action": "add", "username": username, "password": "temppass1", "role": "staff"})
+    c = app.test_client()
+    c.post("/login", data={"username": username, "password": "temppass1"})
+    post(c, "/password", {"current": "temppass1", "password": "mypass2026", "password2": "mypass2026"})
     return c
 
 
@@ -109,9 +118,7 @@ def test_addon_check(client):
 
 
 def test_staff_role_cannot_see_admin_pages(client, app):
-    post(client, "/users", {"action": "add", "username": "worker", "password": "password123", "role": "staff"})
-    c = app.test_client()
-    c.post("/login", data={"username": "worker", "password": "password123"})
+    c = staff_client(client, app)
     assert c.get("/").status_code == 200
     assert c.get("/m/residents/").status_code == 200
     for path in ["/m/staff/", "/m/shogu_plans/", "/shogu/", "/career", "/users", "/backup", "/billing/invoices",
@@ -133,9 +140,7 @@ def test_purpose_menu(client, app):
     page = client.get("/m/support_plans/").get_data(as_text=True)
     assert 'class="on"><span class="ic">👤' in page and "＞" in page
 
-    post(client, "/users", {"action": "add", "username": "worker", "password": "password123", "role": "staff"})
-    c = app.test_client()
-    c.post("/login", data={"username": "worker", "password": "password123"})
+    c = staff_client(client, app)
     assert c.get("/do/staff").status_code == 404
     home = c.get("/").get_data(as_text=True)
     assert "職員のこと" not in home and "処遇改善の計画と配分を見る" not in home
@@ -301,3 +306,81 @@ def test_hidden_attribute_wins_over_css(app):
     # .todo { display:grid } などに負けて hidden の要素が見えてしまわないこと
     css = open(app.static_folder + "/style.css", encoding="utf-8").read()
     assert "[hidden] { display:none !important; }" in css
+
+
+# ---------------------------------------------------------------- ログイン・個人情報の保護
+def test_new_staff_must_change_password_first(client, app):
+    post(client, "/users", {"action": "add", "username": "newbie", "password": "temppass1", "role": "staff"})
+    c = app.test_client()
+    c.post("/login", data={"username": "newbie", "password": "temppass1"})
+    r = c.get("/m/residents/")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/password")
+    assert "最初に自分だけが知っているパスワードに変えてください" in c.get("/password").get_data(as_text=True)
+    # 決まりに合わないパスワード・確認の不一致は受け付けない
+    post(c, "/password", {"current": "temppass1", "password": "abcdefgh", "password2": "abcdefgh"})
+    post(c, "/password", {"current": "temppass1", "password": "mypass2026", "password2": "other2026"})
+    assert c.get("/m/residents/").status_code == 302
+    post(c, "/password", {"current": "temppass1", "password": "mypass2026", "password2": "mypass2026"})
+    assert c.get("/m/residents/").status_code == 200
+
+
+def test_password_rules(client):
+    r = post(client, "/users", {"action": "add", "username": "u1", "password": "onlyletters", "role": "staff"})
+    assert "英字と数字の両方" in client.get(r.headers["Location"]).get_data(as_text=True)
+    post(client, "/users", {"action": "add", "username": "abc12345", "password": "ABC12345", "role": "staff"})
+    users = client.get("/users").get_data(as_text=True)
+    assert "<b>u1</b>" not in users and "<b>abc12345</b>" not in users
+
+
+def test_lockout_after_failures_and_unlock(client, app):
+    staff_client(client, app, "locky")
+    c = app.test_client()
+    for _ in range(5):
+        c.post("/login", data={"username": "locky", "password": "wrong1234"})
+    r = c.post("/login", data={"username": "locky", "password": "mypass2026"})
+    assert "しばらくログインできません" in r.get_data(as_text=True)
+    assert "ロック中" in client.get("/users").get_data(as_text=True)
+    post(client, "/users", {"action": "unlock", "id": "2"})
+    r = c.post("/login", data={"username": "locky", "password": "mypass2026"})
+    assert r.status_code == 302
+
+
+def test_disabled_user_is_logged_out(client, app):
+    c = staff_client(client, app)
+    assert c.get("/").status_code == 200
+    post(client, "/users", {"action": "disable", "id": "2"})
+    assert c.get("/").status_code == 302  # 使っている途中でも追い出される
+    r = c.post("/login", data={"username": "worker", "password": "mypass2026"})
+    assert "違います" in r.get_data(as_text=True)
+
+
+def test_last_admin_is_protected(client):
+    post(client, "/users", {"action": "role", "id": "1", "role": "staff"})
+    post(client, "/users", {"action": "disable", "id": "1"})
+    assert client.get("/users").status_code == 200  # まだ管理者のまま
+
+
+def test_idle_timeout(client):
+    with client.session_transaction() as s:
+        s["seen"] = s["seen"] - 31 * 60
+    r = client.get("/m/residents/")
+    assert r.status_code == 302 and "/login" in r.headers["Location"]
+
+
+def test_staff_export_needs_permission(client, app):
+    c = staff_client(client, app)
+    assert c.get("/m/residents/export.xlsx").status_code == 403
+    assert "Excelで出す" not in c.get("/m/residents/").get_data(as_text=True)
+    post(client, "/settings", {"staff_can_export": "1", "session_timeout_min": "30"})
+    assert c.get("/m/residents/export.xlsx").status_code == 200
+
+
+def test_audit_records_views_exports_and_failures(client, app):
+    post(client, "/m/residents/new", {"name": "山田太郎"})
+    client.get("/m/residents/1")
+    client.get("/m/residents/export.xlsx")
+    app.test_client().post("/login", data={"username": "admin", "password": "wrong1234"})
+    html = client.get("/audit").get_data(as_text=True)
+    assert "閲覧" in html and "Excel出力" in html and "ログイン失敗" in html and "/m/residents/export.xlsx" in html
+    r = client.get("/m/residents/1")
+    assert r.headers["Cache-Control"] == "no-store" and r.headers["X-Frame-Options"] == "DENY"

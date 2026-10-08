@@ -44,6 +44,10 @@ def init_db(path):
         "CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY, at TEXT, username TEXT,"
         " action TEXT, entity TEXT, record_id INTEGER)"
     )
+    # ログインの安全対策・操作記録の詳細（既存DBにも列を追加）
+    _ensure_columns(con, "users", {"active": "INTEGER DEFAULT 1", "must_change": "INTEGER DEFAULT 0",
+                                   "failed_count": "INTEGER DEFAULT 0", "locked_until": "TEXT", "last_login": "TEXT"})
+    _ensure_columns(con, "audit_log", {"detail": "TEXT", "ip": "TEXT"})
     # 月ごとのグリッド入力（在居・外泊などの実績、勤務表）
     con.execute(
         "CREATE TABLE IF NOT EXISTS attendance (resident_id INTEGER, date TEXT, code TEXT,"
@@ -68,6 +72,13 @@ def init_db(path):
 
     seed(con)
     con.close()
+
+
+def _ensure_columns(con, table, cols):
+    existing = {r[1] for r in con.execute(f'PRAGMA table_info("{table}")')}
+    for name, decl in cols.items():
+        if name not in existing:
+            con.execute(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {decl}')
 
 
 def get_setting(key, default=""):

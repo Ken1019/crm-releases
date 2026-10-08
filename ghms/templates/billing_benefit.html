@@ -3,7 +3,7 @@
 {% block content %}
 <div class="head">
   <h1>🧮 給付費の概算（{{ first.strftime('%Y年%m月') }}）</h1>
-  <a class="btn" href="{{ url_for('billing.benefit_export', ym=ym, home_id=home_id or '') }}">🖨️ 概算と実績記録をExcelで出す</a>
+  {% if can_export %}<a class="btn" href="{{ url_for('billing.benefit_export', ym=ym, home_id=home_id or '') }}">🖨️ 概算と実績記録をExcelで出す</a>{% endif %}
 </div>
 <p class="guide">国保連に請求する前の確認用です。実績の入れ忘れ・加算の漏れ・単位数の未設定がないかを見てください。<b>請求そのものは請求ソフトで行い、その結果を正としてください。</b></p>
 <form method="get" class="filters card">

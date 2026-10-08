@@ -1,6 +1,11 @@
 {% extends 'base.html' %}
 {% block title %}帳票・資料出力{% endblock %}
 {% block content %}
+{% if not can_export %}
+<h1>🖨️ 書類を作る</h1>
+<p class="guide">個人情報を守るため、Excelでの書き出しは管理者だけができる設定になっています。必要なときは管理者に頼んでください。
+  （管理者は「設定」→「事業所の情報を変える」で職員にも許可できます）</p>
+{% else %}
 <h1>🖨️ 書類を作る</h1>
 <p class="guide">作りたい書類の「Excelで出す」を押すと、Excelファイルがダウンロードされます。それぞれの画面の「印刷」からPDFにもできます。</p>
 
@@ -64,4 +69,5 @@
   <h2>加算</h2>
   <ul class="related"><li><a href="{{ url_for('views.addon_check') }}">加算 要件確認・概算（印刷）</a></li></ul>
 </section>
+{% endif %}
 {% endblock %}

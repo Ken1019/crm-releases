@@ -124,6 +124,9 @@ def detail(aid):
             crud.save("contact_logs", data)
             flash("連絡を記録しました。", "ok")
             return redirect(url_for("absences.detail", aid=aid))
+    if request.method == "GET":
+        crud.audit("view", "absences", aid)
+        db.commit()
     logs = db.execute("SELECT * FROM contact_logs WHERE absence_id=? ORDER BY date DESC, time DESC, id DESC", (aid,)).fetchall()
     month = date.today().strftime("%Y-%m")
     visits = sum(1 for c in logs if c["method"] == "面会・訪問" and (c["date"] or "").startswith(month))

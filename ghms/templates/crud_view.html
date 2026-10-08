@@ -7,7 +7,7 @@
   <a class="btn primary" href="{{ url_for('crud.edit', key=key, rid=row['id']) }}">✏️ 直す</a>
   <button class="btn" onclick="window.print()">🖨️ 印刷</button>
   {% if key == 'residents' %}
-    <a class="btn" href="{{ url_for('views.resident_records_export', rid=row['id']) }}">📄 今月の記録をExcelで</a>
+    {% if can_export %}<a class="btn" href="{{ url_for('views.resident_records_export', rid=row['id']) }}">📄 今月の記録をExcelで</a>{% endif %}
   {% elif key == 'absences' %}
     <a class="btn" href="{{ url_for('absences.detail', aid=row['id']) }}">📞 連絡のやりとりを見る・記録する</a>
   {% elif key == 'shogu_plans' %}

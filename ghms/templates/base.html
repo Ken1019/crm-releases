@@ -18,7 +18,7 @@
   <span class="fontsize" role="group" aria-label="文字の大きさ">
     <button type="button" data-f="normal">文字 ふつう</button><button type="button" data-f="large">大きく</button>
   </span>
-  <span class="who">{{ g.user['display_name'] }} さん</span>
+  <span class="who">{{ g.user['display_name'] }} さん <span class="pill {{ 'warn' if is_admin else 'ok' }}">{{ ROLES[g.user['role']] }}</span></span>
   <a href="{{ url_for('auth.my_password') }}">パスワード変更</a>
   <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
     <input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="link">ログアウト</button>

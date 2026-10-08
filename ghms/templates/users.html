@@ -1,27 +1,61 @@
 {% extends 'base.html' %}
-{% block title %}ユーザー管理{% endblock %}
+{% block title %}ログインする人の管理{% endblock %}
 {% block content %}
-<h1>ユーザー管理</h1>
-<p class="muted">「職員」権限では、職員情報・キャリアパス・処遇改善（給与情報を含む）は表示されません。</p>
-<table class="list">
-<thead><tr><th>ユーザー名</th><th>表示名</th><th>権限</th><th>パスワード再設定</th><th></th></tr></thead>
-{% for u in rows %}
-<tr><td>{{ u['username'] }}</td><td>{{ u['display_name'] }}</td><td>{{ '管理者' if u['role'] == 'admin' else '職員' }}</td>
-<td><form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
-  <input type="hidden" name="action" value="password"><input type="hidden" name="id" value="{{ u['id'] }}">
-  <input type="password" name="password" minlength="8" placeholder="新しいパスワード" required> <button class="btn">変更</button></form></td>
-<td>{% if u['id'] != g.user['id'] %}<form method="post" class="inline" onsubmit="return confirm('削除しますか？')">
-  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete">
-  <input type="hidden" name="id" value="{{ u['id'] }}"><button class="btn danger">削除</button></form>{% endif %}</td></tr>
-{% endfor %}
-</table>
-<h2>ユーザー追加</h2>
-<form method="post" class="card form">
-  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="add">
-  <label><span>ユーザー名</span><input name="username" required></label>
-  <label><span>表示名</span><input name="display_name"></label>
-  <label><span>パスワード（8文字以上）</span><input type="password" name="password" minlength="8" required></label>
-  <label><span>権限</span><select name="role"><option value="staff">職員</option><option value="admin">管理者</option></select></label>
-  <div class="actions wide"><button class="btn primary">追加</button></div>
-</form>
+<h1>🔑 ログインする人の管理</h1>
+<p class="guide">職員一人ひとりに自分のアカウントを作ってください（アカウントの使い回しはしないでください。誰が何をしたか記録が残ります）。
+  退職した人は「停止」にすると、記録を残したままログインできなくなります。</p>
+
+<section class="card">
+  <h2>権限でできること</h2>
+  <div class="tablewrap"><table class="list">
+    <thead><tr><th></th><th>日誌・支援記録・連絡・入院帰省</th><th>入居者の情報</th><th>実績・預り金</th><th>職員・給与・処遇改善・請求書</th><th>設定・ログインする人</th><th>Excel出力</th></tr></thead>
+    <tr><td><b>管理者</b></td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+    <tr><td><b>職員</b></td><td>✓</td><td>✓</td><td>✓</td><td>—</td><td>—</td><td>設定で許可したときだけ</td></tr>
+  </table></div>
+</section>
+
+<section class="card">
+  <h2>アカウント一覧</h2>
+  <div class="tablewrap"><table class="list">
+  <thead><tr><th>ユーザー名</th><th>名前</th><th>権限</th><th>状態</th><th>最後のログイン</th><th>パスワード再設定</th><th></th></tr></thead>
+  {% for u in rows %}
+  {% set locked = u['locked_until'] and u['locked_until'] > now %}
+  <tr>
+    <td><b>{{ u['username'] }}</b>{% if u['id'] == g.user['id'] %} <small class="muted">（自分）</small>{% endif %}</td>
+    <td>{{ u['display_name'] }}</td>
+    <td><form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="role"><input type="hidden" name="id" value="{{ u['id'] }}">
+      <select name="role" onchange="this.form.submit()" aria-label="権限">{% for k, v in ROLES.items() %}<option value="{{ k }}"{% if u['role'] == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></form></td>
+    <td>{% if not u['active'] %}<span class="pill ng">停止中</span>{% elif locked %}<span class="pill warn">ロック中</span>
+        {% elif u['must_change'] %}<span class="pill warn">パスワード変更待ち</span>{% else %}<span class="pill ok">使用中</span>{% endif %}</td>
+    <td class="nowrap">{{ u['last_login'] or '—' }}</td>
+    <td><form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="password"><input type="hidden" name="id" value="{{ u['id'] }}">
+      <input type="password" name="password" minlength="8" placeholder="仮のパスワード" required autocomplete="new-password" class="w8"> <button class="btn mini">再設定</button></form></td>
+    <td class="nowrap">
+      {% if locked %}<form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="unlock">
+        <input type="hidden" name="id" value="{{ u['id'] }}"><button class="btn mini">ロック解除</button></form>{% endif %}
+      {% if u['id'] != g.user['id'] %}
+      <form method="post" class="inline"{% if u['active'] %} onsubmit="return confirm('{{ u['username'] }} を停止しますか？ログインできなくなります。')"{% endif %}>
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="{{ 'disable' if u['active'] else 'enable' }}">
+        <input type="hidden" name="id" value="{{ u['id'] }}"><button class="btn mini {{ 'danger' if u['active'] }}">{{ '停止する' if u['active'] else '使えるようにする' }}</button></form>
+      {% endif %}</td>
+  </tr>
+  {% endfor %}
+  </table></div>
+  <p class="muted small">パスワードを{{ MAX_FAILS }}回続けて間違えると、しばらくロックされます。再設定した仮のパスワードは、本人が次のログインで必ず変更します。</p>
+</section>
+
+<section class="card">
+  <h2>＋ ログインする人を追加</h2>
+  <form method="post" class="form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="add">
+    <label><span>ユーザー名（半角英数）<span class="must">必須</span></span><input name="username" required pattern="[A-Za-z0-9_.\-]+" autocomplete="off"></label>
+    <label><span>名前</span><input name="display_name" placeholder="例：鈴木 由美"></label>
+    <label><span>仮のパスワード<span class="must">必須</span></span><input type="password" name="password" minlength="8" required autocomplete="new-password">
+      <small class="muted">8文字以上・英字と数字の両方。本人に伝え、最初のログインで変えてもらいます。</small></label>
+    <label><span>権限</span><select name="role"><option value="staff">職員</option><option value="admin">管理者</option></select></label>
+    <div class="actions wide"><button class="btn primary">＋ 追加する</button></div>
+  </form>
+</section>
 {% endblock %}

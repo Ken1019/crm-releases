@@ -160,6 +160,10 @@ for sid, p in pattern.items():
         shift[f"s{sid}_{day}"] = p[(day - 1) % 7]
 post("/shift/", shift)
 
+# ログインする人（職員のアカウント）
+post("/users", {"action": "add", "username": "suzuki", "display_name": "鈴木 由美", "password": "temppass1", "role": "staff"})
+post("/users", {"action": "add", "username": "takahashi", "display_name": "高橋 誠", "password": "temppass1", "role": "staff"})
+
 # サンプル登録で溜まった「登録しました」の表示を消しておく
 c.get("/m/homes/")
 

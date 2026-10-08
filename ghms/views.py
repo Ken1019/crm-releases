@@ -485,18 +485,29 @@ SETTINGS = [
     ("bank_info", "振込先（例：〇〇銀行 △△支店 普通 1234567 カ）〇〇）"),
     ("invoice_due_day", "利用料の支払期限（翌月の何日）"),
     ("full_time_hours", "常勤の勤務時間（月・時間）※常勤換算に使います"),
+    ("session_timeout_min", "自動ログアウトまでの時間（分）※操作がないとき", ["10", "15", "30", "60", "120"]),
+    ("staff_can_export", "職員のExcel出力・バックアップ", [("0", "許可しない（管理者だけ）"), ("1", "許可する")]),
 ]
+SETTING_DEFAULTS = {"session_timeout_min": "30", "staff_can_export": "0"}
 
 
 @bp.route("/settings", methods=["GET", "POST"])
 @admin_required
 def settings():
     if request.method == "POST":
-        for k, _ in SETTINGS:
+        for k, *_ in SETTINGS:
             set_setting(k, request.form.get(k, "").strip())
+        from .auth import log_event
+
+        log_event("settings")
+        get_db().commit()
         flash("設定を保存しました。", "ok")
         return redirect(url_for("views.settings"))
-    return render_template("settings.html", items=[(k, label, get_setting(k)) for k, label in SETTINGS])
+    items = []
+    for k, label, *opts in SETTINGS:
+        choices = [(o, o) if isinstance(o, str) else o for o in opts[0]] if opts else None
+        items.append((k, label, get_setting(k, SETTING_DEFAULTS.get(k, "")), choices))
+    return render_template("settings.html", items=items)
 
 
 @bp.route("/backup")
@@ -515,5 +526,30 @@ def backup():
 @bp.route("/audit")
 @admin_required
 def audit_log():
-    rows = get_db().execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 300").fetchall()
-    return render_template("audit.html", rows=rows)
+    where, params = [], []
+    user, action = request.args.get("user", ""), request.args.get("action", "")
+    if user:
+        where.append("username = ?")
+        params.append(user)
+    if action:
+        where.append("action = ?")
+        params.append(action)
+    if request.args.get("from"):
+        where.append("at >= ?")
+        params.append(request.args["from"])
+    if request.args.get("to"):
+        where.append("at <= ?")
+        params.append(request.args["to"] + " 23:59:59")
+    sql = "SELECT * FROM audit_log" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC LIMIT 500"
+    db = get_db()
+    rows = db.execute(sql, params).fetchall()
+    users = [r[0] for r in db.execute("SELECT DISTINCT username FROM audit_log WHERE username != '' ORDER BY username")]
+    return render_template("audit.html", rows=rows, users=users, args=request.args, ACTIONS=AUDIT_ACTIONS)
+
+
+AUDIT_ACTIONS = {
+    "login": "ログイン", "logout": "ログアウト", "login_failed": "ログイン失敗", "view": "閲覧", "export": "Excel出力・ダウンロード",
+    "create": "登録", "update": "更新", "delete": "削除", "password_change": "パスワード変更", "settings": "設定の変更",
+    "user_add": "ユーザー追加", "user_password": "パスワード再設定", "user_role": "権限の変更", "user_disable": "ユーザー停止",
+    "user_enable": "ユーザー再開", "user_unlock": "ロック解除",
+}

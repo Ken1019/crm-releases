@@ -112,7 +112,7 @@ def _seed_v2(con):
             " VALUES (?,?,?,?,?,?,?,?,?)",
             (sort, code, name, start, end, hours, night, ts, ts),
         )
-    for k, v in [("full_time_hours", "160"), ("invoice_due_day", "27"), ("bank_info", ""), ("office_address", ""),
+    for k, v in [("session_timeout_min", "30"), ("staff_can_export", "0"), ("full_time_hours", "160"), ("invoice_due_day", "27"), ("bank_info", ""), ("office_address", ""),
                  ("office_tel", "")]:
         con.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
     con.execute("INSERT INTO settings (key, value) VALUES ('seeded_v2', '1')")

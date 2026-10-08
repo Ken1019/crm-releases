@@ -4,7 +4,7 @@
 <div class="head">
   <h1>{{ ent.icon }} {{ ent.title }}</h1>
   <a class="btn primary" href="{{ url_for('crud.new', key=key) }}">＋ 新しく追加する</a>
-  <a class="btn" href="{{ url_for('crud.export', key=key, **args) }}">🖨️ Excelで出す</a>
+  {% if can_export %}<a class="btn" href="{{ url_for('crud.export', key=key, **args) }}">🖨️ Excelで出す</a>{% endif %}
   {% if key == 'absences' %}<a class="btn" href="{{ url_for('absences.index') }}">🏥 いま不在の方を見る</a>{% endif %}
   {% if key == 'shogu_plans' %}<a class="btn" href="{{ url_for('views.shogu_index') }}">💴 処遇改善の画面へ</a>{% endif %}
 </div>

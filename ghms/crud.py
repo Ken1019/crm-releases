@@ -135,11 +135,15 @@ def safe_next(url):
     return url if url and url.startswith("/") and not url.startswith("//") else None
 
 
+# 開いただけでも記録を残す（個人情報・給与など）
+VIEW_LOGGED = {"residents", "support_plans", "support_records", "contact_logs", "absences", "incidents",
+               "resident_documents", "deposits", "invoices", "staff", "evaluations", "shogu_allocations"}
+
+
 def audit(action, key, rid):
-    get_db().execute(
-        "INSERT INTO audit_log (at, username, action, entity, record_id) VALUES (?,?,?,?,?)",
-        (now(), g.user["username"], action, key, rid),
-    )
+    from .auth import log_event
+
+    log_event(action, key, rid)
 
 
 def save(key, data, rid=None):
@@ -236,6 +240,9 @@ def view(key, rid):
         for f in e["fields"]:
             if f["type"] == "ref" and f["ref"] == key:
                 related.append((k, e, f["name"]))
+    if key in VIEW_LOGGED:
+        audit("view", key, rid)
+        get_db().commit()
     summary = resident_summary(rid) if key == "residents" else None
     return render_template("crud_view.html", key=key, ent=ent, row=row, maps=ref_maps(ent), fmt=fmt, related=related,
                            summary=summary)
