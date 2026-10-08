@@ -3,7 +3,7 @@
     python run.py              … このPCだけで使う（http://127.0.0.1:8000）
     python run.py --lan        … 同じ事業所内LANの他のPCからも使う
     python run.py --stop       … 起動中のシステムを止める（インストーラー・更新で使う）
-    python run.py --backup D:\GHMSバックアップ … データを日付付きでバックアップ（タスクスケジューラ用）
+    python run.py --backup D:\\GHMSバックアップ … データを日付付きでバックアップ（タスクスケジューラ用）
 
 インストール版（GHMS.exe）も同じ。すでに起動していればブラウザを開くだけにする。
 LAN・ポートは config.ini（インストール版は C:\\ProgramData\\GHMS\\config.ini）でも指定できる。
