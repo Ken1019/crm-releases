@@ -322,7 +322,7 @@ while queue and len(pages) < MAX_PAGES:
     text = r.get_data(as_text=True)
     pages[url] = text
     for _, link in HREF.findall(text):
-        link = htmlmod.unescape(link)
+        link = htmlmod.unescape(link).split("#")[0]
         if link.startswith("//") or link in seen:
             continue
         if allowed(link):
@@ -379,8 +379,9 @@ def rewrite(text):
         attr, link = m.group(1), htmlmod.unescape(m.group(2))
         if link.startswith("/static/"):
             return f'{attr}="{link.rsplit("/", 1)[1]}"'
-        if link in names:
-            return f'{attr}="{names[link]}"'
+        base, _, frag = link.partition("#")
+        if base in names:
+            return f'{attr}="{names[base]}{"#" + frag if frag else ""}"'
         if attr == "action" and link == "/logout":
             return f'{attr}="p_login.html" data-demo-go="p_login.html"'
         if attr == "action":
