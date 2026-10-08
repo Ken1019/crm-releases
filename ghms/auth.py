@@ -66,6 +66,31 @@ def log_event(action, entity=None, record_id=None, detail=None, username=None):
     )
 
 
+_DUMMY_HASH = generate_password_hash("dummy-password-for-timing")
+
+
+def is_safe_path(url):
+    """リダイレクト先として安全な、このサイトの中のパスか（//evil.example や制御文字・\\ でごまかすものを通さない）"""
+    from urllib.parse import urlsplit
+
+    if not url or not url.startswith("/") or url.startswith("//"):
+        return False
+    if any(ord(c) < 0x21 or c in "\\\x7f" for c in url):
+        return False
+    sp = urlsplit(url)
+    return not sp.scheme and not sp.netloc
+
+
+def bump_session(uid):
+    """その人のログインを全部切る（パスワード・PIN・権限の変更、停止、ログアウトのとき）"""
+    db = get_db()
+    db.execute("UPDATE users SET session_ver=COALESCE(session_ver, 0)+1 WHERE id=?", (uid,))
+    ver = db.execute("SELECT session_ver FROM users WHERE id=?", (uid,)).fetchone()[0]
+    if session.get("uid") == uid:
+        session["ver"] = ver  # 自分で変えたときは、この画面のログインはそのまま
+    return ver
+
+
 def password_problem(pw, username=""):
     """パスワードの決まり。問題があればその説明、なければ None"""
     if len(pw) < 8:
@@ -97,7 +122,7 @@ def install(app):
         if uid:
             user = get_db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
             seen = session.get("seen", 0)
-            if user is None or not user["active"]:
+            if user is None or not user["active"] or session.get("ver", 0) != (user["session_ver"] or 0):
                 session.clear()
             elif time.time() - seen > timeout_seconds():
                 session.clear()
@@ -105,7 +130,8 @@ def install(app):
                     flash("しばらく操作がなかったため、安全のためログアウトしました。もう一度ログインしてください。", "error")
             else:
                 g.user = user
-                session["seen"] = time.time()
+                if request.endpoint not in PUBLIC:  # 打刻の画面などを開いているだけではログインを延ばさない
+                    session["seen"] = time.time()
         if request.endpoint in PUBLIC:
             return None
         if get_db().execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
@@ -170,11 +196,12 @@ def _login(user, via="password"):
     session["csrf"] = secrets.token_hex(16)
     session["seen"] = time.time()
     session["via"] = via
+    session["ver"] = user["session_ver"] or 0
 
 
 def _safe_next(default="views.dashboard"):
     nxt = request.args.get("next", "")
-    return nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for(default)
+    return nxt if is_safe_path(nxt) else url_for(default)
 
 
 @bp.route("/setup", methods=["GET", "POST"])
@@ -228,17 +255,17 @@ def login():
         username = request.form.get("username", "").strip()
         user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
         locked = user and user["locked_until"] and user["locked_until"] > now()
-        if user and user["active"] and not locked and check_password_hash(user["password_hash"], request.form.get("password", "")):
+        # ないユーザー名でも同じだけ時間をかける（ユーザー名があるかどうかを探られないように）
+        ok = check_password_hash(user["password_hash"] if user else _DUMMY_HASH, request.form.get("password", ""))
+        if user and user["active"] and not locked and ok:
             db.execute("UPDATE users SET failed_count=0, locked_until=NULL, last_login=? WHERE id=?", (now(), user["id"]))
             _login(user)
             g.user = user
             log_event("login")
             db.commit()
             return redirect(_safe_next())
-        if locked:
-            flash(f"パスワードを続けて間違えたため、しばらくログインできません。{LOCK_MINUTES}分ほど待つか、管理者にロック解除を頼んでください。", "error")
-        else:
-            flash("ユーザー名またはパスワードが違います。", "error")
+        flash(f"ユーザー名またはパスワードが違うか、続けて間違えたため{LOCK_MINUTES}分ほどログインできない状態です。"
+              "わからないときは管理者にロック解除を頼んでください。", "error")
         if user and user["active"] and not locked:
             _fail(user, None)
         else:
@@ -347,6 +374,7 @@ def my_pin():
             flash("確認のために入れたPINが一致しません。", "error")
         else:
             db.execute("UPDATE users SET pin_hash=? WHERE id=?", (generate_password_hash(pin), g.user["id"]))
+            bump_session(g.user["id"])
             log_event("pin_set")
             flash("PINを設定しました。登録された事業所の端末で、名前をえらんでPINでログインできます。", "ok")
     db.commit()
@@ -357,6 +385,7 @@ def my_pin():
 def logout():
     if g.get("user"):
         log_event("logout")
+        bump_session(g.user["id"])  # 前にコピーされたログインも使えなくする
         get_db().commit()
     session.clear()
     flash("ログアウトしました。", "ok")
@@ -404,6 +433,7 @@ def users():
             else:
                 db.execute("UPDATE users SET password_hash=?, must_change=?, failed_count=0, locked_until=NULL, updated_at=? WHERE id=?",
                            (generate_password_hash(pw), 0 if uid == g.user["id"] else 1, now(), uid))
+                bump_session(uid)
                 log_event("user_password", "users", uid, target["username"])
                 flash(f"「{target['username']}」のパスワードを再設定しました。次のログインで本人に変えてもらいます。", "ok")
         elif action == "role":
@@ -412,6 +442,7 @@ def users():
                 flash("管理者が1人もいなくなるため変更できません。", "error")
             else:
                 db.execute("UPDATE users SET role=?, updated_at=? WHERE id=?", (role, now(), uid))
+                bump_session(uid)
                 log_event("user_role", "users", uid, f"{target['username']} → {ROLES[role]}")
                 flash(f"「{target['username']}」の権限を{ROLES[role]}にしました。", "ok")
         elif action in ("disable", "enable"):
@@ -419,10 +450,12 @@ def users():
                 flash("自分自身や、最後の管理者は停止できません。", "error")
             else:
                 db.execute("UPDATE users SET active=?, updated_at=? WHERE id=?", (1 if action == "enable" else 0, now(), uid))
+                bump_session(uid)
                 log_event("user_" + action, "users", uid, target["username"])
                 flash(f"「{target['username']}」を{'使えるように' if action == 'enable' else '停止'}しました。", "ok")
         elif action == "clear_pin":
             db.execute("UPDATE users SET pin_hash=NULL WHERE id=?", (uid,))
+            bump_session(uid)
             log_event("user_pin_clear", "users", uid, target["username"])
             flash(f"「{target['username']}」のPINを消しました。本人が設定し直します。", "ok")
         elif action == "staff":
@@ -458,6 +491,7 @@ def my_password():
             db = get_db()
             db.execute("UPDATE users SET password_hash=?, must_change=0, updated_at=? WHERE id=?",
                        (generate_password_hash(pw), now(), g.user["id"]))
+            bump_session(g.user["id"])  # ほかの端末のログインを切る
             log_event("password_change")
             db.commit()
             flash("パスワードを変更しました。", "ok")

@@ -48,6 +48,8 @@ def update_url():
 
 
 def fetch_manifest(url, opener=urllib.request.urlopen):
+    if not url.startswith("https://"):
+        raise ValueError("更新情報のURLは https:// で始まる必要があります")
     req = urllib.request.Request(url, headers={"User-Agent": f"GHMS/{VERSION}"})
     with opener(req, timeout=TIMEOUT) as r:
         data = json.loads(r.read().decode("utf-8"))

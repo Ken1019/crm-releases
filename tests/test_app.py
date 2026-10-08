@@ -343,7 +343,7 @@ def test_lockout_after_failures_and_unlock(client, app):
     for _ in range(5):
         c.post("/login", data={"username": "locky", "password": "wrong1234"})
     r = c.post("/login", data={"username": "locky", "password": "mypass2026"})
-    assert "しばらくログインできません" in r.get_data(as_text=True)
+    assert "ログインできない状態です" in r.get_data(as_text=True)
     assert "ロック中" in client.get("/users").get_data(as_text=True)
     post(client, "/users", {"action": "unlock", "id": "2"})
     r = c.post("/login", data={"username": "locky", "password": "mypass2026"})
@@ -356,7 +356,7 @@ def test_disabled_user_is_logged_out(client, app):
     post(client, "/users", {"action": "disable", "id": "2"})
     assert c.get("/").status_code == 302  # 使っている途中でも追い出される
     r = c.post("/login", data={"username": "worker", "password": "mypass2026"})
-    assert "違います" in r.get_data(as_text=True)
+    assert "違うか" in r.get_data(as_text=True)
 
 
 def test_last_admin_is_protected(client):
@@ -1021,3 +1021,26 @@ def test_today_list_on_home(client, app):
     page = staff.get("/").get_data(as_text=True)
     assert "今日のやること" in page and "ひまわりの業務日誌を書く" in page and "国保連" not in page
     assert staff.post("/today/done", data={"key": m.group(1), "_csrf": csrf(staff)}).status_code == 403
+
+
+def test_security_redirects_sessions_and_staff_delete(client, app):
+    # next= に制御文字をまぜた外部へのリダイレクトは通さない
+    c = app.test_client()
+    r = c.post("/login?next=/%09/evil.example", data={"username": "admin", "password": "password123"})
+    assert r.headers["Location"].endswith("/") and "evil" not in r.headers["Location"]
+    # タイムカードがある職員は消せない（次の職員にデータが引き継がれないように）
+    post(client, "/m/staff/new", {"name": "旧 職員", "status": "在籍"})
+    with app.app_context():
+        from ghms.db import get_db
+        get_db().execute("INSERT INTO timecards (staff_id, date, clock_in, clock_out) VALUES (1, '2026-09-01', '09:00', '18:00')")
+        get_db().commit()
+    post(client, "/m/staff/1/delete", {})
+    assert "旧 職員" in client.get("/m/staff/").get_data(as_text=True)
+    # ログアウトする前にコピーしたログインは、ログアウトのあと使えない
+    with c.session_transaction() as s:
+        copied = dict(s)
+    post(c, "/logout", {})
+    c2 = app.test_client()
+    with c2.session_transaction() as s:
+        s.update(copied)
+    assert c2.get("/").status_code == 302

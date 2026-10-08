@@ -47,7 +47,7 @@ def init_db(path):
     # ログインの安全対策・操作記録の詳細（既存DBにも列を追加）
     _ensure_columns(con, "users", {"active": "INTEGER DEFAULT 1", "must_change": "INTEGER DEFAULT 0",
                                    "failed_count": "INTEGER DEFAULT 0", "locked_until": "TEXT", "last_login": "TEXT",
-                                   "pin_hash": "TEXT"})
+                                   "pin_hash": "TEXT", "session_ver": "INTEGER DEFAULT 0"})
     # PINでログインできる事業所の端末（端末に保存する合い言葉はハッシュで保管）
     con.execute(
         "CREATE TABLE IF NOT EXISTS devices (id INTEGER PRIMARY KEY, name TEXT, token_hash TEXT UNIQUE,"

@@ -149,7 +149,9 @@ def parse_form(ent, form):
 
 def safe_next(url):
     """リダイレクト先は同一サイト内のパスに限定する"""
-    return url if url and url.startswith("/") and not url.startswith("//") else None
+    from .auth import is_safe_path
+
+    return url if is_safe_path(url) else None
 
 
 # 開いただけでも記録を残す（個人情報・給与など）
@@ -189,9 +191,21 @@ def save(key, data, rid=None):
     return rid
 
 
+# 一覧の表（ENTITIES）ではない記録からの参照。職員を消すと、タイムカードや給与明細が次の職員に引き継がれてしまうため
+EXTRA_REFS = {
+    "staff": [("timecards", "staff_id", "タイムカード"), ("payslips", "staff_id", "給与明細"), ("leave_grants", "staff_id", "有給休暇"),
+              ("shifts", "staff_id", "勤務表"), ("health_checks", "staff_id", "体温の記録"), ("users", "staff_id", "ログインする人")],
+    "residents": [("attendance", "resident_id", "実績"), ("record_marks", "resident_id", "実績記録票")],
+}
+
+
 def references_to(key, rid):
     """他テーブルから参照されている件数（削除可否の判定用）"""
     db, found = get_db(), []
+    for table, col, label in EXTRA_REFS.get(key, []):
+        n = db.execute(f'SELECT COUNT(*) FROM "{table}" WHERE "{col}"=?', (rid,)).fetchone()[0]
+        if n:
+            found.append(f"{label} {n}件")
     for k, ent in ENTITIES.items():
         for f in ent["fields"]:
             if f["type"] in ("ref", "multiref") and f["ref"] == key:
