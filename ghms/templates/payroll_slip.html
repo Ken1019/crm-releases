@@ -1,0 +1,27 @@
+{% extends 'doc_base.html' %}
+{% block title %}給与明細書 {{ s['name'] }} {{ first.strftime('%Y年%m月') }}{% endblock %}
+{% block back %}{{ url_for('payroll.mine') if not is_admin else url_for('payroll.edit', sid=s['id'], ym=first.strftime('%Y-%m')) }}{% endblock %}
+{% block pages %}
+<style>
+.slip .box{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.slip table{font-size:12px} .slip td.r{text-align:right;white-space:nowrap}
+.slip .net{font-size:20px;font-weight:bold;text-align:right;border:2px solid #333;padding:8px 14px;margin-top:10px}
+</style>
+<div class="page slip">
+  <h1>給与明細書</h1>
+  <div class="meta"><span>{{ first.strftime('%Y年%m月') }}分（{{ pay_day }}支給）</span><span>{{ office.corp_name }} {{ office.office_name }}</span></div>
+  <p style="font-size:15px;margin:6px 0 10px"><b>{{ s['name'] }}</b> 様{% if d.status != '確定' %}　<span style="color:#c00">（未確定）</span>{% endif %}</p>
+  <div class="box">
+    <table><tr><th colspan="2">勤怠</th></tr>
+      {% for k, label, unit in WORK_ITEMS %}<tr><td>{{ label }}</td><td class="r">{% if k in ('hours', 'ot_h', 'night_h') %}{{ hm(d.work[k]) }}{% else %}{{ d.work[k] }}{{ unit }}{% endif %}</td></tr>{% endfor %}</table>
+    <table><tr><th colspan="2">支給</th></tr>
+      {% for k, label in EARNINGS %}{% if d.earnings[k] %}<tr><td>{{ label }}</td><td class="r">{{ '{:,}'.format(d.earnings[k]) }}</td></tr>{% endif %}{% endfor %}
+      <tr><th>総支給額</th><th class="r">{{ '{:,}'.format(d.gross) }}</th></tr></table>
+    <table><tr><th colspan="2">控除</th></tr>
+      {% for k, label in DEDUCTIONS %}{% if d.deductions[k] %}<tr><td>{{ label }}</td><td class="r">{{ '{:,}'.format(d.deductions[k]) }}</td></tr>{% endif %}{% endfor %}
+      <tr><th>控除合計</th><th class="r">{{ '{:,}'.format(d.total_ded) }}</th></tr></table>
+  </div>
+  <div class="net">差引支給額　{{ '{:,}'.format(d.net) }} 円</div>
+  {% if d.memo %}<p style="margin-top:10px">{{ d.memo }}</p>{% endif %}
+</div>
+{% endblock %}

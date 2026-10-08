@@ -4,7 +4,8 @@
 {% if device %}
 <div class="pinlogin">
   <h1>🌼 {{ office_name }}</h1>
-  <p class="hello">自分の名前を押して、4桁のPINを入れてください。</p>
+  {% if feature_on('timecard') %}<p><a class="btn primary big" href="{{ url_for('work.kiosk') }}">⏰ 出勤・退勤の打刻はこちら</a></p>{% endif %}
+  <p class="hello">記録を書くときは、自分の名前を押して、4桁のPINを入れてください。</p>
   <div class="people">
     {% for p in people %}<a class="person" href="{{ url_for('auth.pin_login', uid=p['id']) }}"><span class="avatar">{{ p['display_name'][:1] }}</span>
       <b>{{ p['display_name'] }}</b>{% if p['role'] == 'admin' %}<small>管理者</small>{% endif %}</a>

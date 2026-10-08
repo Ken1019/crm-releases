@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block title %}給与計算{% endblock %}
+{% block content %}
+<h1>💴 給与計算（{{ first.strftime('%Y年%m月') }}分）</h1>
+<p class="guide">タイムカード（実働・残業・深夜・夜勤）と職員の情報（給与の形・手当・保険）から自動で計算しています。名前を押すと1項目ずつ直せます。確かめたら「確定」し、「職員に見せる」を押すと本人の画面に明細が出ます。保険料・所得税は概算です（料率は「給与の設定」で直せます）。</p>
+<form method="get" class="filters card">
+  <input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
+  <a class="btn" href="{{ url_for('work.timecards', ym=ym) }}">📅 タイムカード</a>
+  <a class="btn" href="{{ url_for('payroll.ledger', year=first.year) }}">📥 賃金台帳（{{ first.year }}年）</a>
+  <a class="btn" href="{{ url_for('payroll.settings') }}">⚙️ 給与の設定</a>
+</form>
+<div class="tablewrap card"><table class="list">
+  <thead><tr><th>職員</th><th>状態</th><th>出勤</th><th>実働</th><th>残業</th><th>夜勤</th>
+    <th class="num">基本給</th><th class="num">手当など</th><th class="num">総支給</th><th class="num">控除</th><th class="num">差引支給</th><th class="num">事業所負担</th><th></th></tr></thead>
+  {% for r in rows %}{% set d = r.d %}
+  <tr>
+    <td class="nowrap"><a href="{{ url_for('payroll.edit', sid=r.s['id'], ym=ym) }}"><b>{{ r.s['name'] }}</b></a><br><small class="muted">{{ d.pay_type }}</small></td>
+    <td>{% if not r.saved %}<span class="pill warn">自動計算</span>{% elif d.status == '確定' %}<span class="pill ok">確定</span>{% if d.shared %} <span class="pill ok">見せている</span>{% endif %}{% else %}<span class="pill">下書き</span>{% endif %}
+      {% if d.missing %}<br><span class="pill ng">退勤なし {{ d.missing }}</span>{% endif %}</td>
+    <td>{{ d.work.days }}日</td><td>{{ hm(d.work.hours) }}</td><td>{{ hm(d.work.ot_h) }}</td><td>{{ d.work.yakin_n }}回</td>
+    <td class="num">{{ '{:,}'.format(d.earnings.base) }}</td><td class="num">{{ '{:,}'.format(d.gross - d.earnings.base) }}</td>
+    <td class="num"><b>{{ '{:,}'.format(d.gross) }}</b></td><td class="num">{{ '{:,}'.format(d.total_ded) }}</td>
+    <td class="num"><b>{{ '{:,}'.format(d.net) }}</b></td><td class="num">{{ '{:,}'.format(d.employer_total or 0) }}</td>
+    <td class="nowrap"><a class="btn mini" href="{{ url_for('payroll.edit', sid=r.s['id'], ym=ym) }}">直す</a> <a class="btn mini" href="{{ url_for('payroll.slip', sid=r.s['id'], ym=ym) }}">明細</a></td>
+  </tr>
+  {% else %}<tr><td colspan="13" class="empty">職員が登録されていません。</td></tr>{% endfor %}
+  <tr class="total"><td colspan="8">合計（{{ rows|length }}人）</td><td class="num"><b>{{ '{:,}'.format(total.gross) }}</b></td><td class="num">{{ '{:,}'.format(total.total_ded) }}</td>
+    <td class="num"><b>{{ '{:,}'.format(total.net) }}</b></td><td class="num">{{ '{:,}'.format(total.employer_total) }}</td><td></td></tr>
+</table></div>
+<form method="post" class="actions"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="save_all"><input type="hidden" name="ym" value="{{ ym }}">
+  <button class="btn primary">💾 自動計算の人を全員、下書きとして保存する</button>
+  <a class="btn" href="{{ url_for('payroll.profit') }}">📊 事業所の収支を見る</a></form>
+<p class="muted small">人件費（総支給＋事業所負担）{{ '{:,}'.format(total.gross + total.employer_total) }}円。給与の締めは月末、時間外は1日8時間をこえた分として計算しています。</p>
+{% endblock %}

@@ -33,6 +33,7 @@ ACTIVITY_KIND = ["外出", "誕生日会", "バーベキュー", "季節の行�
 SHOGU_CATEGORY = ["Ⅰ", "Ⅱ", "Ⅲ", "Ⅳ"]
 PAY_METHOD = ["基本給", "手当（毎月）", "賞与・一時金"]
 PAY_TYPE = ["月給", "時給", "日給"]
+COMMUTE_TYPE = ["支給しない", "毎月定額", "1日あたり×出勤日数"]
 EXPENSE_KIND = ["家賃・地代", "水道光熱費", "食材費", "日用品・消耗品", "車両・ガソリン", "修繕費", "通信費", "保険料", "研修費", "委託料", "その他"]
 PLAN_STATUS = ["作成中", "同意済", "モニタリング済", "終了"]
 INCOME_CLASS = ["生活保護", "低所得", "一般1", "一般2"]
@@ -342,7 +343,8 @@ ENTITIES = {
             F("daily_wage", "日給（円）", "number", list=False),
             F("allowance_qual", "資格手当（月額・円）", "number", list=False),
             F("allowance_other", "その他の手当（月額・円）", "number", list=False),
-            F("commute", "通勤手当（月額・円・非課税）", "number", list=False),
+            F("commute_type", "交通費", "select", options=COMMUTE_TYPE, default="支給しない", list=False),
+            F("commute", "交通費の金額（円・非課税）", "number", list=False, help="「毎月定額」なら月額、「1日あたり」なら1日の金額"),
             F("night_allowance", "夜勤手当（1回・円）", "number", list=False, help="タイムカードで日をまたいだ勤務（夜勤）1回ごとに付きます"),
             F("dependents", "扶養親族等の数（源泉徴収）", "number", list=False, help="扶養控除等申告書の人数。所得税の概算に使います"),
             F("resident_tax", "住民税（月額・円）", "number", list=False, help="市区町村からの特別徴収税額通知書の金額"),

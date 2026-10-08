@@ -11,10 +11,12 @@ from .auth import is_admin
 # (ラベル, 説明, url を作る関数, 管理者のみ)
 HUBS = [
     {
-        "key": "daily", "icon": "📔", "title": "毎日の記録", "desc": "日誌・行事・ヒヤリハット・会議の記録",
+        "key": "daily", "icon": "📔", "title": "毎日の記録", "desc": "日誌・行事・ヒヤリハット・会議の記録", "staff_menu": True,
         "entities": ["daily_logs", "support_records", "incidents", "meetings", "contact_logs", "activities"], "endpoints": ["views.journal"],
         "tasks": [
             ("今日の日誌を書く", "業務日誌と入居者ごとの様子を1画面でまとめて", lambda: url_for("views.journal"), False),
+            ("在居・外泊・入院の実績を入れる", "月の表で入居者ごとに", lambda: url_for("billing.attendance"), "staff"),
+            ("夜間支援などを実績記録票に入れる", "日ごとにチェック", lambda: url_for("docs.record_marks"), "staff"),
             ("連絡を記録する（家族・病院・相談員など）", "電話・面会・メールの内容を残す", lambda: url_for("crud.new", key="contact_logs"), False),
             ("行事・レクリエーションを記録する", "外出・誕生日会・バーベキューなど。参加者をえらぶだけ", lambda: url_for("crud.new", key="activities"), False),
             ("ヒヤリハット・事故を書く", "ヒヤッとしたら小さなことでもすぐ記録", lambda: url_for("crud.new", key="incidents"), False),
@@ -30,7 +32,7 @@ HUBS = [
         ],
     },
     {
-        "key": "residents", "icon": "👤", "title": "入居者のこと", "desc": "入居者の情報・個別支援計画・入院や帰省",
+        "key": "residents", "icon": "👤", "title": "入居者のこと", "desc": "入居者の情報・個別支援計画・入院や帰省", "staff_menu": True,
         "entities": ["residents", "support_plans", "resident_documents", "absences"],
         "endpoints": ["billing.documents", "absences.index", "absences.detail"],
         "tasks": [
@@ -76,9 +78,10 @@ HUBS = [
     },
     {
         "key": "billing", "icon": "🧾", "title": "請求・お金", "desc": "実績・給付費の確認・利用料の請求書・預り金",
-        "entities": ["basic_units", "invoices", "deposits"],
+        "entities": ["basic_units", "invoices", "deposits", "expenses"],
         "endpoints": ["billing.attendance", "billing.benefit", "billing.benefit_export", "billing.invoices",
-                      "billing.invoice_print", "billing.invoices_export", "billing.deposits", "billing.deposit_ledger"],
+                      "billing.invoice_print", "billing.invoices_export", "billing.deposits", "billing.deposit_ledger",
+                      "payroll.profit"],
         "tasks": [
             ("今月の実績（在居・外泊・入院）を入れる", "請求のもとになります。月末にまとめて入れてもOK", lambda: url_for("billing.attendance"), False),
             ("夜間支援などを実績記録票に入れる", "増やした項目を日ごとにチェック", lambda: url_for("docs.record_marks"), False),
@@ -89,13 +92,32 @@ HUBS = [
             ("預り金の残高と出納帳を見る", "入居者ごとの残高・出納帳（Excel）", lambda: url_for("billing.deposits"), False),
             ("入居者ごとの家賃・食費などを設定する", "入居者の情報の「利用料」の欄に入れます", lambda: url_for("crud.index", key="residents"), False),
             ("基本報酬の単位数を設定する", "障害支援区分ごとの1日の単位数", lambda: url_for("crud.index", key="basic_units"), False),
+            ("事業所の収支を見る", "給付費・利用料の収入と、給与・経費の支出。月ごと・年度ごと", lambda: url_for("payroll.profit"), True),
+            ("経費を記録する", "家賃・光熱水費・食材費・消耗品など", lambda: url_for("crud.new", key="expenses"), True),
+        ],
+    },
+    {
+        "key": "work", "icon": "⏰", "title": "勤怠・給与", "desc": "出勤・退勤・体温・タイムカード・給与明細", "staff_menu": True,
+        "entities": [], "endpoints": ["work.clock", "work.timecards", "work.health", "payroll.index", "payroll.edit",
+                                      "payroll.mine", "payroll.settings"],
+        "tasks": [
+            ("出勤・退勤を打刻する", "出勤のときに体温と体調も記録します", lambda: url_for("work.clock"), False),
+            ("自分のタイムカードを見る", "今月の出勤日数・実働・残業", lambda: url_for("work.timecards"), "staff"),
+            ("自分の体温の記録を見る", "出勤のときに入れた体温", lambda: url_for("work.health"), "staff"),
+            ("自分の給与明細を見る", "管理者が見せた月だけ出ます", lambda: url_for("payroll.mine"), "staff"),
+            ("職員のタイムカードを見る・直す", "打刻のまちがい・退勤忘れを直す。出勤簿をExcelで", lambda: url_for("work.timecards"), True),
+            ("今日の職員の体温を見る", "37.5℃以上・体調不良の人が上に出ます", lambda: url_for("work.health"), True),
+            ("給与を計算する・明細を出す", "タイムカードから自動計算。直して確定・職員に見せる", lambda: url_for("payroll.index"), True),
+            ("賃金台帳をExcelで出す", "1年分・職員ごと", lambda: url_for("payroll.ledger"), True),
+            ("給与・保険料率の設定", "所定労働時間・割増・保険料率・勤務の上限", lambda: url_for("payroll.settings"), True),
         ],
     },
     {
         "key": "docs", "icon": "🖨️", "title": "書類を作る", "desc": "提出・保管する書類・献立表・Excel",
         "entities": [], "endpoints": ["views.reports", "views.journal_export", "views.career_export", "docs.renewal",
-                                      "docs.menus", "docs.record_marks", "docs.record_columns_settings"],
+                                      "docs.menus", "docs.record_marks", "docs.record_columns_settings", "compliance.index"],
         "tasks": [
+            ("実地指導チェックを見る", "研修漏れ・記入漏れ・委員会の開催など、規定に足りないもの", lambda: url_for("compliance.index"), True),
             ("指定更新の書類をそろえる", "チェックリストと、データから作る書類（経歴書・運営規程など）", lambda: url_for("docs.renewal"), True),
             ("サービス提供実績記録票を印刷する", "入居者ごと・月ごと。全員分をまとめて", lambda: url_for("docs.record_sheets"), True),
             ("実績記録票の項目を増やす・変える", "夜間支援・送迎など、記録票の欄を追加", lambda: url_for("docs.record_columns_settings"), True),
@@ -134,13 +156,16 @@ def visible_tasks(hub):
     from .customize import path_disabled
 
     admin = is_admin()
-    tasks = [{"label": l, "desc": d, "url": u()} for l, d, u, adm in hub["tasks"] if admin or not adm]
+    # adm: True＝管理者だけ、False＝全員、"staff"＝職員だけ（管理者には別の言い方のタスクがあるもの）
+    tasks = [{"label": l, "desc": d, "url": u()} for l, d, u, adm in hub["tasks"]
+             if adm is False or (adm is True and admin) or (adm == "staff" and not admin)]
     return [t for t in tasks if not path_disabled(t["url"])]
 
 
 def visible_hubs():
+    """管理者はすべて。職員は記録・入居者・勤怠だけ（お金・書類・設定のメニューは出さない）"""
     admin = is_admin()
-    return [h for h in HUBS if (admin or not h.get("admin")) and visible_tasks(h)]
+    return [h for h in HUBS if (admin or (h.get("staff_menu") and not h.get("admin"))) and visible_tasks(h)]
 
 
 def current_hub():

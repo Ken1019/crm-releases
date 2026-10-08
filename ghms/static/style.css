@@ -198,3 +198,19 @@ table.monthly td.name { min-width:6.5em; }
 .multi { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
 .form label.chip, .chip { display:inline-flex; flex-direction:row; gap:6px; align-items:center; padding:4px 12px; border:2px solid var(--line); border-radius:99px; background:#fff; cursor:pointer; font-weight:normal; }
 .chip:has(input:checked) { border-color:var(--pri); background:var(--pri-soft); }
+
+/* 実地指導チェック・打刻・給与 */
+.card.comp { border-left: 6px solid var(--warn, #e0a100); }
+.card.comp.ng { border-left-color: var(--ng, #d64545); background: #fff6f5; }
+.card.comp h2 b { color: var(--ng, #d64545); }
+.clockbox { text-align: center; }
+.clock-now { font-size: 54px; font-weight: 700; margin: 0; line-height: 1.1; }
+.clock-now small { display: block; font-size: 16px; font-weight: 400; color: var(--muted); }
+.clockform { max-width: 560px; margin: 10px auto 0; text-align: left; }
+.btn.huge { font-size: 24px; padding: 18px 40px; width: 100%; }
+.pill.big { font-size: 17px; padding: 6px 16px; }
+.people .person.on { border-color: #4caf50; background: #f1faf1; }
+.kiosk .form { max-width: 560px; }
+.w8 { width: 8.5em; }
+fieldset { border: 0; padding: 0; margin: 0; }
+fieldset legend { font-weight: 700; margin-bottom: 6px; }

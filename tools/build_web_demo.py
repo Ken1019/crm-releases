@@ -221,6 +221,45 @@ for u in ("suzuki", "takahashi"):
     t2 = re.search(r'name="_csrf" value="([0-9a-f]+)"', c2.get("/password").get_data(as_text=True)).group(1)
     c2.post("/my-pin", data={"_csrf": t2, "current": "mypass2026", "pin": "5937", "pin2": "5937"})
 
+# 勤怠・給与（架空）：給与の情報・ログインと職員をつなぐ・勤務表どおりのタイムカード・体温・経費
+with app.app_context():
+    from ghms.db import get_db
+
+    db = get_db()
+    for sid, vals in {1: ("月給", 260000, None, 10000, "毎月定額", 8000, 0, 1, 12000, 1, 1),
+                      2: ("月給", 220000, None, 0, "1日あたり×出勤日数", 400, 6000, 0, 8000, 1, 1),
+                      3: ("時給", None, 1250, 0, "1日あたり×出勤日数", 300, 6000, 0, 0, 0, 1),
+                      4: ("時給", None, 1100, 0, "支給しない", 0, 0, 0, 0, 0, 0),
+                      5: ("時給", None, 1150, 0, "支給しない", 0, 7000, 0, 0, 0, 1)}.items():
+        db.execute("UPDATE staff SET pay_type=?, base_salary=?, hourly_wage=?, allowance_qual=?, commute_type=?, commute=?,"
+                   " night_allowance=?, dependents=?, resident_tax=?, social_insurance=?, employment_insurance=?, weekly_hours=40"
+                   " WHERE id=?", vals + (sid,))
+    db.execute("UPDATE users SET staff_id=2 WHERE username='suzuki'")
+    db.execute("UPDATE users SET staff_id=3 WHERE username='takahashi'")
+    TIMES = {"日": ("09:00", "18:00", 60), "早": ("07:00", "16:00", 60), "遅": ("11:00", "20:00", 60), "夜": ("16:00", "10:00", 120)}
+    for sid, p in pattern.items():
+        for day in range(1, today.day):
+            code = p[(day - 1) % 7]
+            if code in TIMES:
+                cin, cout, brk = TIMES[code]
+                if sid == 4 and day == today.day - 2:
+                    cout = None          # 退勤の押し忘れ（実地指導チェックに出る）
+                dd = today.replace(day=day).isoformat()
+                db.execute("INSERT INTO timecards (staff_id, date, clock_in, clock_out, break_min, updated_by, updated_at)"
+                           " VALUES (?,?,?,?,?,'demo','')", (sid, dd, cin, cout, brk))
+                db.execute("INSERT INTO health_checks (staff_id, date, time, temp, symptoms, updated_by) VALUES (?,?,?,?,'','demo')",
+                           (sid, dd, cin, 36.2 + (day % 5) / 10))
+    t = today.isoformat()
+    db.execute("INSERT INTO timecards (staff_id, date, clock_in, updated_by, updated_at) VALUES (2, ?, '08:58', 'demo', '')", (t,))
+    db.execute("INSERT INTO health_checks (staff_id, date, time, temp, symptoms, updated_by) VALUES (2, ?, '08:58', 36.4, '', 'demo')", (t,))
+    db.execute("INSERT INTO health_checks (staff_id, date, time, temp, symptoms, updated_by) VALUES (3, ?, '06:50', 37.7, 'のどの痛み', 'demo')", (t,))
+    db.commit()
+for dd, kind, item, amt in [(d(-20), "家賃・地代", "第1ホーム 家賃", 180000), (d(-15), "水道光熱費", "電気・ガス・水道", 42000),
+                            (d(-10), "食材費", "食材（スーパー〇〇）", 95000), (d(-5), "日用品・消耗品", "洗剤・トイレットペーパー", 8500),
+                            (d(-3), "車両・ガソリン", "送迎車ガソリン", 12000)]:
+    post("/m/expenses/new", {"date": dd, "kind": kind, "item": item, "amount": str(amt), "home_id": "1"})
+post("/payroll/", {"action": "save_all", "ym": ym})
+
 # サンプル登録で溜まった「登録しました」の表示を消しておく
 c.get("/m/homes/")
 
@@ -228,7 +267,7 @@ c.get("/m/homes/")
 SKIP = ("/logout", "/backup", "/setup", "/login")
 CAP_PER_PATH = 2         # 同じ画面の絞り込み違いは2つまで
 CAP_DETAIL = {"view": 2, "edit": 1}
-MAX_PAGES = 235
+MAX_PAGES = 232
 
 PRIORITY = ["/", "/do/daily", "/do/residents", "/do/staff", "/do/money", "/do/billing", "/do/settings", "/journal",
             "/reports", "/billing/attendance", "/billing/benefit", "/billing/invoices", "/billing/invoice/1/print",
@@ -239,7 +278,8 @@ PRIORITY = ["/", "/do/daily", "/do/residents", "/do/staff", "/do/money", "/do/bi
             "/m/residents/5", "/m/residents/4", "/do/docs", "/docs/renewal", "/docs/record-sheets", "/docs/record-marks", "/docs/record-columns", "/docs/menus",
             "/docs/menus?print=1", "/docs/rules", "/docs/resumes", "/docs/staff-list", "/docs/residents-status", "/docs/committee",
             "/settings/features", "/settings/choices", "/settings/fields", "/update", "/m/activities/", "/m/activities/new",
-            "/m/activities/1"]
+            "/m/activities/1", "/compliance/", "/do/work", "/work/timecards", "/work/health", "/payroll/", f"/payroll/2/{ym}",
+            f"/payroll/2/{ym}/slip", "/payroll/profit", "/payroll/settings", "/m/expenses/"]
 pages, queue, seen = {}, deque(PRIORITY), set(PRIORITY)
 per_path, per_kind = Counter(), Counter()
 
@@ -291,8 +331,17 @@ while queue and len(pages) < MAX_PAGES:
 c.post("/logout", data={"_csrf": TOKEN})
 pages["/login"] = c.get("/login").get_data(as_text=True)
 pages["/pin/2"] = c.get("/pin/2").get_data(as_text=True)
+# 事務所のPCの打刻画面（ログインしないで使う）と、職員がログインしたときのホーム
+pages["/work/kiosk"] = c.get("/work/kiosk").get_data(as_text=True)
+pages["/work/kiosk?staff_id=3"] = c.get("/work/kiosk?staff_id=3").get_data(as_text=True)
+pages["/work/kiosk?staff_id=2"] = c.get("/work/kiosk?staff_id=2").get_data(as_text=True)
+sc = app.test_client()
+sc.post("/login", data={"username": "suzuki", "password": "mypass2026"})
+pages["/?staff"] = sc.get("/").get_data(as_text=True)
+pages["/work/clock?staff"] = sc.get("/work/clock").get_data(as_text=True)
 
-names = {"/": "p_home.html", "/login": "p_login.html", "/pin/2": "p_pin.html"}
+names = {"/": "p_home.html", "/login": "p_login.html", "/pin/2": "p_pin.html", "/?staff": "p_home_staff.html",
+         "/work/kiosk": "p_kiosk.html", "/work/clock?staff": "p_clock_staff.html"}
 import hashlib  # noqa: E402
 
 for url in (u for u in pages if u not in names):

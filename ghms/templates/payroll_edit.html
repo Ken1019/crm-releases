@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}給与を直す{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('payroll.index', ym=ym) }}">◀ 給与計算の一覧へ</a></p>
+<h1>💴 {{ s['name'] }} さん　{{ first.strftime('%Y年%m月') }}分</h1>
+<p class="guide">{% if not slip %}<span class="pill warn">自動計算</span> まだ保存していません。{% elif slip.status == '確定' %}<span class="pill ok">確定</span> {{ slip.updated_at }}（{{ slip.updated_by }}）{% if slip.shared %}・<b>職員の画面に出しています</b>{% endif %}{% else %}<span class="pill">下書き</span> {{ slip.updated_at }}（{{ slip.updated_by }}）{% endif %}
+  {% if unsaved %}<br><b>計算しなおした内容です。まだ保存していません。</b>{% endif %}
+  <br>{{ d.pay_type }}・時間単価 {{ '{:,}'.format(d.unit or 0) }}円。手当や控除を直したら「保険料・税を計算しなおす」で控除が入り直します（直した控除はそのまま保存もできます）。</p>
+{% set locked = slip and slip.status == '確定' %}
+<form method="post" class="cols" data-guard>
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <section class="card"><h2>勤怠</h2>
+    <table class="list">{% for k, label, unit in WORK_ITEMS %}<tr><th>{{ label }}</th><td class="num">{% if k in ('hours', 'ot_h', 'night_h') %}{{ hm(d.work[k]) }}{% else %}{{ d.work[k] }}{{ unit }}{% endif %}</td></tr>{% endfor %}</table>
+    {% if d.missing %}<p class="flash error">退勤の打刻がない日が {{ d.missing }}回あります。<a href="{{ url_for('work.timecards', ym=ym, staff_id=s['id']) }}">タイムカードを直す</a></p>{% endif %}
+    <p><a href="{{ url_for('work.timecards', ym=ym, staff_id=s['id']) }}">📅 タイムカードを見る</a></p></section>
+  <section class="card"><h2>支給</h2>
+    <table class="list">{% for k, label in EARNINGS %}<tr><th>{{ label }}</th><td><input type="number" name="e_{{ k }}" value="{{ d.earnings[k] }}" class="num w8"{{ ' readonly' if locked }}>{% if auto.earnings[k] != d.earnings[k] %}<br><small class="muted">自動：{{ '{:,}'.format(auto.earnings[k]) }}</small>{% endif %}</td></tr>{% endfor %}
+      <tr class="total"><th>総支給額</th><td class="num"><b>{{ '{:,}'.format(d.gross) }}</b></td></tr></table></section>
+  <section class="card"><h2>控除</h2>
+    <table class="list">{% for k, label in DEDUCTIONS %}<tr><th>{{ label }}</th><td><input type="number" name="d_{{ k }}" value="{{ d.deductions[k] }}" class="num w8"{{ ' readonly' if locked }}></td></tr>{% endfor %}
+      <tr class="total"><th>控除合計</th><td class="num">{{ '{:,}'.format(d.total_ded) }}</td></tr>
+      <tr class="total"><th>差引支給額</th><td class="num"><b>{{ '{:,}'.format(d.net) }}</b></td></tr></table>
+    <p class="muted small">事業所の負担（保険料など）：{{ '{:,}'.format(d.employer_total or 0) }}円</p></section>
+  <section class="card wide"><label><span>明細に書くメモ</span><input name="memo" value="{{ d.memo or '' }}"{{ ' readonly' if locked }} style="width:100%"></label>
+  <div class="actions">
+    {% if locked %}
+      <a class="btn primary" href="{{ url_for('payroll.slip', sid=s['id'], ym=ym) }}">🖨️ 明細を印刷</a>
+      {% if slip.shared %}<button class="btn" name="action" value="unshare">職員の画面から外す</button>{% else %}<button class="btn primary" name="action" value="share">👀 職員に見せる</button>{% endif %}
+      <button class="btn" name="action" value="unlock" onclick="return confirm('確定を取り消しますか？')">確定を取り消す</button>
+    {% else %}
+      <button class="btn" name="action" value="recalc">🧮 保険料・税を計算しなおす</button>
+      <button class="btn" name="action" value="save">💾 下書きで保存</button>
+      <button class="btn primary" name="action" value="confirm" onclick="return confirm('この内容で確定しますか？')">✅ 確定する</button>
+      {% if slip %}<button class="btn" name="action" value="reset" onclick="return confirm('直した内容を消して自動計算に戻しますか？')">自動計算に戻す</button>{% endif %}
+      <a class="btn" href="{{ url_for('payroll.slip', sid=s['id'], ym=ym) }}">明細を見る</a>
+    {% endif %}
+  </div></section>
+</form>
+{% endblock %}

@@ -1,4 +1,5 @@
 import re
+from datetime import date
 
 import pytest
 
@@ -146,7 +147,9 @@ def test_purpose_menu(client, app):
     assert c.get("/do/staff").status_code == 404
     home = c.get("/").get_data(as_text=True)
     assert "職員のこと" not in home and "処遇改善の計画と配分を見る" not in home
-    assert "今月の加算の要件をチェックする" in home
+    # 職員のメニューは「毎日の記録」「入居者のこと」「勤怠・給与」だけ（お金・書類・設定は出さない）
+    assert "今月の加算の要件をチェックする" not in home and "請求・お金" not in home and "今日の日誌・記録を書く" in home
+    assert c.get("/do/money").status_code == 404 and c.get("/do/work").status_code == 200
 
 
 def _setup_billing(client):
@@ -821,3 +824,101 @@ def test_activities_with_participants_and_birthdays(client):
     # 参加した記録がある入居者は削除できない
     post(client, "/m/residents/3/delete", {})
     assert "佐藤次郎" in client.get("/m/residents/").get_data(as_text=True)
+
+
+# ---------------------------------------------------------------- タイムカード・打刻・給与
+def test_timecard_kiosk_and_payroll(client, app):
+    post(client, "/m/staff/new", {"name": "佐藤 一郎", "status": "在籍", "pay_type": "時給", "hourly_wage": "1200",
+                                  "night_allowance": "5000", "employment_insurance": "1",
+                                  "commute_type": "1日あたり×出勤日数", "commute": "300"})
+    staff = staff_client(client, app)
+    post(client, "/users", {"action": "staff", "id": "2", "staff_id": "1"})
+    post(staff, "/my-pin", {"current": "mypass2026", "pin": "4826", "pin2": "4826"})
+    # 登録していない端末では打刻できない
+    assert "登録したPC" in app.test_client().get("/work/kiosk").get_data(as_text=True)
+    _register_device(client)
+    _logout(client)                              # 事務所のPC（ログインしていない状態）
+    assert "佐藤 一郎" in client.get("/work/kiosk").get_data(as_text=True)
+    page = client.get("/work/kiosk?staff_id=1").get_data(as_text=True)
+    k = re.search(r'name="_k" value="([0-9a-f]+)"', page).group(1)
+    client.post("/work/kiosk", data={"_k": k, "staff_id": "1", "action": "in", "temp": "36.4", "pin": "0000"})
+    with app.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT COUNT(*) FROM timecards").fetchone()[0] == 0
+    client.post("/work/kiosk", data={"_k": k, "staff_id": "1", "action": "in", "pin": "4826"})   # 体温なし
+    client.post("/work/kiosk", data={"_k": k, "staff_id": "1", "action": "in", "temp": "37.8", "pin": "4826"})
+    assert "勤務中" in client.get("/work/kiosk").get_data(as_text=True)
+    assert client.get("/").status_code == 302    # 打刻してもログインしたままにならない
+    with app.app_context():
+        from ghms.db import get_db
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM timecards WHERE clock_out IS NULL").fetchone()[0] == 1
+        assert db.execute("SELECT temp FROM health_checks").fetchone()[0] == 37.8
+        db.execute("DELETE FROM timecards")
+        db.commit()
+
+    admin = app.test_client()
+    admin.post("/login", data={"username": "admin", "password": "password123"})
+    assert "佐藤 一郎" in admin.get("/work/health").get_data(as_text=True)
+    # 管理者がタイムカードを入れる：夜勤 17:00〜翌9:00（休憩60分）と日勤 9:00〜18:30（休憩60分）
+    post(admin, "/work/timecards", {"ym": "2026-10", "staff_id": "1", "in_new_1": "17:00", "out_new_1": "09:00", "br_new_1": "60",
+                                    "in_new_2": "09:00", "out_new_2": "18:30", "br_new_2": "60"})
+    page = admin.get("/work/timecards?ym=2026-10&staff_id=1").get_data(as_text=True)
+    assert "23:30" in page and "夜勤 1回" in page
+    # 時給1200円：基本 28,200＋時間外(7.5h×25%) 2,250＋深夜(7h×25%) 2,100＋夜勤 5,000＋交通費 600 ＝ 38,150、雇用保険 210
+    page = admin.get("/payroll/?ym=2026-10").get_data(as_text=True)
+    assert "38,150" in page and "37,940" in page
+    post(admin, "/payroll/?ym=2026-10", {"action": "save_all", "ym": "2026-10"})
+    form = {f"e_{k}": v for k, v in [("base", 28200), ("ot", 2250), ("night", 2100), ("yakin", 5000), ("qual", 0), ("shogu", 0),
+                                     ("other", 3000), ("commute", 600)]}
+    form.update({f"d_{k}": v for k, v in [("health", 0), ("care", 0), ("pension", 0), ("emp", 210), ("itax", 0), ("rtax", 0),
+                                          ("other_ded", 0)]})
+    post(admin, "/payroll/1/2026-10", dict(form, action="confirm"))
+    assert "41,150" in admin.get("/payroll/1/2026-10/slip").get_data(as_text=True)
+    assert "まだ明細はありません" in staff.get("/payroll/mine").get_data(as_text=True)     # 見せる前は出ない
+    post(admin, "/payroll/1/2026-10", {"action": "share"})
+    assert "2026年10月分" in staff.get("/payroll/mine").get_data(as_text=True)
+    assert "40,940" in staff.get("/payroll/mine/2026-10").get_data(as_text=True)
+    assert staff.get("/payroll/").status_code == 403 and staff.get("/payroll/1/2026-10/slip").status_code == 403
+    assert admin.get("/payroll/ledger.xlsx?year=2026").data[:2] == b"PK"
+    assert admin.get("/work/timecards.xlsx?ym=2026-10").data[:2] == b"PK"
+    # 収支
+    post(admin, "/m/expenses/new", {"date": "2026-10-05", "kind": "水道光熱費", "item": "電気代", "amount": "12000"})
+    page = admin.get("/payroll/profit?fy=2026").get_data(as_text=True)
+    assert "給与（総支給）" in page and "水道光熱費" in page and "12,000" in page
+
+
+def test_income_tax_estimate():
+    from ghms.payroll import half_down, income_tax
+
+    assert income_tax(300000, 0, 2025) == 8350
+    assert income_tax(300000, 2, 2025) < income_tax(300000, 0, 2025)
+    assert income_tax(100000, 0, 2026) == 0
+    assert half_down(100.5) == 100 and half_down(100.51) == 101
+
+
+def test_compliance_warnings_on_home(client, app):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/staff/new", {"name": "佐藤 一郎", "status": "在籍"})
+    post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "status": "入居中", "move_in": "2026-01-01"})
+    page = client.get("/").get_data(as_text=True)
+    assert "実地指導チェック" in page and "虐待防止委員会" in page
+    full = client.get("/compliance/").get_data(as_text=True)
+    assert "「虐待防止研修」の受講" in full and "業務日誌がない日" in full and "支援記録がない日" in full
+    assert "未入力：受給者証番号" in full and "未入力：職種・雇用形態・週の勤務時間" in full
+    # 研修を記録する・会議の出席者に名前がある → 消える
+    post(client, "/m/trainings/new", {"staff_id": "1", "date": date.today().isoformat(), "kind": "内部研修", "title": "虐待防止研修"})
+    post(client, "/m/meetings/new", {"date": date.today().isoformat(), "kind": "感染症研修", "attendees": "佐藤一郎、鈴木"})
+    full = client.get("/compliance/").get_data(as_text=True)
+    assert "「虐待防止研修」の受講" not in full and "「感染症の研修」の受講" not in full and "「身体拘束適正化の研修」の受講" in full
+    # チェックを止める
+    post(client, "/compliance/", {"comp_days": "7", "comp_trainings": "", **{f"on::{k}": "1" for k in
+                                  ["meetings", "journal", "records", "plans", "incidents", "residents", "attendance", "timecard", "health", "payroll"]}})
+    full = client.get("/compliance/").get_data(as_text=True)
+    assert "の受講が" not in full and "業務日誌がない日" in full
+    # 職員の画面：管理者むけのお知らせ・メニューは出ない
+    staff = staff_client(client, app)
+    page = staff.get("/").get_data(as_text=True)
+    assert "出勤する" in page and "業務日誌がない日" in page
+    assert "実地指導チェック" not in page and "受給者証番号" not in page and "収支" not in page
+    assert staff.get("/compliance/").status_code == 403

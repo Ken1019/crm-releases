@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block title %}打刻{% endblock %}
+{% block content %}
+<div class="pinlogin kiosk">
+{% if not device %}
+  <h1>⏰ 打刻</h1>
+  <p class="guide">打刻は、事務所の「PINでログインできる端末」として登録したPCでだけ使えます。管理者が「設定 → ログインする人」でこのPCを登録してください。</p>
+  <p><a class="btn" href="{{ url_for('auth.login') }}">ログインの画面へ</a></p>
+{% elif not person %}
+  <h1>⏰ 出勤・退勤 <small class="muted" id="now">{{ now_time.strftime('%H:%M') }}</small></h1>
+  <p class="hello">自分の名前を押してください。</p>
+  <div class="people">
+    {% for p in people %}<a class="person{{ ' on' if p.card }}" href="{{ url_for('work.kiosk', staff_id=p.s['id']) }}"><span class="avatar">{{ p.s['name'][:1] }}</span>
+      <b>{{ p.s['name'] }}</b><small>{% if p.card %}<span class="pill ok">{{ p.card['clock_in'] }}から勤務中</span>{% else %}出勤前{% endif %}</small></a>
+    {% else %}<p class="guide">打刻できる人がいません。管理者が「設定 → ログインする人」で、ログインと職員の情報をつなぎ、本人がPINを設定すると出てきます。</p>{% endfor %}
+  </div>
+  <p class="muted small">この端末：{{ device['name'] }}　<a href="{{ url_for('auth.login') }}">記録を書くときはこちらからログイン</a></p>
+{% else %}{% set p = person %}
+  <p><a href="{{ url_for('work.kiosk') }}">◀ 名前をえらび直す</a></p>
+  <h1><span class="avatar">{{ p.s['name'][:1] }}</span> {{ p.s['name'] }} さん</h1>
+  <form method="post" id="pinform" class="form">
+    <input type="hidden" name="_k" value="{{ kcsrf }}"><input type="hidden" name="staff_id" value="{{ p.s['id'] }}">
+    {% if p.card %}
+    <input type="hidden" name="action" value="out">
+    <p class="pill ok big">{{ p.card['clock_in'] }} から勤務中 → 退勤します</p>
+    <label><span>休憩した時間（分）</span><input type="number" name="break_min" min="0" max="600" value="{{ default_break }}" class="w5"></label>
+    {% else %}
+    <input type="hidden" name="action" value="in">
+    <p class="hello wide">体温を入れてから、PINを押すと出勤になります。</p>
+    <label><span>体温 <span class="must">必須</span></span><input type="number" name="temp" step="0.1" min="34" max="42" inputmode="decimal" placeholder="36.5" class="w5" required autofocus> ℃</label>
+    <fieldset class="wide"><legend>体調で気になること（あればチェック）</legend>
+      {% for s in SYMPTOMS %}<label class="chip"><input type="checkbox" name="sym::{{ s }}" value="1"> {{ s }}</label>{% endfor %}</fieldset>
+    {% endif %}
+    {% if not p.pin %}<p class="flash error wide">PINが設定されていません。管理者にログインのしかたを聞いてください。</p>{% endif %}
+    <input type="hidden" name="pin" id="pin">
+    <div class="wide"><p class="hello">4桁のPIN</p>
+      <div class="dots" aria-live="polite"><span></span><span></span><span></span><span></span></div>
+      <div class="pinpad">
+        {% for n in [1,2,3,4,5,6,7,8,9] %}<button type="button" data-n="{{ n }}">{{ n }}</button>{% endfor %}
+        <button type="button" data-clear class="sub">けす</button><button type="button" data-n="0">0</button><button type="button" data-back class="sub">⌫</button>
+      </div></div>
+  </form>
+  <p class="muted small">打刻の時刻はこのPCの時計で決まります。まちがえたときは管理者に直してもらってください。</p>
+<script>
+(function(){
+  var v='',input=document.getElementById('pin'),dots=document.querySelectorAll('.dots span'),f=document.getElementById('pinform');
+  function show(){dots.forEach(function(d,i){d.classList.toggle('on',i<v.length);});
+    if(v.length===4){input.value=v;if(f.reportValidity&&!f.reportValidity()){v='';show();return;}
+      document.querySelectorAll('.pinpad button').forEach(function(b){b.disabled=true;});f.submit();}}
+  function add(n){if(v.length<4){v+=n;show();}}
+  document.querySelectorAll('[data-n]').forEach(function(b){b.addEventListener('click',function(){add(b.dataset.n);});});
+  document.querySelector('[data-clear]').addEventListener('click',function(){v='';show();});
+  document.querySelector('[data-back]').addEventListener('click',function(){v=v.slice(0,-1);show();});
+  document.addEventListener('keydown',function(e){if(e.target.tagName==='INPUT')return;if(/^[0-9]$/.test(e.key))add(e.key);else if(e.key==='Backspace'){v=v.slice(0,-1);show();}});
+})();
+</script>
+{% endif %}
+</div>
+{% if not person %}<script>setTimeout(function(){location.reload();},60000);</script>{% else %}<script>setTimeout(function(){location.href='{{ url_for('work.kiosk') }}';},120000);</script>{% endif %}
+{% endblock %}

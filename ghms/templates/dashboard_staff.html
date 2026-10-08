@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block title %}ホーム{% endblock %}
+{% block content %}
+<h1>{{ g.user['display_name'] }} さん、おつかれさまです 🌼</h1>
+<p class="hello muted">今日は {{ today.strftime('%Y年%m月%d日') }}（{{ '月火水木金土日'[today.weekday()] }}）です。</p>
+
+<div class="bigmenu">
+  {% if feature_on('timecard') %}<a class="main" href="{{ url_for('work.clock') }}"><span class="ic">⏰</span><b>{{ '退勤する' if card else '出勤する' }}</b>
+    <small>{{ (card['clock_in'] ~ ' から勤務中') if card else '体温を入れて打刻' }}</small></a>{% endif %}
+  <a class="{{ 'main' if not feature_on('timecard') }}" href="{{ url_for('views.journal') }}"><span class="ic">📝</span><b>今日の日誌・記録を書く</b><small>業務日誌と入居者ごとの様子</small></a>
+  {% if feature_on('contact_logs') %}<a href="{{ url_for('crud.new', key='contact_logs') }}"><span class="ic">📞</span><b>連絡を記録する</b><small>家族・病院・相談員</small></a>{% endif %}
+  {% if feature_on('incidents') %}<a href="{{ url_for('crud.new', key='incidents') }}"><span class="ic">⚠️</span><b>ヒヤリハットを書く</b><small>小さなことでもすぐ</small></a>{% endif %}
+  {% if feature_on('activities') %}<a href="{{ url_for('crud.new', key='activities') }}"><span class="ic">🎉</span><b>行事を記録する</b><small>外出・誕生日会など</small></a>{% endif %}
+  <a href="{{ url_for('crud.index', key='residents') }}"><span class="ic">👤</span><b>入居者の情報を見る</b><small>服薬・アレルギー・緊急連絡先</small></a>
+  {% if feature_on('payroll') %}<a href="{{ url_for('payroll.mine') }}"><span class="ic">💴</span><b>自分の給与明細</b><small>見せてもらった月だけ</small></a>{% endif %}
+</div>
+
+{% if comp %}
+<section class="card comp warn">
+  <h2>🔔 書きもれ・受けていない研修（{{ comp|length }}件）</h2>
+  <ul class="todo">{% for x in comp[:10] %}<li><a href="{{ x.url }}"><span class="pill {{ x.level }}">{{ x.name }}</span><span><b>{{ x.who }}</b>：{{ x.msg }}</span><span class="when">▶</span></a></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<div class="cols">
+<section class="card">
+  <h2>📔 今日の日誌</h2>
+  <ul class="todo">
+  {% for h, n, done in home_stats %}
+    <li><a href="{{ url_for('views.journal', home_id=h['id']) }}">
+      {% if done %}<span class="pill ok">書きました</span>{% else %}<span class="pill ng">まだです</span>{% endif %}
+      <span><b>{{ h['name'] }}</b>（入居 {{ n }}名）</span><span class="when">{{ '見る' if done else '書く ▶' }}</span></a></li>
+  {% endfor %}
+  </ul>
+  {% if birthdays %}<h2 style="margin-top:20px">🎂 今月の誕生日</h2>
+  <ul class="todo">{% for b in birthdays %}<li><span>{% if b.today %}<span class="pill ok">今日！</span>{% endif %} <b>{{ b.name }}</b> さん　{{ b.day }}日</span></li>{% endfor %}</ul>{% endif %}
+</section>
+{% if feature_on('absences') %}
+<section class="card">
+  <h2>🏥 入院中・帰省中の方</h2>
+  <ul class="todo">
+  {% for x in away %}{% set a = x.a %}
+    <li><a href="{{ url_for('absences.detail', aid=a['id']) }}"><span class="pill {{ 'ng' if a['kind'] == '入院' else 'warn' }}">{{ a['kind'] }}</span>
+      <span><b>{{ a['rname'] }}</b> さん {{ a['place'] or '' }}</span></a></li>
+  {% else %}<li class="muted">いま不在の方はいません。</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+</div>
+
+<section class="card finder">
+  <label for="finder"><b>🔍 やりたいことを言葉でさがす</b></label>
+  <input id="finder" type="search" placeholder="例：日誌、連絡、タイムカード" autocomplete="off">
+  <ul class="todo" id="finder-list" hidden>
+    {% for t in all_tasks %}<li data-text="{{ t.label }} {{ t.desc }} {{ t.hub.title }}"><a href="{{ t.url }}"><span class="ic">{{ t.hub.icon }}</span>
+      <span><b>{{ t.label }}</b><br><small class="muted">{{ t.desc }}</small></span></a></li>{% endfor %}
+  </ul>
+</section>
+<script>
+(function(){var q=document.getElementById('finder'),list=document.getElementById('finder-list');
+  q.addEventListener('input',function(){var v=q.value.trim(),n=0;list.querySelectorAll('li').forEach(function(li){var hit=v&&li.dataset.text.indexOf(v)>=0;li.hidden=!hit;if(hit)n++;});list.hidden=!v||!n;});})();
+</script>
+{% endblock %}

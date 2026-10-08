@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}事業所の収支{% endblock %}
+{% block content %}
+<h1>📊 事業所の収支（{{ fy }}年度）</h1>
+<p class="guide">収入は給付費の概算（実績と単位数から）と利用料の請求、支出は給与（給与計算）と経費の記録から出しています。<b>概算</b>なので、決算の数字は会計ソフト・税理士の資料で確認してください。</p>
+<form method="get" class="filters card">
+  <a class="btn" href="{{ url_for('payroll.profit', fy=fy - 1) }}">◀ {{ fy - 1 }}年度</a><b>{{ fy }}年度（{{ fy }}年4月〜{{ fy + 1 }}年3月）</b><a class="btn" href="{{ url_for('payroll.profit', fy=fy + 1) }}">{{ fy + 1 }}年度 ▶</a>
+  <a class="btn" href="{{ url_for('crud.new', key='expenses') }}">＋ 経費を記録する</a>
+</form>
+{% if months %}
+<div class="tablewrap card"><table class="list">
+  <thead><tr><th></th>{% for m in months %}<th class="num">{{ m.first.month }}月{% if m.estimated %}<br><small class="muted">見込み</small>{% endif %}</th>{% endfor %}<th class="num">合計</th></tr></thead>
+  <tr class="total"><th colspan="{{ months|length + 2 }}">収入</th></tr>
+  {% for k in inc_keys %}<tr><td>{{ k }}</td>{% for m in months %}<td class="num">{{ '{:,}'.format(m.income.get(k, 0)) }}</td>{% endfor %}<td class="num">{{ '{:,}'.format(inc_tot[k]) }}</td></tr>{% endfor %}
+  <tr><th>収入の合計</th>{% for m in months %}<th class="num">{{ '{:,}'.format(m.income_total) }}</th>{% endfor %}<th class="num">{{ '{:,}'.format(total.income_total) }}</th></tr>
+  <tr class="total"><th colspan="{{ months|length + 2 }}">支出</th></tr>
+  {% for k in exp_keys %}<tr><td>{{ k }}</td>{% for m in months %}<td class="num">{{ '{:,}'.format(m.expense.get(k, 0)) }}</td>{% endfor %}<td class="num">{{ '{:,}'.format(exp_tot[k]) }}</td></tr>{% endfor %}
+  <tr><th>支出の合計</th>{% for m in months %}<th class="num">{{ '{:,}'.format(m.expense_total) }}</th>{% endfor %}<th class="num">{{ '{:,}'.format(total.expense_total) }}</th></tr>
+  <tr class="total"><th>差引（収益）</th>{% for m in months %}<th class="num" style="color:{{ '#c00' if m.profit < 0 else 'inherit' }}">{{ '{:,}'.format(m.profit) }}</th>{% endfor %}
+    <th class="num" style="color:{{ '#c00' if total.profit < 0 else 'inherit' }}">{{ '{:,}'.format(total.profit) }}</th></tr>
+  <tr><td>人件費率</td>{% for m in months %}<td class="num">{{ m.labor_ratio ~ '%' if m.labor_ratio is not none else '—' }}</td>{% endfor %}
+    <td class="num">{{ ((total.labor * 1000 // total.income_total) / 10) ~ '%' if total.income_total else '—' }}</td></tr>
+</table></div>
+<p class="muted small">「見込み」の月は、給与が保存されていない、または利用料の請求書がまだの月です（自動計算の金額で出しています）。給付費は国保連の審査で変わることがあります。</p>
+{% else %}<div class="card"><p>この年度はまだ始まっていません。</p></div>{% endif %}
+{% endblock %}

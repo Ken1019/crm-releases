@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block title %}実地指導チェック{% endblock %}
+{% block content %}
+<h1>🚨 実地指導チェック</h1>
+<p class="guide">運営指導（実地指導）でよく見られる「記録・研修・委員会・書類」の不足を、システムのデータから自動でさがしています。<b>{{ total }}件</b>見つかっています。押すとその入力画面が開きます。回数や日数は目安なので、自治体の指導内容に合わせて下の設定で変えてください。</p>
+{% for gp in groups %}
+<section class="card">
+  <h2>{{ gp.name }}（{{ gp['items']|length }}件{% if gp.ng %}・急ぎ {{ gp.ng }}件{% endif %}）</h2>
+  <p class="muted small">見られること：{{ gp.why }}</p>
+  <ul class="todo">{% for x in gp['items'] %}<li class="{{ 'over' if x.level == 'ng' }}"><a href="{{ x.url }}"><span class="pill {{ x.level }}">{{ '急ぎ' if x.level == 'ng' else '確認' }}</span>
+    <span><b>{{ x.who }}</b>：{{ x.msg }}</span><span class="when">直す ▶</span></a></li>{% endfor %}</ul>
+</section>
+{% else %}<p class="flash ok">✔ いま見つかっている不足はありません。</p>{% endfor %}
+
+<details class="card"><summary><b>⚙️ チェックの設定</b></summary>
+<form method="post" class="form">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <fieldset class="wide"><legend>使うチェック</legend>
+    {% for k, name, why, feat in CHECKS %}<label class="chip"><input type="checkbox" name="on::{{ k }}" value="1"{% if k not in off %} checked{% endif %}> {{ name }}</label>{% endfor %}</fieldset>
+  <label><span>書きもれを見る日数（今日をのぞく）</span><input type="number" name="comp_days" value="{{ days }}" min="1" max="60" class="w5"> 日</label>
+  <label class="wide"><span>職員ごとに受けているか見る研修（1行に「名前=さがす言葉,言葉|日数」）</span>
+    <textarea name="comp_trainings" rows="5">{{ trainings }}</textarea>
+    <small class="muted">「研修受講記録」の研修名、または「会議・委員会」の種別・議題にさがす言葉が入っていて、出席者に名前（または「全員」）があれば受講とみなします。</small></label>
+  <p class="muted small wide">委員会・訓練の間隔は「設定 → 選択肢を変える → 会議の種類」の日数で決まります。</p>
+  <div class="actions wide"><button class="btn primary">💾 保存する</button></div>
+</form>
+</details>
+{% endblock %}

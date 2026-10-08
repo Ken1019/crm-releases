@@ -7,6 +7,32 @@
 {% if update_available %}
 <p class="flash ok">🎁 ソフトの新しい版 {{ update_available['version'] }} があります。<a href="{{ url_for('system.update') }}">内容を見て更新する</a></p>
 {% endif %}
+{% if comp %}{% set ng = comp|selectattr('level', 'equalto', 'ng')|list %}
+<section class="card comp {{ 'ng' if ng else 'warn' }}">
+  <h2>🚨 実地指導チェック：規定を満たしていないものが <b>{{ comp|length }}件</b>{% if ng %}（うち急ぎ {{ ng|length }}件）{% endif %}</h2>
+  <ul class="todo">
+  {% for x in comp[:8] %}<li class="{{ 'over' if x.level == 'ng' }}"><a href="{{ x.url }}"><span class="pill {{ x.level }}">{{ x.name }}</span>
+    <span><b>{{ x.who }}</b>：{{ x.msg }}</span><span class="when">直す ▶</span></a></li>{% endfor %}
+  </ul>
+  <p><a class="btn" href="{{ url_for('compliance.index') }}">全部見る（{% for gp in comp_groups %}{{ gp.name }} {{ gp['items']|length }}{% if not loop.last %}・{% endif %}{% endfor %}）</a></p>
+</section>
+{% else %}<p class="flash ok">✔ 実地指導チェック：いま見つかっている不足はありません。<a href="{{ url_for('compliance.index') }}">チェックの内容</a></p>{% endif %}
+
+{% if work_today or profit_now %}
+<div class="cols">
+  {% if work_today %}<section class="card"><h2>⏰ 今日の勤務</h2>
+    <p><b>勤務中：</b>{{ work_today.working|join('、') or 'いません' }}</p>
+    {% for name, h in work_today.unwell %}<p class="flash error">🌡️ {{ name }} さん {{ h['time'] }} {{ h['temp'] or '' }}℃ {{ h['symptoms'] or '' }}</p>{% endfor %}
+    <p><a href="{{ url_for('work.health') }}">今日の体温を見る</a>・<a href="{{ url_for('work.timecards') }}">タイムカード</a></p></section>{% endif %}
+  {% if profit_now %}<section class="card"><h2>📊 今月の収支（見込み）</h2>
+    <table class="list"><tr><td>収入</td><td class="num">{{ '{:,}'.format(profit_now.income_total) }}円</td></tr>
+      <tr><td>支出（給与・保険料・経費）</td><td class="num">{{ '{:,}'.format(profit_now.expense_total) }}円</td></tr>
+      <tr class="total"><td>差引</td><td class="num" style="color:{{ '#c00' if profit_now.profit < 0 else 'inherit' }}"><b>{{ '{:,}'.format(profit_now.profit) }}円</b></td></tr>
+      <tr><td>人件費率</td><td class="num">{{ profit_now.labor_ratio ~ '%' if profit_now.labor_ratio is not none else '—' }}</td></tr></table>
+    <p><a href="{{ url_for('payroll.profit') }}">年度の収支を見る</a>・<a href="{{ url_for('payroll.index') }}">給与計算</a></p></section>{% endif %}
+</div>
+{% endif %}
+
 <div class="bigmenu">
   <a class="main" href="{{ url_for('views.journal') }}"><span class="ic">📝</span><b>今日の日誌を書く</b><small>いちばんよく使う画面です</small></a>
   {% for h in hubs %}

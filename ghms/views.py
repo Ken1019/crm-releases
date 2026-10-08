@@ -132,7 +132,28 @@ def dashboard():
             birthdays.append({"id": r["id"], "name": r["name"], "day": b.day, "age": today.year - b.year, "today": b.day == today.day})
     birthdays.sort(key=lambda x: x["day"])
     all_tasks = [dict(t, hub=h) for h in visible_hubs() for t in visible_tasks(h)]
-    return render_template("dashboard.html", birthdays=birthdays, update_available=update_available, all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
+    from .compliance import grouped, run_checks
+
+    if g.user["role"] != "admin":
+        # 職員の画面：打刻・今日の記録・自分に関係するお知らせだけ
+        from .work import my_staff_id, open_card
+
+        sid = my_staff_id()
+        comp = run_checks(staff_id=sid or -1)
+        return render_template("dashboard_staff.html", birthdays=birthdays, all_tasks=all_tasks, away=away, home_stats=home_stats,
+                               today=today, comp=comp, card=open_card(sid) if sid and feature_on("timecard") else None, sid=sid)
+    comp = run_checks()
+    work_today = profit_now = None
+    if feature_on("timecard"):
+        from .work import today_status
+
+        work_today = today_status()
+    if feature_on("payroll"):
+        from .payroll import month_profit
+
+        first = today.replace(day=1)
+        profit_now = month_profit(first, (first + timedelta(days=32)).replace(day=1) - timedelta(days=1))
+    return render_template("dashboard.html", comp=comp, comp_groups=grouped(comp), work_today=work_today, profit_now=profit_now, birthdays=birthdays, update_available=update_available, all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
                            recent=recent, today=today)
 
 

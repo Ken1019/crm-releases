@@ -71,11 +71,42 @@ def my_staff_id():
     return None
 
 
+def max_shift_minutes():
+    """1回の勤務の上限。夜勤（例 16時〜翌10時）があるので設定で変えられる。これをこえた打刻は退勤を押せず、管理者が直す"""
+    return int(setting_num("pay_max_shift_hours", 20) * 60)
+
+
+def _started(card):
+    try:
+        return datetime.strptime(f"{card['date']} {card['clock_in']}", "%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return None
+
+
 def open_card(staff_id):
-    """まだ退勤していない打刻（夜勤なら前の日の分）"""
-    since = (date.today() - timedelta(days=1)).isoformat()
-    return get_db().execute("SELECT * FROM timecards WHERE staff_id=? AND clock_out IS NULL AND date >= ? ORDER BY date DESC, id DESC",
-                            (staff_id, since)).fetchone()
+    """まだ退勤していない打刻。出勤から上限の時間をすぎたものは「退勤忘れ」として扱い、ここでは返さない"""
+    since = (date.today() - timedelta(days=2)).isoformat()
+    for c in get_db().execute("SELECT * FROM timecards WHERE staff_id=? AND clock_out IS NULL AND date >= ? ORDER BY date DESC, id DESC",
+                              (staff_id, since)):
+        st = _started(c)
+        if st and datetime.now() - st <= timedelta(minutes=max_shift_minutes()):
+            return c
+    return None
+
+
+def forgotten_cards(staff_id=None, days=31):
+    """退勤の打刻がないまま上限をすぎたもの（管理者が直す）"""
+    since = (date.today() - timedelta(days=days)).isoformat()
+    sql, args = "SELECT * FROM timecards WHERE clock_out IS NULL AND date >= ?", [since]
+    if staff_id:
+        sql += " AND staff_id=?"
+        args.append(staff_id)
+    out = []
+    for c in get_db().execute(sql + " ORDER BY date", args):
+        st = _started(c)
+        if st is None or datetime.now() - st > timedelta(minutes=max_shift_minutes()):
+            out.append(c)
+    return out
 
 
 def default_break(card, out_time):
@@ -114,7 +145,7 @@ def is_unwell(h):
     return (h["temp"] or 0) >= fever_line() or bool(h["symptoms"])
 
 
-def _save_health(staff_id, form):
+def _save_health(staff_id, form, username):
     temp = form.get("temp", type=float)
     symptoms = "、".join(s for s in SYMPTOMS if form.get(f"sym::{s}"))
     if temp is None and not symptoms and not form.get("health_note"):
@@ -122,8 +153,97 @@ def _save_health(staff_id, form):
     t = datetime.now()
     get_db().execute("INSERT INTO health_checks (staff_id, date, time, temp, symptoms, note, updated_by, updated_at) VALUES (?,?,?,?,?,?,?,?)",
                      (staff_id, t.date().isoformat(), t.strftime("%H:%M"), temp, symptoms, form.get("health_note") or "",
-                      g.user["username"], now()))
+                      username, now()))
     return {"temp": temp, "symptoms": symptoms}
+
+
+def punch(sid, action, form, username):
+    """出勤・退勤・体温の記録。時刻はこのPCの時計で決める（本人は時刻を入れられない）。メッセージの一覧を返す"""
+    db = get_db()
+    t = datetime.now()
+    card = open_card(sid)
+    msgs = []
+    if action == "in":
+        if card:
+            return [("error", f"すでに {card['clock_in']} に出勤しています。退勤のときは「退勤する」を押してください。")]
+        if get_setting("pay_health_required", "1") == "1" and form.get("temp", type=float) is None:
+            return [("error", "出勤の前に体温を入れてください。")]
+        h = _save_health(sid, form, username)
+        db.execute("INSERT INTO timecards (staff_id, date, clock_in, note, updated_by, updated_at) VALUES (?,?,?,?,?,?)",
+                   (sid, t.date().isoformat(), t.strftime("%H:%M"), form.get("note") or "", username, now()))
+        log_event("clock_in", "timecards", sid, t.strftime("%H:%M"), username=username)
+        if h and ((h["temp"] or 0) >= fever_line() or h["symptoms"]):
+            msgs.append(("error", "体調がよくないようです。勤務の前に管理者に連絡してください。管理者のホームにもお知らせが出ます。"))
+        msgs.append(("ok", f"{t:%H:%M} 出勤しました。今日もよろしくお願いします。"))
+    elif action == "out":
+        if not card:
+            return [("error", "出勤の打刻が見つかりません。出勤を押し忘れたときや、長い時間がたったときは管理者に直してもらってください。")]
+        out = t.strftime("%H:%M")
+        brk = form.get("break_min", type=int)
+        db.execute("UPDATE timecards SET clock_out=?, break_min=?, updated_by=?, updated_at=? WHERE id=?",
+                   (out, default_break(card, out) if brk is None else max(0, brk), username, now(), card["id"]))
+        log_event("clock_out", "timecards", sid, out, username=username)
+        msgs.append(("ok", f"{out} 退勤しました。おつかれさまでした。"))
+    elif action == "health":
+        if _save_health(sid, form, username) is not None:
+            msgs.append(("ok", "体温・体調を記録しました。"))
+    return msgs
+
+
+# ---------------------------------------------------------------- 事務所のPCの打刻画面（ログインしないで使う）
+def _kiosk_people():
+    db = get_db()
+    rows = []
+    for s in db.execute("SELECT s.*, u.id AS uid, u.pin_hash, u.locked_until FROM staff s JOIN users u ON u.staff_id=s.id "
+                        "WHERE u.active=1 AND (s.status IS NULL OR s.status != '退職') ORDER BY s.kana, s.name"):
+        rows.append({"s": s, "card": open_card(s["id"]), "pin": bool(s["pin_hash"])})
+    return rows
+
+
+@bp.route("/kiosk", methods=["GET", "POST"])
+def kiosk():
+    """名前を押して PIN → 出勤／退勤。押したらすぐ名前の一覧に戻る（ログインしたままにならない）。
+    PINでログインできる端末として登録した事務所のPCでだけ開ける"""
+    from flask import session
+    from werkzeug.security import check_password_hash
+
+    from .auth import LOCK_MINUTES, _fail, current_device
+
+    device = current_device()
+    if device is None:
+        return render_template("work_kiosk.html", device=None, people=[], person=None)
+    db = get_db()
+    if not session.get("kiosk_csrf"):
+        import secrets
+
+        session["kiosk_csrf"] = secrets.token_hex(16)
+    sid = request.values.get("staff_id", type=int)
+    person = next((p for p in _kiosk_people() if p["s"]["id"] == sid), None) if sid else None
+    if request.method == "POST" and person:
+        if request.form.get("_k") != session.get("kiosk_csrf"):
+            abort(400)
+        user = db.execute("SELECT * FROM users WHERE id=?", (person["s"]["uid"],)).fetchone()
+        if user["locked_until"] and user["locked_until"] > now():
+            flash(f"PINを続けて間違えたため、{LOCK_MINUTES}分ほど打刻できません。管理者に連絡してください。", "error")
+        elif not user["pin_hash"] or not check_password_hash(user["pin_hash"], request.form.get("pin", "")):
+            _fail(user, f"打刻のPIN（{device['name']}）")
+            flash("PINが違います。", "error")
+            db.commit()
+            return redirect(url_for("work.kiosk", staff_id=sid))
+        else:
+            db.execute("UPDATE users SET failed_count=0, locked_until=NULL WHERE id=?", (user["id"],))
+            db.execute("UPDATE devices SET last_used=? WHERE id=?", (now(), device["id"]))
+            msgs = punch(sid, request.form.get("action"), request.form, user["username"])
+            for cat, msg in msgs:
+                flash(f"{person['s']['name']} さん：{msg}", cat)
+            db.commit()
+            if any(cat == "error" for cat, _ in msgs) and request.form.get("action") == "in" and not person["card"]:
+                return redirect(url_for("work.kiosk", staff_id=sid))
+        db.commit()
+        return redirect(url_for("work.kiosk"))
+    return render_template("work_kiosk.html", device=device, people=_kiosk_people(), person=person, SYMPTOMS=SYMPTOMS,
+                           default_break=int(setting_num("pay_break_default", 60)), now_time=datetime.now(),
+                           kcsrf=session["kiosk_csrf"], fever=fever_line())
 
 
 # ---------------------------------------------------------------- 出勤・退勤（職員の画面）
@@ -136,29 +256,8 @@ def clock():
     if request.method == "POST":
         if not staff:
             abort(400)
-        t = datetime.now()
-        action = request.form.get("action")
-        if action == "in" and not card:
-            h = _save_health(sid, request.form)
-            if h is None and get_setting("pay_health_required", "1") == "1":
-                flash("出勤の前に体温を入れてください。", "error")
-                return redirect(url_for("work.clock"))
-            db.execute("INSERT INTO timecards (staff_id, date, clock_in, note, updated_by, updated_at) VALUES (?,?,?,?,?,?)",
-                       (sid, t.date().isoformat(), t.strftime("%H:%M"), request.form.get("note") or "", g.user["username"], now()))
-            log_event("clock_in", "timecards", sid, t.strftime("%H:%M"))
-            if h and ((h["temp"] or 0) >= fever_line() or h["symptoms"]):
-                flash("体調がよくないようです。勤務の前に管理者に連絡してください。ホームの管理者画面にもお知らせが出ます。", "error")
-            flash(f"{t:%H:%M} 出勤しました。今日もよろしくお願いします。", "ok")
-        elif action == "out" and card:
-            out = t.strftime("%H:%M")
-            brk = request.form.get("break_min", type=int)
-            db.execute("UPDATE timecards SET clock_out=?, break_min=?, updated_by=?, updated_at=? WHERE id=?",
-                       (out, default_break(card, out) if brk is None else max(0, brk), g.user["username"], now(), card["id"]))
-            log_event("clock_out", "timecards", sid, out)
-            flash(f"{out} 退勤しました。おつかれさまでした。", "ok")
-        elif action == "health":
-            if _save_health(sid, request.form) is not None:
-                flash("体温・体調を記録しました。", "ok")
+        for cat, msg in punch(sid, request.form.get("action"), request.form, g.user["username"]):
+            flash(msg, cat)
         db.commit()
         return redirect(url_for("work.clock"))
     first, last = parse_ym(None)
@@ -167,6 +266,7 @@ def clock():
         for c in reversed(month_cards(sid, first, last)[-10:]):
             cards.append({"c": c, "w": work_minutes(c)})
     return render_template("work_clock.html", staff=staff, card=card, cards=cards, SYMPTOMS=SYMPTOMS, hm=hm,
+                           forgotten=forgotten_cards(sid) if sid else [], max_hours=max_shift_minutes() // 60,
                            default_break=int(setting_num("pay_break_default", 60)), fever=fever_line(),
                            summary=month_summary(sid, first, last) if sid else None,
                            today_health=health_of(sid, date.today().isoformat()) if sid else [], now_time=datetime.now())
@@ -284,9 +384,10 @@ def today_status():
     db = get_db()
     today = date.today().isoformat()
     names = {s["id"]: s["name"] for s in db.execute("SELECT id, name FROM staff")}
+    forgot = {c["id"] for c in forgotten_cards(days=3)}
     working = [names.get(c["staff_id"], "?") + f"（{c['clock_in']}〜）" for c in db.execute(
         "SELECT * FROM timecards WHERE clock_out IS NULL AND date >= ? ORDER BY clock_in",
-        ((date.today() - timedelta(days=1)).isoformat(),))]
+        ((date.today() - timedelta(days=2)).isoformat(),)) if c["id"] not in forgot]
     unwell = [(names.get(h["staff_id"], "?"), h) for h in db.execute("SELECT * FROM health_checks WHERE date=? ORDER BY time", (today,))
               if is_unwell(h)]
     return {"working": working, "unwell": unwell}

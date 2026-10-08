@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}給与の設定{% endblock %}
+{% block content %}
+<h1>⚙️ 給与・タイムカードの設定</h1>
+<p class="guide">保険料率は毎年変わります（健康保険・介護保険は毎年3月、雇用保険は4月など）。協会けんぽ・ハローワークのお知らせで確かめて直してください。所得税は概算です。</p>
+<form method="post" class="form card">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  {% for k, label, d, help in PAY_SETTINGS %}
+  <label><span>{{ label }}</span><input name="{{ k }}" value="{{ values[k] }}" placeholder="{{ d }}">{% if help %}<small class="muted">{{ help }}</small>{% endif %}</label>
+  {% endfor %}
+  <label class="chip wide"><input type="checkbox" name="pay_health_required" value="1"{% if health_required %} checked{% endif %}> 出勤のとき体温の入力を必ずにする</label>
+  <div class="actions wide"><button class="btn primary">💾 保存する</button></div>
+</form>
+{% endblock %}

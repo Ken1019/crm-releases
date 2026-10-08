@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}自分の給与明細{% endblock %}
+{% block content %}
+<h1>💴 自分の給与明細</h1>
+{% if not linked %}<div class="card"><p>このログインが職員の情報とつながっていません。管理者に連絡してください。</p></div>
+{% else %}
+<p class="guide">管理者が確定して「職員に見せる」にした月だけ出ます。</p>
+<ul class="todo card">
+  {% for r in rows %}<li><a href="{{ url_for('payroll.mine_slip', ym=r['ym']) }}"><span class="pill ok">{{ r['ym'][:4] }}年{{ r['ym'][5:]|int }}月分</span>
+    <span>差引支給額 <b>{{ '{:,}'.format(r['net']) }}円</b></span><span class="when">見る ▶</span></a></li>
+  {% else %}<li class="muted">まだ明細はありません。</li>{% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

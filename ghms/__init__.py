@@ -35,7 +35,7 @@ def create_app(test_config=None):
     db.init_db(app.config["DATABASE"])
     app.teardown_appcontext(db.close_db)
 
-    from . import absences, auth, billing, crud, customize, docs, shift, updater, views
+    from . import absences, auth, billing, crud, customize, compliance, docs, payroll, shift, updater, views, work
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(crud.bp)
@@ -46,6 +46,9 @@ def create_app(test_config=None):
     app.register_blueprint(updater.bp)
     app.register_blueprint(customize.bp)
     app.register_blueprint(docs.bp)
+    app.register_blueprint(work.bp)
+    app.register_blueprint(payroll.bp)
+    app.register_blueprint(compliance.bp)
     auth.install(app)
     customize.install(app)
 
