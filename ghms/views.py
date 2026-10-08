@@ -202,9 +202,16 @@ def journal():
     db = get_db()
     d = parse_date(request.values.get("date"), date.today())
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
-    home_id = request.values.get("home_id", type=int) or (homes[0]["id"] if homes else None)
+    home_id = request.values.get("home_id", type=int)
+    if home_id is None:
+        home_id = homes[0]["id"] if homes else None
+    # home_id=0 は「住居未設定」（住居が入っていない入居者）。業務日誌は住居なし（NULL）として保存する
+    log_home = None if home_id == 0 else home_id
     slot = request.values.get("slot") if request.values.get("slot") in TIME_SLOT else "終日"
-    residents = _home_residents(home_id)
+    if home_id == 0:
+        residents = db.execute(f"SELECT * FROM residents WHERE home_id IS NULL AND ({ACTIVE_RES}) ORDER BY room, kana").fetchall()
+    else:
+        residents = _home_residents(home_id)
 
     if request.method == "POST":
         log = {f: (request.form.get(f, "").strip() or None) for f in LOG_FIELDS}
@@ -213,19 +220,20 @@ def journal():
                 log["residents_count"] = int(log["residents_count"])
             except ValueError:
                 log["residents_count"] = None
-        existing = db.execute("SELECT id FROM daily_logs WHERE date=? AND home_id IS ?", (d.isoformat(), home_id)).fetchone()
-        if any(v not in (None, "") for v in log.values()):
-            cols = list(log)
-            if existing:
-                db.execute(f"UPDATE daily_logs SET {', '.join(c + '=?' for c in cols)}, updated_at=?, updated_by=? WHERE id=?",
-                           [log[c] for c in cols] + [now(), g.user["username"], existing["id"]])
-                audit("update", "daily_logs", existing["id"])
-            else:
-                cur = db.execute(f"INSERT INTO daily_logs (date, home_id, {', '.join(cols)}, created_at, updated_at, updated_by)"
-                                 f" VALUES (?, ?, {', '.join('?' for _ in cols)}, ?, ?, ?)",
-                                 [d.isoformat(), home_id] + [log[c] for c in cols] + [now(), now(), g.user["username"]])
-                audit("create", "daily_logs", cur.lastrowid)
-        saved = 0
+        existing = db.execute("SELECT id FROM daily_logs WHERE date=? AND home_id IS ?", (d.isoformat(), log_home)).fetchone()
+        cols = list(log)
+        if existing:
+            # すでにある日誌は、全部消したときも消した内容で上書きする
+            db.execute(f"UPDATE daily_logs SET {', '.join(c + '=?' for c in cols)}, updated_at=?, updated_by=? WHERE id=?",
+                       [log[c] for c in cols] + [now(), g.user["username"], existing["id"]])
+            audit("update", "daily_logs", existing["id"])
+        elif any(v not in (None, "") for v in log.values()):
+            cur = db.execute(f"INSERT INTO daily_logs (date, home_id, {', '.join(cols)}, created_at, updated_at, updated_by)"
+                             f" VALUES (?, ?, {', '.join('?' for _ in cols)}, ?, ?, ?)",
+                             [d.isoformat(), log_home] + [log[c] for c in cols] + [now(), now(), g.user["username"]])
+            audit("create", "daily_logs", cur.lastrowid)
+        saved = removed = 0
+        by_id = request.form.get("by_id") == "1"  # 今の画面は、行ごとに記録の番号を送る
         for r in residents:
             rec = {f: (request.form.get(f"r{r['id']}_{f}", "").strip() or None) for f in REC_FIELDS}
             if rec["temperature"]:
@@ -233,12 +241,27 @@ def journal():
                     rec["temperature"] = float(rec["temperature"])
                 except ValueError:
                     rec["temperature"] = None
-            ex = db.execute("SELECT id FROM support_records WHERE date=? AND resident_id=? AND time_slot=?",
-                            (d.isoformat(), r["id"], slot)).fetchone()
-            # 記録者欄は自動入力されるため、それ以外に記入がある場合のみ新規作成する
+            # 画面に出していた記録（行ごとの番号）だけを直す。同じ日・時間帯のほかの記録は上書きしない
+            rec_id = request.form.get(f"r{r['id']}_id", type=int)
+            if rec_id:
+                ex = db.execute("SELECT id FROM support_records WHERE id=? AND resident_id=?", (rec_id, r["id"])).fetchone()
+            elif by_id:
+                ex = None  # 画面を開いたときに記録がなかった → 新しく作る（あとから書かれた記録は上書きしない）
+            else:
+                # 番号のない送信（古い画面など）は、同じ日・時間帯のいちばん新しい記録を直す
+                ex = db.execute("SELECT id FROM support_records WHERE date=? AND resident_id=? AND time_slot=? ORDER BY id DESC",
+                                (d.isoformat(), r["id"], slot)).fetchone()
+            # 記録者欄は自動入力されるため、それ以外に記入がある場合のみ記録として扱う
             filled = any(rec[f] not in (None, "") for f in REC_FIELDS if f != "staff")
             cols = list(rec)
-            if ex:
+            if ex and not filled and not (rec_id or by_id):
+                continue  # 番号のない送信で空欄のときは、記録を変えない
+            if ex and not filled:
+                # 記録の欄を全部消したら、その記録を削除する
+                db.execute("DELETE FROM support_records WHERE id=?", (ex["id"],))
+                audit("delete", "support_records", ex["id"])
+                removed += 1
+            elif ex:
                 db.execute(f"UPDATE support_records SET {', '.join(c + '=?' for c in cols)}, updated_at=?, updated_by=? WHERE id=?",
                            [rec[c] for c in cols] + [now(), g.user["username"], ex["id"]])
                 audit("update", "support_records", ex["id"])
@@ -250,20 +273,28 @@ def journal():
                 audit("create", "support_records", cur.lastrowid)
                 saved += 1
         db.commit()
-        flash(f"保存しました（支援記録 {saved}件）。", "ok")
+        flash(f"保存しました（支援記録 {saved}件" + (f"・削除 {removed}件" if removed else "") + "）。", "ok")
         return redirect(url_for("views.journal", date=d.isoformat(), home_id=home_id, slot=slot))
 
     from .absences import current_absences
 
     away = current_absences(home_id) if feature_on("absences") else []
-    log = db.execute("SELECT * FROM daily_logs WHERE date=? AND home_id IS ?", (d.isoformat(), home_id)).fetchone()
+    if home_id == 0:
+        away = [x for x in away if x["a"]["home_id"] is None]
+    log = db.execute("SELECT * FROM daily_logs WHERE date=? AND home_id IS ?", (d.isoformat(), log_home)).fetchone()
+    # 同じ日・時間帯に記録がいくつかあるときは、いちばん新しいもの（番号が大きいもの）を表に出す
     recs = {r["resident_id"]: r for r in db.execute(
-        "SELECT * FROM support_records WHERE date=? AND time_slot=?", (d.isoformat(), slot))}
-    day_all = db.execute("SELECT s.*, r.name AS rname FROM support_records s JOIN residents r ON r.id=s.resident_id "
-                         "WHERE s.date=? AND (? IS NULL OR r.home_id=?) ORDER BY r.kana, s.id",
-                         (d.isoformat(), home_id, home_id)).fetchall()
+        "SELECT * FROM support_records WHERE date=? AND time_slot=? ORDER BY id", (d.isoformat(), slot))}
+    if home_id == 0:
+        day_all = db.execute("SELECT s.*, r.name AS rname FROM support_records s JOIN residents r ON r.id=s.resident_id "
+                             "WHERE s.date=? AND r.home_id IS NULL ORDER BY r.kana, s.id", (d.isoformat(),)).fetchall()
+    else:
+        day_all = db.execute("SELECT s.*, r.name AS rname FROM support_records s JOIN residents r ON r.id=s.resident_id "
+                             "WHERE s.date=? AND (? IS NULL OR r.home_id=?) ORDER BY r.kana, s.id",
+                             (d.isoformat(), home_id, home_id)).fetchall()
+    no_home = db.execute(f"SELECT COUNT(*) FROM residents WHERE home_id IS NULL AND ({ACTIVE_RES})").fetchone()[0]
     return render_template("journal.html", away=away, d=d, homes=homes, home_id=home_id, slot=slot, residents=residents, log=log,
-                           recs=recs, day_all=day_all, prev=(d - timedelta(days=1)).isoformat(),
+                           recs=recs, day_all=day_all, prev=(d - timedelta(days=1)).isoformat(), no_home=no_home,
                            next=(d + timedelta(days=1)).isoformat(), MEAL=MEAL, MED=MED, MOOD=MOOD, TIME_SLOT=TIME_SLOT)
 
 

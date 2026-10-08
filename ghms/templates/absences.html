@@ -15,7 +15,7 @@
     <li class="{{ 'over' if x.need_contact }}"><a href="{{ url_for('absences.detail', aid=a['id']) }}">
       <span class="pill {{ 'ng' if a['kind'] == '入院' else 'warn' }}">{{ a['kind'] }}</span>
       <span><b>{{ a['rname'] }}</b> さん　{{ a['place'] or '' }}<br>
-        <small class="muted">{{ a['start_date'] }} から{% if a['end_plan'] %}・{{ a['end_plan'] }} に戻る予定{% endif %}</small></span>
+        <small class="muted">{{ a['start_date'] }} から{% if a['end_date'] or a['end_plan'] %}・{{ a['end_date'] or a['end_plan'] }} に戻る予定{% endif %}</small></span>
       <span class="when">{% if a['last_contact'] %}最後の連絡 {{ a['last_contact'] }}{% else %}連絡の記録なし{% endif %}
         {% if x.need_contact %}<br><b class="ng">{{ x.days }}日 連絡なし</b>{% endif %}</span></a></li>
   {% else %}
