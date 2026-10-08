@@ -1,0 +1,27 @@
+{% extends 'doc_base.html' %}
+{% block title %}経歴書{% endblock %}
+{% block toolbar %}
+<form method="get"><select name="sid" onchange="this.form.submit()"><option value="">管理者・サービス管理責任者</option>
+  {% for s in all_staff %}<option value="{{ s['id'] }}"{% if s['id'] == sid %} selected{% endif %}>{{ s['name'] }}（{{ s['job'] or '' }}）</option>{% endfor %}</select></form>
+<span class="note">職員の情報の「職歴」「修了した研修」「保有資格」から作ります。研修修了証・資格証の写しを添えてください。</span>
+{% endblock %}
+{% block pages %}
+{% for p in people %}
+<div class="page">
+  <h1>{{ p['job'] or '' }} 経 歴 書</h1>
+  <div class="meta"><span>事業所名：{{ office.office_name }}（事業所番号 {{ office.office_no }}）</span><span>{{ today.strftime('%Y年%m月%d日') }}</span></div>
+  <table>
+    <tr><th style="width:22%">ふりがな</th><td>{{ p['kana'] or '' }}</td><th style="width:16%">生年月日</th><td>{{ p['birthdate'] or '' }}</td></tr>
+    <tr><th>氏名</th><td style="font-size:16px">{{ p['name'] }}</td><th>入職日</th><td>{{ p['hire_date'] or '' }}</td></tr>
+    <tr><th>職種</th><td>{{ p['job'] or '' }}</td><th>常勤／非常勤</th><td>{{ p['employment'] or '' }}</td></tr>
+  </table>
+  <h2>主な職歴</h2>
+  <table><tr><td class="pre" style="height:70mm">{{ p['career_history'] or '（職員の情報の「職歴」に入力してください）' }}</td></tr></table>
+  <h2>保有資格</h2>
+  <table><tr><td class="pre" style="height:25mm">{{ p['qualifications'] or '' }}</td></tr></table>
+  <h2>修了した研修</h2>
+  <table><tr><td class="pre" style="height:35mm">{{ p['certified_trainings'] or '（サービス管理責任者等研修などの修了状況を入力してください）' }}</td></tr></table>
+  <p style="margin-top:14px">上記のとおり相違ありません。　　　　　　　　氏名＿＿＿＿＿＿＿＿＿＿＿＿　印</p>
+</div>
+{% else %}<div class="page"><p>管理者・サービス管理責任者が登録されていません。上のメニューで職員をえらんでください。</p></div>{% endfor %}
+{% endblock %}

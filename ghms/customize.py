@@ -29,6 +29,7 @@ FEATURES = [
     ("billing", "実績と給付費の概算", "国保連に請求する前の確認", ["/billing/attendance", "/billing/benefit", "/m/basic_units"]),
     ("invoices", "利用料の請求書・入金管理", "家賃・食費などの請求書と領収書", ["/billing/invoice", "/m/invoices"]),
     ("deposits", "預り金の管理", "お小遣いなどの出し入れと出納帳", ["/billing/deposits", "/m/deposits"]),
+    ("menus", "献立表", "1週間の献立を入力・印刷", ["/docs/menus"]),
 ]
 FEATURE_BY_KEY = {k: (k, n, d, p) for k, n, d, p in FEATURES}
 

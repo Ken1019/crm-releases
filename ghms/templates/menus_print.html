@@ -1,0 +1,15 @@
+{% extends 'doc_base.html' %}
+{% block title %}献立表{% endblock %}
+{% block orient %}landscape{% endblock %}
+{% block back %}{{ url_for('docs.menus', home_id=home_id or '', week=start.isoformat()) }}{% endblock %}
+{% block pages %}
+<div class="page land">
+  <h1>献 立 表</h1>
+  <div class="meta"><span>{{ office.office_name }}　{{ home['name'] if home else '' }}</span><span>{{ days[0].strftime('%Y年%m月%d日') }} 〜 {{ days[-1].strftime('%m月%d日') }}</span></div>
+  <table>
+    <thead><tr><th style="width:9%"></th>{% for d in days %}<th class="c">{{ d.month }}/{{ d.day }}（{{ WEEK[d.weekday()] }}）</th>{% endfor %}</tr></thead>
+    {% for m in MEALS %}<tr><th class="c">{{ m }}</th>{% for d in days %}<td class="pre" style="height:28mm">{{ cells.get((d.isoformat(), m), '') }}</td>{% endfor %}</tr>{% endfor %}
+  </table>
+  {% if allergies %}<p class="muted">アレルギー・禁忌：{% for a in allergies %}{{ a['name'] }}（{{ a['allergy'] }}）{{ '、' if not loop.last }}{% endfor %}</p>{% endif %}
+</div>
+{% endblock %}

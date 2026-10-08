@@ -306,6 +306,12 @@ ENTITIES = {
             F("hourly_wage", "時給（円）", "number", list=False),
             F("tel", "電話番号", list=False),
             F("notes", "備考", "textarea", list=False),
+            F("birthdate", "生年月日", "date", list=False, section="指定申請・更新の書類に使う情報（経歴書など）"),
+            F("career_history", "職歴（年月と勤務先・仕事の内容）", "textarea", list=False,
+              help="例：2015年4月〜2019年3月　〇〇福祉会 生活介護事業所 生活支援員"),
+            F("certified_trainings", "修了した研修（研修名と修了日）", "textarea", list=False,
+              help="例：サービス管理責任者等基礎研修 2020年11月修了／実践研修 2022年12月修了"),
+            F("weekly_hours", "1週間の勤務時間（時間）", "number", list=False, help="勤務体制一覧表・従業者の一覧に使います"),
         ],
     },
     "trainings": {

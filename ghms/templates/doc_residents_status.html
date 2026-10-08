@@ -1,0 +1,16 @@
+{% extends 'doc_base.html' %}
+{% block title %}利用者の状況{% endblock %}
+{% block pages %}
+<div class="page">
+  <h1>利用者の状況</h1>
+  <div class="meta"><span>{{ office.office_name }}（事業所番号 {{ office.office_no }}）</span><span>{{ today.strftime('%Y年%m月%d日') }} 現在</span></div>
+  <table>
+    <thead><tr><th>住居</th><th class="c">類型</th><th class="c">定員</th><th class="c">現員</th>{% for l in levels %}<th class="c">{{ l }}</th>{% endfor %}<th class="c">未入力</th></tr></thead>
+    {% for t in table %}<tr><td>{{ t.h['name'] }}</td><td class="c">{{ t.h['home_type'] or '' }}</td><td class="r">{{ t.h['capacity']|int if t.h['capacity'] else '' }}</td><td class="r">{{ t.n }}</td>
+      {% for l in levels %}<td class="r">{{ t.levels.get(l, 0) or '' }}</td>{% endfor %}<td class="r">{{ t.levels.get('未入力', 0) or '' }}</td></tr>{% endfor %}
+    <tr><th>合計</th><th></th><th class="r">{{ capacity }}</th><th class="r">{{ total }}</th>{% for l in levels %}<th class="r">{{ total_levels.get(l, 0) or '' }}</th>{% endfor %}<th class="r">{{ total_levels.get('未入力', 0) or '' }}</th></tr>
+  </table>
+  <h2>障害種別</h2>
+  <table style="width:60%">{% for k, n in dis.items() %}<tr><td>{{ k }}</td><td class="r">{{ n }}名</td></tr>{% endfor %}</table>
+</div>
+{% endblock %}

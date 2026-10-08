@@ -1,0 +1,21 @@
+{% extends 'doc_base.html' %}
+{% block title %}従業者の一覧{% endblock %}
+{% block orient %}landscape{% endblock %}
+{% block toolbar %}<span class="note">常勤換算は {{ first.strftime('%Y年%m月') }} の勤務表から計算しています。勤務形態一覧表は「勤務表」の画面からExcelで出せます。</span>{% endblock %}
+{% block pages %}
+<div class="page land">
+  <h1>従業者の一覧</h1>
+  <div class="meta"><span>事業所番号 {{ office.office_no }}　{{ office.office_name }}</span><span>{{ today.strftime('%Y年%m月%d日') }} 現在</span></div>
+  <table>
+    <thead><tr><th class="c">No</th><th>職種</th><th>氏名</th><th class="c">常勤／非常勤</th><th>主な勤務住居</th><th>保有資格</th><th class="c">入職日</th>
+      <th class="c">週の勤務時間</th><th class="c">今月の勤務時間</th><th class="c">常勤換算</th></tr></thead>
+    {% for s in staff %}{% set f = fte.get(s['id']) %}
+    <tr><td class="c">{{ loop.index }}</td><td>{{ s['job'] or '' }}</td><td>{{ s['name'] }}</td><td class="c">{{ s['employment'] or '' }}</td>
+      <td>{{ s['hname'] or '' }}</td><td class="pre">{{ s['qualifications'] or '' }}</td><td class="c">{{ s['hire_date'] or '' }}</td>
+      <td class="r">{{ (s['weekly_hours']|round(1)) if s['weekly_hours'] else '' }}</td><td class="r">{{ (f[1]|round(1)) if f else '' }}</td><td class="r">{{ f[0] if f else '' }}</td></tr>
+    {% endfor %}
+  </table>
+  <h2>職種ごとの常勤換算（{{ first.strftime('%Y年%m月') }}）</h2>
+  <table style="width:50%">{% for job, v in by_job.items() %}<tr><td>{{ job }}</td><td class="r">{{ '%.2f'|format(v) }}</td></tr>{% else %}<tr><td class="muted">勤務表が入力されていません</td></tr>{% endfor %}</table>
+</div>
+{% endblock %}

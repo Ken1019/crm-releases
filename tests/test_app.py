@@ -688,3 +688,50 @@ def test_monthly_fee_entry(client):
                                         "user_burden": "9300", "other_label": "行事費", "other_amount": "1500"})
     post(client, "/billing/invoices", {"ym": "2026-10", "action": "save", "r1_daily_goods": "99999"})
     assert '<b class="rowtotal">75,680</b>' in client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
+
+
+# ---------------------------------------------------------------- 書類（献立表・実績記録票・指定更新）
+def test_menus_week_copy_print(client, app):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "allergy": "えび"})
+    post(client, "/docs/menus", {"home_id": "1", "week": "2026-10-05", "action": "save",
+                                 "2026-10-05_朝食": "ごはん\n味噌汁", "2026-10-07_夕食": "カレーライス"})
+    page = client.get("/docs/menus?home_id=1&week=2026-10-07").get_data(as_text=True)  # 週の途中の日でも同じ週
+    assert "カレーライス" in page and "えび" in page
+    post(client, "/docs/menus", {"home_id": "1", "week": "2026-10-12", "action": "copy_prev"})
+    assert "カレーライス" in client.get("/docs/menus?home_id=1&week=2026-10-12").get_data(as_text=True)
+    printed = client.get("/docs/menus?home_id=1&week=2026-10-12&print=1").get_data(as_text=True)
+    assert "献 立 表" in printed and "10/14（水）" in printed
+    assert client.get("/docs/menus.xlsx?home_id=1&ym=2026-10").data[:2] == b"PK"
+    staff = staff_client(client, app)
+    assert staff.get("/docs/menus").status_code == 200       # 職員も献立表は使える
+    assert staff.get("/docs/renewal").status_code == 403     # 指定更新の書類は管理者だけ
+
+
+def test_record_sheets(client):
+    _setup_billing(client)
+    page = client.get("/docs/record-sheets?ym=2026-10").get_data(as_text=True)
+    assert "サービス提供実績記録票（共同生活援助）" in page and "山田太郎" in page
+    assert "在居 28日・外泊 3日" in page
+    assert client.get("/docs/record-sheets.xlsx?ym=2026-10").data[:2] == b"PK"
+
+
+def test_renewal_documents(client):
+    post(client, "/settings", {"office_name": "ひだまり", "corp_name": "社会福祉法人テスト会", "service_area": "札幌市中央区",
+                               "complaint_manager": "管理者 佐藤", "session_timeout_min": "30", "staff_can_export": "0"})
+    post(client, "/m/homes/new", {"name": "第1ホーム", "capacity": "5", "home_type": "介護サービス包括型"})
+    post(client, "/m/staff/new", {"name": "佐藤 一郎", "status": "在籍", "job": "サービス管理責任者", "employment": "常勤",
+                                  "career_history": "2015年4月〜 生活支援員", "certified_trainings": "基礎研修 2020年修了"})
+    post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "support_level": "区分4", "rent": "38000"})
+    page = client.get("/docs/renewal").get_data(as_text=True)
+    assert "運営規程" in page and "0 / " in page
+    post(client, "/docs/renewal", {"done_1": "1", "note_1": "総務が作成", "new": "消防の点検結果の写し", "due": "2027-03-31"})
+    page = client.get("/docs/renewal").get_data(as_text=True)
+    assert "1 / " in page and "消防の点検結果の写し" in page and "2027-03-31" in page
+    rules = client.get("/docs/rules").get_data(as_text=True)
+    assert "社会福祉法人テスト会" in rules and "札幌市中央区" in rules and "利用定員は5名" in rules and "38,000円" in rules
+    resume = client.get("/docs/resumes").get_data(as_text=True)
+    assert "佐藤 一郎" in resume and "基礎研修 2020年修了" in resume
+    assert "区分4" in client.get("/docs/residents-status").get_data(as_text=True)
+    assert "佐藤 一郎" in client.get("/docs/staff-list").get_data(as_text=True)
+    assert client.get("/docs/committee").status_code == 200

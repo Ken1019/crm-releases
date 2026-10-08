@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}献立表{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>🍚 献立表</h1>
+  <a class="btn" href="{{ url_for('docs.menus', home_id=home_id or '', week=start.isoformat(), print=1) }}">🖨️ この週を印刷</a>
+  {% if can_export %}<a class="btn" href="{{ url_for('docs.menus_export', home_id=home_id or '', ym=start.strftime('%Y-%m')) }}">📄 {{ start.month }}月をExcelで</a>{% endif %}
+</div>
+<p class="guide">1週間分の献立を入れて「保存する」を押します。「前の週を写す」で先週の献立をそのまま入れてから直すと早く作れます。</p>
+<form method="get" class="filters card">
+  <a class="btn" href="{{ url_for('docs.menus', home_id=home_id or '', week=prev) }}">◀ 前の週</a>
+  <input type="date" name="week" value="{{ start.isoformat() }}" onchange="this.form.submit()" aria-label="週">
+  <a class="btn" href="{{ url_for('docs.menus', home_id=home_id or '', week=next) }}">次の週 ▶</a>
+  <select name="home_id" onchange="this.form.submit()" aria-label="住居">{% for h in homes %}<option value="{{ h['id'] }}"{% if h['id'] == home_id %} selected{% endif %}>{{ h['name'] }}</option>{% endfor %}</select>
+  <noscript><button class="btn">表示</button></noscript>
+</form>
+{% if allergies %}<p class="away">⚠️ アレルギー・禁忌：{% for a in allergies %}<b>{{ a['name'] }}</b>さん（{{ a['allergy'] }}）{{ '、' if not loop.last }}{% endfor %}</p>{% endif %}
+<form method="post" data-guard>
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="home_id" value="{{ home_id or '' }}"><input type="hidden" name="week" value="{{ start.isoformat() }}">
+  <div class="gridwrap card"><table class="list menu-grid">
+    <thead><tr><th class="name"></th>{% for d in days %}<th class="{{ 'sat' if d.weekday() == 5 else 'sun' if d.weekday() == 6 }}">{{ d.month }}/{{ d.day }}（{{ WEEK[d.weekday()] }}）</th>{% endfor %}</tr></thead>
+    <tbody>{% for m in MEALS %}<tr><th class="name">{{ m }}</th>
+      {% for d in days %}<td><textarea name="{{ d.isoformat() }}_{{ m }}" rows="3" aria-label="{{ d.month }}/{{ d.day }} {{ m }}">{{ cells.get((d.isoformat(), m), '') }}</textarea></td>{% endfor %}</tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="actions sticky-save">
+    <button class="btn" name="action" value="copy_prev" formnovalidate onclick="return confirm('前の週の献立を、この週に写しますか？（入力済みの欄は上書きされます）')">📋 前の週を写す</button>
+    <button class="btn primary big" name="action" value="save">💾 保存する</button>
+  </div>
+</form>
+{% endblock %}

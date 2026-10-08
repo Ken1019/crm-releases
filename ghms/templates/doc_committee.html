@@ -1,0 +1,19 @@
+{% extends 'doc_base.html' %}
+{% block title %}委員会・研修の実施状況{% endblock %}
+{% block toolbar %}<form method="get"><select name="days" onchange="this.form.submit()">
+  {% for d, l in [(365, '直近1年'), (730, '直近2年'), (2190, '直近6年')] %}<option value="{{ d }}"{% if request.args.get('days', '730')|int == d %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></form>{% endblock %}
+{% block pages %}
+<div class="page">
+  <h1>委員会・研修の実施状況</h1>
+  <div class="meta"><span>{{ office.office_name }}（事業所番号 {{ office.office_no }}）</span><span>{{ since }} 〜 {{ today.isoformat() }}</span></div>
+  {% for kind, rows in by_kind.items() %}
+  <h2>{{ kind }}（{{ rows|length }}回）</h2>
+  <table><thead><tr><th class="c" style="width:16%">開催日</th><th style="width:28%">議題</th><th>出席者</th><th style="width:14%">記録者</th></tr></thead>
+    {% for m in rows %}<tr><td class="c">{{ m['date'] }}</td><td>{{ m['title'] or '' }}</td><td>{{ m['attendees'] or '' }}</td><td>{{ m['recorder'] or '' }}</td></tr>{% endfor %}</table>
+  {% else %}<p class="muted">この期間の会議・委員会の記録はありません。</p>{% endfor %}
+  <h2>研修の受講（{{ trainings|length }}件）</h2>
+  <table><thead><tr><th class="c" style="width:16%">受講日</th><th>研修名</th><th style="width:18%">受講者</th><th class="c" style="width:12%">種別</th><th class="c" style="width:9%">時間</th></tr></thead>
+    {% for t in trainings %}<tr><td class="c">{{ t['date'] }}</td><td>{{ t['title'] }}</td><td>{{ t['sname'] or '' }}</td><td class="c">{{ t['kind'] or '' }}</td><td class="r">{{ t['hours'] or '' }}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">記録はありません。</td></tr>{% endfor %}</table>
+</div>
+{% endblock %}

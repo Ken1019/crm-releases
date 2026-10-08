@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}指定更新の書類{% endblock %}
+{% block content %}
+<h1>📂 指定更新の書類</h1>
+<p class="guide">指定更新（6年ごと）に出す書類のチェックリストです。「作る」があるものは、システムのデータから下書きを作って印刷・PDF保存できます。
+  必要な書類と様式は自治体によって違うため、指定権者の案内で確認し、足りない書類は下で追加してください。</p>
+<div class="tiles">
+  <div class="tile"><b>{{ done }} / {{ items|length }}</b><span>そろった書類</span></div>
+  <div class="tile"><b>{{ due or '未設定' }}</b><span>提出の期限</span></div>
+</div>
+<form method="post" class="card" data-guard>
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <label class="check" style="margin-bottom:10px">提出の期限 <input type="date" name="due" value="{{ due }}"></label>
+  <div class="tablewrap"><table class="list">
+    <thead><tr><th>そろった</th><th>書類</th><th>作る</th><th>メモ（担当・保管場所など）</th></tr></thead>
+    {% for i in items %}
+    <tr class="{{ 'muted' if i['done'] }}"><td><input type="checkbox" name="done_{{ i['id'] }}" value="1"{% if i['done'] %} checked{% endif %} aria-label="{{ i['name'] }}"></td>
+      <td><b>{{ i['name'] }}</b></td>
+      <td class="nowrap">{% if i['endpoint'] %}<a class="btn mini" href="{{ url_for(i['endpoint']) }}" target="_blank">📄 作る</a>{% else %}<span class="muted small">自分で用意</span>{% endif %}</td>
+      <td><input name="note_{{ i['id'] }}" value="{{ i['note'] or '' }}" style="width:100%"></td></tr>
+    {% endfor %}
+    <tr class="total"><td>＋</td><td colspan="3"><input name="new" placeholder="書類を追加（例：消防用設備等点検結果報告書の写し）" style="width:100%"></td></tr>
+  </table></div>
+  <div class="actions"><button class="btn primary">💾 保存する</button></div>
+</form>
+<section class="card">
+  <h2>書類に印字する事業所の情報</h2>
+  <p class="muted small">法人名・代表者・実施地域・苦情受付担当者などは「設定」→「事業所の情報を変える」で入れておくと、運営規程などに自動で入ります。
+    職員の経歴書は、職員の情報の「職歴」「修了した研修」から作ります。</p>
+  <table class="list">
+    {% for k, label in [('corp_name', '法人名'), ('corp_rep', '代表者'), ('service_area', '実施地域'), ('complaint_manager', '苦情解決責任者'), ('cooperating_hospital', '協力医療機関')] %}
+    <tr><td>{{ label }}</td><td>{% if office[k] %}{{ office[k] }}{% else %}<span class="pill warn">未入力</span>{% endif %}</td></tr>{% endfor %}
+  </table>
+  <p><a href="{{ url_for('views.settings') }}">事業所の情報を入れる</a></p>
+</section>
+{% endblock %}

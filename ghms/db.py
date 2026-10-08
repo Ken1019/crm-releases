@@ -63,6 +63,11 @@ def init_db(path):
         "CREATE TABLE IF NOT EXISTS shifts (staff_id INTEGER, date TEXT, code TEXT,"
         " updated_by TEXT, updated_at TEXT, PRIMARY KEY (staff_id, date))"
     )
+    # 献立表・指定更新の書類チェックリスト
+    con.execute("CREATE TABLE IF NOT EXISTS menus (home_id INTEGER, date TEXT, meal TEXT, text TEXT, updated_by TEXT,"
+                " updated_at TEXT, PRIMARY KEY (home_id, date, meal))")
+    con.execute("CREATE TABLE IF NOT EXISTS renewal_items (id INTEGER PRIMARY KEY, sort INTEGER, name TEXT, endpoint TEXT,"
+                " done INTEGER DEFAULT 0, note TEXT)")
     # 事業所ごとのカスタマイズ（選択肢・独自の項目）
     con.execute("CREATE TABLE IF NOT EXISTS choice_options (field TEXT, value TEXT, sort INTEGER, active INTEGER DEFAULT 1,"
                 " track_days INTEGER, PRIMARY KEY (field, value))")

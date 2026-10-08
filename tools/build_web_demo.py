@@ -50,7 +50,11 @@ d = lambda n: (today + timedelta(days=n)).isoformat()  # noqa: E731
 post("/settings", {"office_name": "グループホーム ひだまり（デモ）", "office_no": "0000000000", "unit_price": "10.00",
                    "cert_alert_days": "60", "plan_alert_days": "30", "office_address": "札幌市〇〇区〇〇 1-2-3",
                    "office_tel": "011-000-0000", "bank_info": "〇〇銀行 △△支店 普通 1234567", "invoice_due_day": "27",
-                   "full_time_hours": "160"})
+                   "full_time_hours": "160", "corp_name": "社会福祉法人 ひだまり会（デモ）", "corp_rep": "理事長 山本 太郎",
+                   "service_area": "札幌市〇〇区", "target_disability": "知的障害者・精神障害者",
+                   "complaint_staff": "サービス管理責任者 佐藤 一郎", "complaint_manager": "管理者 佐藤 一郎",
+                   "third_party": "〇〇 〇〇（民生委員）", "cooperating_hospital": "〇〇クリニック（内科）",
+                   "session_timeout_min": "30", "staff_can_export": "0", "pin_timeout_min": "15"})
 post("/m/homes/new", {"name": "ひだまり第1ホーム", "home_type": "介護サービス包括型", "capacity": "5"})
 post("/m/homes/new", {"name": "ひだまり第2ホーム", "home_type": "介護サービス包括型", "capacity": "4"})
 residents = [
@@ -78,6 +82,11 @@ staff = [("佐藤 一郎", "さとういちろう", "サービス管理責任者
 for name, kana, job, emp, grade, hire, q in staff:
     post("/m/staff/new", {"name": name, "kana": kana, "status": "在籍", "job": job, "employment": emp, "grade_id": grade,
                           "hire_date": hire, "qualifications": q, "home_id": "1"})
+post("/m/staff/1/edit", {"name": "佐藤 一郎", "kana": "さとういちろう", "status": "在籍", "job": "サービス管理責任者",
+                         "employment": "常勤", "grade_id": "4", "hire_date": "2019-04-01", "qualifications": "介護福祉士\n社会福祉士",
+                         "home_id": "1", "birthdate": "1980-05-12", "weekly_hours": "40",
+                         "career_history": "2003年4月〜2012年3月　〇〇福祉会 障害者支援施設 生活支援員\n2012年4月〜2019年3月　〇〇会 グループホーム 世話人・サービス管理責任者\n2019年4月〜　現職",
+                         "certified_trainings": "サービス管理責任者等基礎研修　2018年11月修了\nサービス管理責任者等実践研修　2020年12月修了\n更新研修　2025年11月修了"})
 for sid, title, hrs in [(2, "虐待防止・権利擁護研修", "2"), (3, "強度行動障害支援者養成研修（基礎）", "12"), (4, "新任職員研修", "3"),
                         (2, "感染症・BCP研修", "1.5")]:
     post("/m/trainings/new", {"date": d(-30), "staff_id": str(sid), "kind": "外部研修", "title": title, "hours": hrs})
@@ -138,6 +147,25 @@ for rid in (1, 2, 3):
     for t in ["利用契約書", "重要事項説明書", "個人情報使用同意書"]:
         post("/m/resident_documents/new", {"resident_id": str(rid), "doc_type": t, "signed_on": "2025-04-01", "place": "事務所 書庫"})
 post("/m/resident_documents/new", {"resident_id": "4", "doc_type": "利用契約書", "signed_on": "2025-04-01", "expires_on": d(20)})
+# 献立表（今週）
+wk = today - timedelta(days=today.weekday())
+menu = {"朝食": ["ごはん・味噌汁・焼き鮭", "トースト・目玉焼き・サラダ", "ごはん・納豆・卵焼き", "パン・ヨーグルト・バナナ",
+                 "ごはん・味噌汁・ウインナー", "ホットケーキ・牛乳", "おにぎり・豚汁"],
+        "昼食": ["（日中活動先）", "（日中活動先）", "（日中活動先）", "（日中活動先）", "（日中活動先）", "焼きそば・スープ", "うどん・天ぷら"],
+        "夕食": ["カレーライス・サラダ", "鶏の照り焼き・ひじき煮", "肉じゃが・ほうれん草のおひたし", "さばの味噌煮・きんぴら",
+                 "ハンバーグ・ポテトサラダ", "手巻き寿司・すまし汁", "鍋（寄せ鍋）"],
+        "おやつ": ["", "", "", "", "", "プリン", "季節の果物"]}
+mform = {"home_id": "1", "week": wk.isoformat(), "action": "save"}
+for m, items in menu.items():
+    for i, t in enumerate(items):
+        mform[f"{(wk + timedelta(days=i)).isoformat()}_{m}"] = t
+post("/docs/menus", mform)
+post("/m/residents/2/edit", {"name": "石田 健", "kana": "いしだけん", "status": "入居中", "home_id": "1", "room": "102",
+                             "support_level": "区分3", "disability_type": "精神障害", "allergy": "えび・かに", "move_in": "2025-04-01",
+                             "rent": "38000", "rent_subsidy": "10000", "utility": "12000", "daily_goods": "3000",
+                             "food_type": "日額（食べた日数で計算）", "food_amount": "900", "burden_cap": "0", "pay_method": "口座振替"})
+post("/docs/renewal", {"done_3": "1", "done_8": "1", "note_3": "勤務表から作成", "due": "2027-03-31"})
+
 # 入院・帰省と連絡記録
 post("/m/absences/new", {"resident_id": "5", "kind": "入院", "start_date": d(-12), "end_plan": d(5), "place": "△△病院 3階病棟",
                          "place_tel": "011-000-1111", "contact_person": "主治医 〇〇先生／担当看護師 △△さん",
@@ -192,7 +220,9 @@ PRIORITY = ["/", "/do/daily", "/do/residents", "/do/staff", "/do/money", "/do/bi
             "/shogu/", "/shogu/1", "/addons/check", "/settings", "/users", "/audit", "/password",
             "/m/residents/1", "/m/residents/1/edit", "/m/residents/new", "/m/incidents/new", "/m/support_plans/1",
             "/absences/", "/absences/1", "/absences/2", "/m/absences/new", "/m/contact_logs/", "/m/contact_logs/new",
-            "/m/residents/5", "/m/residents/4"]
+            "/m/residents/5", "/m/residents/4", "/do/docs", "/docs/renewal", "/docs/record-sheets", "/docs/menus",
+            "/docs/menus?print=1", "/docs/rules", "/docs/resumes", "/docs/staff-list", "/docs/residents-status", "/docs/committee",
+            "/settings/features", "/settings/choices", "/settings/fields", "/update"]
 pages, queue, seen = {}, deque(PRIORITY), set(PRIORITY)
 per_path, per_kind = Counter(), Counter()
 
