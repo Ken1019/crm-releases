@@ -1021,3 +1021,166 @@ def test_today_list_on_home(client, app):
     page = staff.get("/").get_data(as_text=True)
     assert "今日のやること" in page and "ひまわりの業務日誌を書く" in page and "国保連" not in page
     assert staff.post("/today/done", data={"key": m.group(1), "_csrf": csrf(staff)}).status_code == 403
+
+
+# ---------------------------------------------------------------- 給与・タイムカード・有給の直し
+def test_overtime_per_day_and_early_shift_not_yakin(client, app):
+    post(client, "/m/staff/new", {"name": "A", "status": "在籍", "pay_type": "時給", "hourly_wage": "1200"})
+    with app.app_context():
+        from ghms.db import get_db
+        db = get_db()
+        # 1日に2回：7〜12時と15〜21時 → 11時間 → 残業3時間。早番 5〜14時（休憩60分）は夜勤ではない
+        db.execute("INSERT INTO timecards (staff_id, date, clock_in, clock_out, break_min) VALUES "
+                   "(1,'2026-09-01','07:00','12:00',0), (1,'2026-09-01','15:00','21:00',0), (1,'2026-09-02','05:00','14:00',60)")
+        db.commit()
+    with app.test_request_context():
+        from ghms.work import day_cards, month_cards, month_summary, work_minutes
+
+        sm = month_summary(1, date(2026, 9, 1), date(2026, 9, 30))
+        assert sm["total"] == 19 * 60 and sm["over"] == 180 and sm["yakin"] == 0 and sm["days"] == 2
+        assert not work_minutes({"clock_in": "05:00", "clock_out": "14:00", "break_min": 60})["yakin"]
+        assert work_minutes({"clock_in": "17:00", "clock_out": "09:00", "break_min": 60})["yakin"]
+        overs = [x["w"]["over"] for x in day_cards(month_cards(1, date(2026, 9, 1), date(2026, 9, 30)))]
+        assert overs == [0, 180, 0]
+    page = client.get("/work/timecards?ym=2026-09&staff_id=1").get_data(as_text=True)
+    assert "残業 3:00" in page and "夜勤 0回" in page
+
+
+def test_timecard_empty_clock_in_is_kept(client, app):
+    post(client, "/m/staff/new", {"name": "A", "status": "在籍", "pay_type": "時給", "hourly_wage": "1200"})
+    post(client, "/shift/", {"ym": "2026-09", "s1_1": "日"})
+    post(client, "/work/timecards", {"ym": "2026-09", "staff_id": "1", "in_new_1": "09:00", "out_new_1": "18:00", "br_new_1": "60"})
+    post(client, "/work/timecards", {"ym": "2026-09", "staff_id": "1", "in_1": "", "out_1": "18:00", "br_1": "60"})
+    with app.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT clock_in FROM timecards").fetchone()[0] == "09:00"
+        # 古いデータで出勤が空の行があっても画面は開ける
+        get_db().execute("UPDATE timecards SET clock_in=NULL")
+        get_db().commit()
+    assert client.get("/work/timecards?ym=2026-09&staff_id=1").status_code == 200
+    post(client, "/work/timecards", {"ym": "2026-09", "staff_id": "1", "del_1": "1"})
+    with app.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT COUNT(*) FROM timecards").fetchone()[0] == 0
+
+
+def test_standard_monthly_grade_and_rounding():
+    from decimal import Decimal
+
+    from ghms.payroll import care_applies, half_down, health_grade, std_monthly
+
+    s = {"std_monthly": None}
+    assert std_monthly(s, 200000 + 10000) == {"health": 220000, "pension": 220000, "source": "今月の総支給額 210,000円から"}
+    assert health_grade(62999) == 58000 and health_grade(63000) == 68000 and health_grade(1400000) == 1390000
+    assert std_monthly(s, 60000)["pension"] == 88000 and std_monthly(s, 900000)["pension"] == 650000
+    assert std_monthly({"std_monthly": 700000}, 100000)["health"] == 700000
+    assert std_monthly({"std_monthly": 700000}, 100000)["pension"] == 650000
+    assert half_down(Decimal(150000) * Decimal("10.15") / 100 / 2) == 7612
+    assert half_down(Decimal(1000) * Decimal("0.55") / 100) == 5
+    # 介護保険：40歳の誕生日の前日がある月から、65歳の誕生日の前日がある月の前の月まで
+    assert care_applies("1986-10-02", date(2026, 9, 30)) is False
+    assert care_applies("1986-10-02", date(2026, 10, 31)) is True
+    assert care_applies("1986-10-01", date(2026, 9, 30)) is True       # 9/30 に40歳
+    assert care_applies("1961-10-02", date(2026, 9, 30)) is True
+    assert care_applies("1961-10-02", date(2026, 10, 31)) is False
+
+
+def test_payroll_uses_grade_commute_and_allowances(client, app):
+    post(client, "/m/staff/new", {"name": "A", "status": "在籍", "hire_date": "2020-04-01", "pay_type": "月給",
+                                  "base_salary": "200000", "allowance_qual": "10000", "commute_type": "毎月定額", "commute": "10000",
+                                  "social_insurance": "1", "birthdate": "1990-01-01"})
+    post(client, "/payroll/settings", {"ins_health": "10.15"})
+    post(client, "/m/staff/new", {"name": "B", "status": "在籍", "hire_date": "2026-11-15", "pay_type": "月給", "base_salary": "250000"})
+    with app.test_request_context():
+        from ghms.db import get_db
+        from ghms.payroll import compute_pay, payroll_staff
+
+        s = get_db().execute("SELECT * FROM staff WHERE id=1").fetchone()
+        d = compute_pay(s, date(2026, 9, 1), date(2026, 9, 30))
+        assert d["gross"] == 220000 and d["std"]["health"] == 220000
+        assert d["deductions"]["health"] == 11165       # 220,000 × 10.15% ÷ 2
+        assert d["unit"] == round(210000 / 160)         # 資格手当も時間単価に入る
+        assert d["employer"]["rosai"] == round(220000 * 0.003)
+        names = [r["name"] for r in payroll_staff(date(2026, 9, 1), date(2026, 9, 30))]
+        assert names == ["A"]                            # 入職前の B は出さない
+    assert "標準報酬月額" in client.get("/payroll/1/2026-09").get_data(as_text=True)
+    assert "週40時間" in client.get("/payroll/?ym=2026-09").get_data(as_text=True)
+
+
+def test_leave_part_table_and_deleted_grant_stays(client, app):
+    from ghms.leave import PART
+
+    assert PART[4] == [7, 8, 9, 10, 12, 13, 15]
+    post(client, "/m/staff/new", {"name": "A", "status": "在籍", "hire_date": "2024-04-01", "weekly_hours": "40"})
+    client.get("/leave/1")
+
+    def grants():
+        with app.app_context():
+            from ghms.db import get_db
+            return [tuple(r) for r in get_db().execute("SELECT grant_date, days FROM leave_grants ORDER BY grant_date")]
+
+    assert grants() == [("2024-10-01", 10), ("2025-10-01", 11), ("2026-10-01", 12)]
+    with app.app_context():
+        from ghms.db import get_db
+        gid = get_db().execute("SELECT id FROM leave_grants ORDER BY grant_date").fetchone()[0]
+    post(client, "/leave/1", {"action": "save", f"del_{gid}": "1"})
+    client.get("/leave/1")
+    client.get("/leave/")
+    assert grants() == [("2024-10-01", 0), ("2025-10-01", 11), ("2026-10-01", 12)]
+    assert "付与なし（管理者が消した）" in client.get("/leave/1").get_data(as_text=True)
+    # 入職日を直すと、自動の付与は新しい付与日に作り直す
+    with app.app_context():
+        from ghms.db import get_db
+        get_db().execute("UPDATE staff SET hire_date='2024-06-01' WHERE id=1")
+        get_db().commit()
+    client.get("/leave/1")
+    assert grants() == [("2024-12-01", 10), ("2025-12-01", 11)]
+
+
+def test_kiosk_failures_do_not_lock_password_login(client, app):
+    post(client, "/m/staff/new", {"name": "佐藤 一郎", "status": "在籍"})
+    post(client, "/m/staff/new", {"name": "管理 花子", "status": "在籍"})
+    staff = staff_client(client, app)
+    post(client, "/users", {"action": "staff", "id": "2", "staff_id": "1"})
+    post(client, "/users", {"action": "staff", "id": "1", "staff_id": "2"})   # 管理者も職員の情報とつなぐ
+    post(staff, "/my-pin", {"current": "mypass2026", "pin": "4826", "pin2": "4826"})
+    _register_device(client)
+    # 管理者の画面を開いたまま打刻の画面にしても、ログインは残らない。管理者は打刻の一覧に出ない
+    page = client.get("/work/kiosk").get_data(as_text=True)
+    assert "佐藤 一郎" in page and "管理 花子" not in page
+    assert client.get("/").status_code == 302
+    page = client.get("/work/kiosk?staff_id=1").get_data(as_text=True)
+    k = re.search(r'name="_k" value="([0-9a-f]+)"', page).group(1)
+    for _ in range(5):
+        client.post("/work/kiosk", data={"_k": k, "staff_id": "1", "action": "in", "temp": "36.4", "pin": "0000"})
+    r = client.post("/work/kiosk", data={"_k": k, "staff_id": "1", "action": "in", "temp": "36.4", "pin": "4826"},
+                    follow_redirects=True)
+    assert "打刻できません" in r.get_data(as_text=True)
+    with app.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT COUNT(*) FROM timecards").fetchone()[0] == 0
+        assert get_db().execute("SELECT locked_until FROM users WHERE id=2").fetchone()[0] is None
+    other = app.test_client()
+    r = other.post("/login", data={"username": "worker", "password": "mypass2026"})
+    assert r.status_code == 302 and "/login" not in r.headers["Location"]
+
+
+def test_kiosk_closed_when_timecard_feature_off(client, app):
+    with app.app_context():
+        from ghms.db import set_setting
+        set_setting("features_off", "timecard")
+    kiosk = app.test_client()
+    assert "使わない設定" in kiosk.get("/work/kiosk").get_data(as_text=True)
+    assert kiosk.post("/work/kiosk", data={"staff_id": "1", "action": "in"}).status_code == 403
+
+
+def test_pin_admin_redirected_to_reauth_for_timecards(client, app):
+    post(client, "/my-pin", {"current": "password123", "pin": "4826", "pin2": "4826"})
+    _register_device(client)
+    _logout(client)
+    client.post("/pin/1", data={"pin": "4826"})
+    for path in ["/work/timecards", "/work/health"]:
+        r = client.get(path)
+        assert r.status_code == 302 and "/reauth" in r.headers["Location"], path
+    r = client.post("/work/timecards", data={"_csrf": csrf(client, "/"), "staff_id": "1"})
+    assert r.status_code == 302 and "/reauth" in r.headers["Location"]

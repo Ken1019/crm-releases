@@ -21,6 +21,8 @@
     <table class="list">{% for k, label in DEDUCTIONS %}<tr><th>{{ label }}</th><td><input type="number" name="d_{{ k }}" value="{{ d.deductions[k] }}" class="num w8"{{ ' readonly' if locked }}></td></tr>{% endfor %}
       <tr class="total"><th>控除合計</th><td class="num">{{ '{:,}'.format(d.total_ded) }}</td></tr>
       <tr class="total"><th>差引支給額</th><td class="num"><b>{{ '{:,}'.format(d.net) }}</b></td></tr></table>
+    {% set std = d.std or auto.std %}{% if std %}<p class="small">保険料に使った標準報酬月額：健康保険 <b>{{ '{:,}'.format(std.health) }}円</b>・厚生年金 <b>{{ '{:,}'.format(std.pension) }}円</b><br><small class="muted">{{ std.source }}{% if std.source.startswith('今月') %}（等級表に当てはめた概算。決まった標準報酬月額は職員の情報に入れてください）{% endif %}</small></p>
+    {% elif not s['social_insurance'] %}<p class="muted small">社会保険に入っていない人です（職員の情報で変えられます）。</p>{% endif %}
     <p class="muted small">事業所の負担（保険料など）：{{ '{:,}'.format(d.employer_total or 0) }}円</p></section>
   <section class="card wide"><label><span>明細に書くメモ</span><input name="memo" value="{{ d.memo or '' }}"{{ ' readonly' if locked }} style="width:100%"></label>
   <div class="actions">

@@ -7,10 +7,10 @@
 
 from datetime import date, datetime, timedelta
 
-from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, g, redirect, render_template, request, session, url_for
 
 from . import excel
-from .auth import admin_required, is_admin, log_event
+from .auth import admin_required, is_admin, log_event, require_admin
 from .billing import month_days
 from .db import get_db, get_setting, now
 from .views import parse_date, parse_ym
@@ -60,8 +60,15 @@ def _min(hhmm):
         return None
 
 
+def admin_view():
+    """管理者の画面として開いてよいか（PINで入った管理者は、パスワードで確認するまでだめ）"""
+    return is_admin() and session.get("via") != "pin"
+
+
 def work_minutes(card):
-    """1回の勤務の 実働・残業（1日8時間をこえた分）・深夜（設定の時間帯）・夜勤かどうか"""
+    """1回の勤務の 実働・残業（この1回だけで8時間をこえた分）・深夜（設定の時間帯）・夜勤かどうか。
+    夜勤は日をまたぐ勤務だけ（朝早い勤務は、深夜の時間帯に入っていても夜勤にしない）。
+    月の残業は、1日（出勤した日）の合計で8時間をこえた分で数える（day_cards・month_summary）"""
     start, end = _min(card["clock_in"]), _min(card["clock_out"])
     if start is None or end is None:
         return None
@@ -70,7 +77,27 @@ def work_minutes(card):
     brk = card["break_min"] or 0
     total = max(0, end - start - brk)
     night = sum(max(0, min(end, b) - max(start, a)) for a, b in night_windows())
-    return {"total": total, "over": max(0, total - 480), "night": max(0, night), "yakin": end > 1440 or night >= 240}
+    return {"total": total, "over": max(0, total - 480), "night": max(0, night), "yakin": end > 1440}
+
+
+def day_cards(cards):
+    """打刻を日ごとにまとめて、残業を「1日の合計で8時間をこえた分」にする。
+    日をまたぐ勤務は出勤した日の分。1日に何回か打刻したときは、8時間をこえたあとの打刻に残業をつける。
+    [{"c": 打刻, "w": 実働など（over は1日で数えた分）}] を返す（退勤がない打刻は w=None）"""
+    def key(c):
+        m = _min(c["clock_in"])
+        return (c["date"], -1 if m is None else m)
+
+    out, done = [], {}
+    for c in sorted(cards, key=key):
+        w = work_minutes(c)
+        if w is not None:
+            before = done.get(c["date"], 0)
+            after = before + w["total"]
+            done[c["date"]] = after
+            w = dict(w, over=max(0, after - 480) - max(0, before - 480))
+        out.append({"c": c, "w": w})
+    return out
 
 
 def hm(minutes):
@@ -80,14 +107,9 @@ def hm(minutes):
 
 
 def my_staff_id():
-    """ログインしている人の職員ID（ユーザー管理でつなぐ。つながっていなければ名前が同じ職員）"""
-    if g.user["staff_id"]:
-        return g.user["staff_id"]
-    name = (g.user["display_name"] or "").replace(" ", "").replace("　", "")
-    for s in get_db().execute("SELECT id, name FROM staff WHERE status IS NULL OR status != '退職'"):
-        if (s["name"] or "").replace(" ", "").replace("　", "") == name and name:
-            return s["id"]
-    return None
+    """ログインしている人の職員ID（管理者が「ログインする人」の画面で職員の情報とつないだときだけ。
+    名前が同じというだけではつながない。ほかの人の給与やタイムカードが見えてしまうため）"""
+    return g.user["staff_id"] or None
 
 
 def max_shift_minutes():
@@ -145,21 +167,27 @@ def month_summary(staff_id, first, last):
     """月の合計。yk_〜 は夜勤の分だけ（夜勤を1回いくらで払うときは、時間の計算から外すため）"""
     s = {"days": set(), "day_days": set(), "total": 0, "over": 0, "night": 0, "yakin": 0, "missing": 0,
          "yk_total": 0, "yk_over": 0, "yk_night": 0, "yk_cards": []}
+    all_day, not_yk = {}, {}  # 日ごとの実働（全部／夜勤以外）
     for c in month_cards(staff_id, first, last):
         w = work_minutes(c)
         if w is None:
             s["missing"] += 1
             continue
         s["days"].add(c["date"])
-        for k in ("total", "over", "night"):
+        all_day[c["date"]] = all_day.get(c["date"], 0) + w["total"]
+        for k in ("total", "night"):
             s[k] += w[k]
         if w["yakin"]:
             s["yakin"] += 1
-            for k in ("total", "over", "night"):
+            for k in ("total", "night"):
                 s["yk_" + k] += w[k]
             s["yk_cards"].append((c, w))
         else:
             s["day_days"].add(c["date"])
+            not_yk[c["date"]] = not_yk.get(c["date"], 0) + w["total"]
+    # 残業は1日の合計で8時間をこえた分。夜勤を1回いくらで払うときは、夜勤の時間を外した残りで数える（over − yk_over）
+    s["over"] = sum(max(0, t - 480) for t in all_day.values())
+    s["yk_over"] = s["over"] - sum(max(0, t - 480) for t in not_yk.values())
     s["days"], s["day_days"] = len(s["days"]), len(s["day_days"])
     return s
 
@@ -220,23 +248,73 @@ def punch(sid, action, form, username):
 
 # ---------------------------------------------------------------- 事務所のPCの打刻画面（ログインしないで使う）
 def _kiosk_people():
+    """打刻の画面に出す人（職員の情報とつないだログイン。管理者は出さない：管理者はログインしてから打刻する）"""
     db = get_db()
     rows = []
     for s in db.execute("SELECT s.*, u.id AS uid, u.pin_hash, u.locked_until FROM staff s JOIN users u ON u.staff_id=s.id "
-                        "WHERE u.active=1 AND (s.status IS NULL OR s.status != '退職') ORDER BY s.kana, s.name"):
+                        "WHERE u.active=1 AND u.role != 'admin' AND (s.status IS NULL OR s.status != '退職') ORDER BY s.kana, s.name"):
         rows.append({"s": s, "card": open_card(s["id"]), "pin": bool(s["pin_hash"])})
     return rows
+
+
+KIOSK_MAX_FAILS = 5
+KIOSK_LOCK_MINUTES = 15
+
+
+def _kiosk_fail_state(user_id):
+    """打刻のPINの失敗（ログインのパスワードとは別に数える）。(回数, この時刻までロック) を返す"""
+    raw = get_setting(f"kiosk_fail:{user_id}", "") or ""
+    count, _, until = raw.partition("|")
+    try:
+        count = int(count or 0)
+    except ValueError:
+        count = 0
+    return count, until or None
+
+
+def _kiosk_locked(user_id):
+    _, until = _kiosk_fail_state(user_id)
+    return bool(until) and until > now()
+
+
+def _kiosk_fail(user_id):
+    count, _ = _kiosk_fail_state(user_id)
+    count += 1
+    until = ""
+    if count >= KIOSK_MAX_FAILS:
+        until = (datetime.now() + timedelta(minutes=KIOSK_LOCK_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
+        count = 0
+    get_db().execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (f"kiosk_fail:{user_id}", f"{count}|{until}"))
+
+
+def _kiosk_reset(user_id):
+    get_db().execute("DELETE FROM settings WHERE key=?", (f"kiosk_fail:{user_id}",))
+
+
+def _timecard_off():
+    from .customize import features_off
+
+    return "timecard" in features_off()
 
 
 @bp.route("/kiosk", methods=["GET", "POST"])
 def kiosk():
     """名前を押して PIN → 出勤／退勤。押したらすぐ名前の一覧に戻る（ログインしたままにならない）。
     PINでログインできる端末として登録した事務所のPCでだけ開ける"""
-    from flask import session
     from werkzeug.security import check_password_hash
 
-    from .auth import LOCK_MINUTES, _fail, current_device
+    from .auth import current_device
 
+    if _timecard_off():
+        # 「使う機能」でタイムカードを止めているときは打刻できない
+        if request.method == "POST":
+            abort(403)
+        return render_template("work_kiosk.html", off=True, device=None, people=[], person=None)
+    if request.method == "GET":
+        # 打刻の画面を開いたら、このPCでログインしたままの人は必ずログアウトにする（管理者の画面が後ろで開いたままにならない）
+        for k in ("uid", "seen", "via", "csrf"):
+            session.pop(k, None)
+        g.user = None
     device = current_device()
     if device is None:
         return render_template("work_kiosk.html", device=None, people=[], person=None)
@@ -251,15 +329,18 @@ def kiosk():
         if request.form.get("_k") != session.get("kiosk_csrf"):
             abort(400)
         user = db.execute("SELECT * FROM users WHERE id=?", (person["s"]["uid"],)).fetchone()
-        if user["locked_until"] and user["locked_until"] > now():
-            flash(f"PINを続けて間違えたため、{LOCK_MINUTES}分ほど打刻できません。管理者に連絡してください。", "error")
+        if _kiosk_locked(user["id"]):
+            flash(f"PINを続けて間違えたため、{KIOSK_LOCK_MINUTES}分ほど打刻できません。管理者に連絡してください。", "error")
+            log_event("login_failed", username=user["username"], detail=f"打刻のPIN・ロック中（{device['name']}）")
         elif not user["pin_hash"] or not check_password_hash(user["pin_hash"], request.form.get("pin", "")):
-            _fail(user, f"打刻のPIN（{device['name']}）")
+            # 打刻のPINの失敗は打刻の画面だけで数える（パスワードでのログインはロックしない）
+            _kiosk_fail(user["id"])
+            log_event("login_failed", username=user["username"], detail=f"打刻のPIN（{device['name']}）")
             flash("PINが違います。", "error")
             db.commit()
             return redirect(url_for("work.kiosk", staff_id=sid))
         else:
-            db.execute("UPDATE users SET failed_count=0, locked_until=NULL WHERE id=?", (user["id"],))
+            _kiosk_reset(user["id"])
             db.execute("UPDATE devices SET last_used=? WHERE id=?", (now(), device["id"]))
             msgs = punch(sid, request.form.get("action"), request.form, user["username"])
             for cat, msg in msgs:
@@ -310,7 +391,9 @@ def timecards():
     db = get_db()
     first, last = parse_ym(request.values.get("ym"))
     ym = first.strftime("%Y-%m")
-    admin = is_admin()
+    if is_admin():
+        require_admin()  # PINで入った管理者は、パスワードで確認してから
+    admin = admin_view()
     staff_list = _staff_list() if admin else []
     sid = request.values.get("staff_id", type=int) if admin else my_staff_id()
     if admin and not sid and staff_list:
@@ -320,20 +403,29 @@ def timecards():
         if not admin or not staff:
             abort(403)
         changed = 0
+        kept = []  # 出勤の時刻が空・まちがいで、前の時刻のままにした日
         for c in month_cards(sid, first, last):
             if request.form.get(f"del_{c['id']}"):
                 db.execute("DELETE FROM timecards WHERE id=?", (c["id"],))
                 changed += 1
                 continue
-            vals = (request.form.get(f"in_{c['id']}") or None, request.form.get(f"out_{c['id']}") or None,
-                    request.form.get(f"br_{c['id']}", type=int), request.form.get(f"note_{c['id']}") or "")
+            cin = (request.form.get(f"in_{c['id']}") or "").strip()
+            if _min(cin) is None:
+                # 出勤の時刻は消せない（行を消すときは「消す」にチェック）。前の時刻のままにする
+                cin = c["clock_in"]
+                if (request.form.get(f"in_{c['id']}") or "").strip() != (c["clock_in"] or ""):
+                    kept.append(c["date"][5:].replace("-", "/"))
+            cout = (request.form.get(f"out_{c['id']}") or "").strip() or None
+            if cout is not None and _min(cout) is None:
+                cout = c["clock_out"]
+            vals = (cin, cout, request.form.get(f"br_{c['id']}", type=int), request.form.get(f"note_{c['id']}") or "")
             if vals != (c["clock_in"], c["clock_out"], c["break_min"], c["note"] or ""):
                 db.execute("UPDATE timecards SET clock_in=?, clock_out=?, break_min=?, note=?, updated_by=?, updated_at=? WHERE id=?",
                            vals + (g.user["username"], now(), c["id"]))
                 changed += 1
         for d in month_days(first, last):
-            cin = request.form.get(f"in_new_{d.day}")
-            if cin:
+            cin = (request.form.get(f"in_new_{d.day}") or "").strip()
+            if _min(cin) is not None:
                 db.execute("INSERT INTO timecards (staff_id, date, clock_in, clock_out, break_min, note, updated_by, updated_at)"
                            " VALUES (?,?,?,?,?,?,?,?)", (sid, d.isoformat(), cin, request.form.get(f"out_new_{d.day}") or None,
                                                         request.form.get(f"br_new_{d.day}", type=int), request.form.get(f"note_new_{d.day}") or "",
@@ -343,12 +435,15 @@ def timecards():
             log_event("timecard_edit", "timecards", sid, f"{ym} {changed}件")
         db.commit()
         flash(f"{staff['name']} さんの{first:%Y年%m月}のタイムカードを保存しました（{changed}件）。", "ok")
+        if kept:
+            flash(f"{'、'.join(kept)} は出勤の時刻が空か正しくないため、前の時刻のままにしました。"
+                  "その日の打刻をなくすときは、右の「消す」にチェックしてください。", "error")
         return redirect(url_for("work.timecards", ym=ym, staff_id=sid))
     rows = []
     if staff:
         by_day = {}
-        for c in month_cards(sid, first, last):
-            by_day.setdefault(c["date"], []).append(c)
+        for x in day_cards(month_cards(sid, first, last)):
+            by_day.setdefault(x["c"]["date"], []).append(x)
         temps = {}
         for h in db.execute("SELECT * FROM health_checks WHERE staff_id=? AND date BETWEEN ? AND ? ORDER BY time",
                             (sid, first.isoformat(), last.isoformat())):
@@ -359,7 +454,7 @@ def timecards():
         for d in month_days(first, last):
             cs = by_day.get(d.isoformat(), [])
             code = plan.get(d.isoformat(), "")
-            rows.append({"d": d, "cards": [{"c": c, "w": work_minutes(c)} for c in cs], "health": temps.get(d.isoformat()),
+            rows.append({"d": d, "cards": cs, "health": temps.get(d.isoformat()),
                          "plan": code, "plan_t": tmap.get(code), "diffs": diffs.get(d.isoformat(), [])})
     return render_template("work_timecards.html", staff=staff, staff_list=staff_list, rows=rows, ym=ym, first=first, WEEK=WEEK,
                            hm=hm, summary=month_summary(sid, first, last) if staff else None, admin=admin, fever=fever_line(),
@@ -379,9 +474,9 @@ def timecards_export():
         if not cards:
             continue
         rows = []
-        for c in cards:
+        for x in day_cards(cards):
+            c, w = x["c"], x["w"] or {}
             d = parse_date(c["date"])
-            w = work_minutes(c) or {}
             rows.append([f"{d.month}/{d.day}", WEEK[d.weekday()], c["clock_in"] or "", c["clock_out"] or "", c["break_min"] or 0,
                          hm(w.get("total")), hm(w.get("over")), hm(w.get("night")), "夜勤" if w.get("yakin") else "", c["note"] or ""])
         sm = month_summary(s["id"], first, last)
@@ -398,7 +493,9 @@ def timecards_export():
 @bp.route("/health")
 def health():
     db = get_db()
-    if not is_admin():
+    if is_admin():
+        require_admin()  # PINで入った管理者は、パスワードで確認してから全員の体温を見る
+    if not admin_view():
         sid = my_staff_id()
         rows = db.execute("SELECT * FROM health_checks WHERE staff_id=? ORDER BY date DESC, time DESC LIMIT 60", (sid,)).fetchall() if sid else []
         return render_template("work_health.html", mine=True, rows=rows, fever=fever_line(), day=date.today())
@@ -461,9 +558,9 @@ def shift_differences(staff_id, first, last):
         if _is_work_type(t) and not cs:
             diffs.append(("打刻なし", f"勤務表は「{t['name']}」ですが打刻がありません"))
         elif cs and not _is_work_type(t):
-            diffs.append(("予定外", f"勤務表は「{t['name'] if t else '空欄'}」ですが {cs[0]['clock_in']} に打刻があります"))
+            diffs.append(("予定外", f"勤務表は「{t['name'] if t else '空欄'}」ですが {cs[0]['clock_in'] or '時刻なし'} に打刻があります"))
         elif cs and t:
-            first_in = min(_min(c["clock_in"]) for c in cs if _min(c["clock_in"]) is not None)
+            first_in = min((_min(c["clock_in"]) for c in cs if _min(c["clock_in"]) is not None), default=None)
             ps, pe = _min(t["start"]), _min(t["end"])
             if first_in is not None and ps is not None and first_in > ps + grace:
                 diffs.append(("遅刻", f"予定 {t['start']} → 出勤 {first_in // 60}:{first_in % 60:02d}"))

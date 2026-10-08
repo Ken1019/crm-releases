@@ -2,7 +2,11 @@
 {% block title %}打刻{% endblock %}
 {% block content %}
 <div class="pinlogin kiosk">
-{% if not device %}
+{% if off %}
+  <h1>⏰ 打刻</h1>
+  <p class="guide">この事業所では、タイムカード（打刻）の機能を使わない設定になっています。使うときは、管理者が「設定 → 使う機能」で「タイムカード・職員の体温」をえらんでください。</p>
+  <p><a class="btn" href="{{ url_for('auth.login') }}">ログインの画面へ</a></p>
+{% elif not device %}
   <h1>⏰ 打刻</h1>
   <p class="guide">打刻は、事務所の「PINでログインできる端末」として登録したPCでだけ使えます。管理者が「設定 → ログインする人」でこのPCを登録してください。</p>
   <p><a class="btn" href="{{ url_for('auth.login') }}">ログインの画面へ</a></p>
