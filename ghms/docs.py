@@ -97,30 +97,50 @@ def menus_export():
 
 # ---------------------------------------------------------------- サービス提供実績記録票
 # 列（日中支援・夜間支援など）は事業所で増やせる。
-#   builtin … 実績の記号から自動（日＝日中支援、帰＝帰宅時支援、入＝入院時支援）
-#   auto="stay" … 在居の日は自動でつく（夜間支援など）。日ごとに外せる
-#   auto=""     … 日ごとに手でつける（送迎など）
-# 記録票に出す記号は列ごとに決める（ふつうは国保連の様式に合わせて「1」）
-BUILTIN_COLUMNS = [("day", "日中支援", "日"), ("home", "帰宅時支援", "帰"), ("hosp", "入院時支援", "入")]
-DEFAULT_EXTRA_COLUMNS = [("夜間支援", "stay")]
-AUTO_KINDS = {"": "日ごとに手でつける", "stay": "在居の日は自動でつく（日ごとに外せる）"}
+#   builtin="day" … 実績の「日」の日に自動（日中支援加算）
+#   auto="stay" … 在居の日は自動でつく（夜間支援等体制加算など）。日ごとに外せる
+#   auto="home" / "hosp" … 実績が「帰」／「入」の日は自動でつく
+#   auto=""     … 日ごとに手でつける
+# 記録票に出す記号は列ごとに決める（様式18-1の記載例では「1」）
+BUILTIN_COLUMNS = [("day", "日中支援加算", "日")]
+# 様式18-1（共同生活援助サービス提供実績記録票）の並び。（名前, つけ方, builtin, 合計の単位）
+RECORD_DEFAULTS = [
+    ("住居外利用", "", None, "日"),
+    ("退居後支援", "", None, "回"),
+    ("夜間支援等体制加算", "stay", None, "回"),
+    ("入院時支援特別加算", "", None, "回"),
+    ("帰宅時支援加算", "", None, "回"),
+    ("日中支援加算", "", "day", "回"),
+    ("医療連携体制加算", "", None, "回"),
+    ("自立生活支援加算（Ⅰ）", "", None, "回"),
+    ("自立生活支援加算（Ⅱ）", "", None, "回"),
+    ("集中的支援加算", "", None, "回"),
+]
+RECORD_LAYOUT = "18-1"
+AUTO_KINDS = {"": "日ごとに手でつける", "stay": "在居の日は自動でつく（日ごとに外せる）",
+              "home": "実績が「帰」の日は自動でつく", "hosp": "実績が「入」の日は自動でつく"}
+AUTO_CODES = {"stay": ("○", "日"), "home": ("帰",), "hosp": ("入",)}
 DEFAULT_MARK = "1"
+STAY_CODES = ("○", "日")
+OUT_CODES = ("外", "帰")
 
 
 def mark_text(col):
     return (col["mark"] or "").strip() or DEFAULT_MARK
-STAY_CODES = ("○", "日")
 
 
 def seed_record_columns(con):
-    if con.execute("SELECT COUNT(*) FROM record_columns").fetchone()[0]:
+    """様式18-1の列を用意する。前の並び（日中支援・夜間支援など4列）で、まだ何も入れていなければ入れ替える"""
+    layout = con.execute("SELECT value FROM settings WHERE key='record_layout'").fetchone()
+    if layout and layout[0] == RECORD_LAYOUT:
         return
-    for i, (key, label, _) in enumerate(BUILTIN_COLUMNS):
-        con.execute("INSERT INTO record_columns (label, sort, active, auto, builtin, mark) VALUES (?,?,1,'',?,?)",
-                    (label, (i + 1) * 10, key, DEFAULT_MARK))
-    for i, (label, auto) in enumerate(DEFAULT_EXTRA_COLUMNS):
-        con.execute("INSERT INTO record_columns (label, sort, active, auto, builtin, mark) VALUES (?,?,1,?,NULL,?)",
-                    (label, (len(BUILTIN_COLUMNS) + i + 1) * 10, auto, DEFAULT_MARK))
+    has_marks = con.execute("SELECT COUNT(*) FROM record_marks").fetchone()[0]
+    if not has_marks:
+        con.execute("DELETE FROM record_columns")
+        for i, (label, auto, builtin, unit) in enumerate(RECORD_DEFAULTS):
+            con.execute("INSERT INTO record_columns (label, sort, active, auto, builtin, mark, unit) VALUES (?,?,1,?,?,?,?)",
+                        (label, (i + 1) * 10, auto, builtin, DEFAULT_MARK, unit))
+    con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('record_layout', ?)", (RECORD_LAYOUT,))
     con.commit()
 
 
@@ -133,9 +153,7 @@ def _auto_mark(col, code):
     """手で直していないときに印がつくか"""
     if col["builtin"]:
         return code == dict((k, c) for k, _, c in BUILTIN_COLUMNS).get(col["builtin"])
-    if col["auto"] == "stay":
-        return code in STAY_CODES
-    return False
+    return code in AUTO_CODES.get(col["auto"] or "", ())
 
 
 def marks_map(first, last):
@@ -149,24 +167,47 @@ def mark_of(col, code, stored):
     return stored == "○"
 
 
+def _place(code):
+    if code in OUT_CODES:
+        return "外泊"
+    if code == "入":
+        return "入院"
+    return "home" if code in STAY_CODES else None
+
+
+def status_label(prev, code, home):
+    """サービス提供の状況（記載例：「らら→外泊」「外泊」「外泊戻り」。ふつうに支援した日は空欄）"""
+    cur, before = _place(code), _place(prev)
+    if cur is None:
+        return ""
+    if cur == "home":
+        return f"{before}戻り" if before in ("外泊", "入院") else ""
+    if before == cur:
+        return cur
+    return f"{before if before in ('外泊', '入院') else (home or '住居')}→{cur}"
+
+
 def record_sheet_data(first, last, rid=None):
     sync_open()
     residents = [r for r in residents_in_month(first, last) if rid is None or r["id"] == rid]
-    amap = attendance_map(first, last)
+    amap = attendance_map(first - timedelta(days=1), last)
     mmap = marks_map(first, last)
     cols = record_columns()
-    # 様式18-1の記載例に合わせ、ふつうに支援した日は空欄。帰宅（帰省）は「外泊」と書き、帰宅時支援の欄に記号を入れる
-    labels = {"○": "", "日": "", "外": "外泊", "帰": "外泊", "入": "入院"}
     sheets = []
     for r in residents:
         rows = []
+        prev = amap.get((r["id"], (first - timedelta(days=1)).isoformat()), "")
         for d in month_days(first, last):
             code = amap.get((r["id"], d.isoformat()), "")
             marks = [mark_text(c) if mark_of(c, code, mmap.get((r["id"], d.isoformat(), c["id"]))) else "" for c in cols]
-            rows.append({"d": d, "w": WEEK[d.weekday()], "code": code, "label": labels.get(code, ""), "marks": marks})
+            rows.append({"d": d, "w": WEEK[d.weekday()], "code": code, "label": status_label(prev, code, r["hname"]),
+                         "marks": marks})
+            prev = code
         count = Counter(x["code"] for x in rows)
+        rec = str(r["recipient_no"] or "").strip()
         sheets.append({"r": r, "rows": rows, "stay": count["○"] + count["日"], "home": count["帰"], "hosp": count["入"],
-                       "out": count["外"], "empty": sum(1 for x in rows if not x["code"]),
+                       "out": count["外"], "empty": sum(1 for x in rows if not x["code"] and in_residence(r, x["d"])),
+                       "rec_digits": list(rec.ljust(10))[:10] if len(rec) <= 10 else [rec],
                        "totals": [sum(1 for x in rows if x["marks"][i]) for i in range(len(cols))]})
     return sheets, cols
 
@@ -194,14 +235,13 @@ def record_sheets_export():
     for sh in sheets:
         r = sh["r"]
         ws = wb.create_sheet(excel.safe_sheet_title(r["name"]))
-        rows = [[f"{x['d'].day}", x["w"], x["label"]] + x["marks"] + [""] for x in sh["rows"]]
-        rows.append(["合計", "", f"在居 {sh['stay']}日・外泊 {sh['out']}日・帰宅 {sh['home']}日・入院 {sh['hosp']}日"]
-                    + sh["totals"] + [""])
+        rows = [[f"{x['d'].day}", x["w"], x["label"]] + x["marks"] + ["", ""] for x in sh["rows"]]
+        rows.append(["合計", "", ""] + [f"{t}{c['unit'] or '回'}" for t, c in zip(sh["totals"], cols)] + ["", ""])
         excel.add_table(ws, f"サービス提供実績記録票（共同生活援助）　{first:%Y年%m月}分",
-                        ["日", "曜日", "サービス提供の状況"] + [c["label"] for c in cols] + ["利用者確認"], rows,
+                        ["日付", "曜日", "サービス提供の状況"] + [c["label"] for c in cols] + ["利用者確認欄", "備考"], rows,
                         subtitle=f"事業所：{o['office_name']}（{o['office_no']}）　受給者証番号：{r['recipient_no'] or ''}　"
                                  f"支給決定障害者等氏名：{r['name']}　障害支援区分：{r['support_level'] or ''}",
-                        widths=[5, 5, 30] + [10] * len(cols) + [12])
+                        widths=[5, 5, 18] + [9] * len(cols) + [9, 14])
     if not wb.sheetnames:
         wb.create_sheet("なし")
     return excel.send_workbook(wb, f"サービス提供実績記録票_{first:%Y%m}")
@@ -222,15 +262,17 @@ def record_columns_settings():
             label = (request.form.get(f"label::{cid}") or "").strip()[:20] or c["label"]
             auto = c["auto"] if c["builtin"] else (request.form.get(f"auto::{cid}") or "")
             mark = (request.form.get(f"mark::{cid}") or "").strip()[:3] or DEFAULT_MARK
-            db.execute("UPDATE record_columns SET label=?, sort=?, active=?, auto=?, mark=? WHERE id=?",
+            unit = "日" if request.form.get(f"unit::{cid}") == "日" else "回"
+            db.execute("UPDATE record_columns SET label=?, sort=?, active=?, auto=?, mark=?, unit=? WHERE id=?",
                        (label, request.form.get(f"sort::{cid}", type=int) or 0, 1 if request.form.get(f"active::{cid}") else 0,
-                        auto if auto in AUTO_KINDS else "", mark, cid))
+                        auto if auto in AUTO_KINDS else "", mark, unit, cid))
         new = (request.form.get("new") or "").strip()[:20]
         if new:
             mx = db.execute("SELECT COALESCE(MAX(sort),0) FROM record_columns").fetchone()[0]
             auto = request.form.get("new_auto") or ""
-            db.execute("INSERT INTO record_columns (label, sort, active, auto, builtin, mark) VALUES (?,?,1,?,NULL,?)",
-                       (new, mx + 10, auto if auto in AUTO_KINDS else "", (request.form.get("new_mark") or "").strip()[:3] or DEFAULT_MARK))
+            db.execute("INSERT INTO record_columns (label, sort, active, auto, builtin, mark, unit) VALUES (?,?,1,?,NULL,?,?)",
+                       (new, mx + 10, auto if auto in AUTO_KINDS else "", (request.form.get("new_mark") or "").strip()[:3] or DEFAULT_MARK,
+                        "日" if request.form.get("new_unit") == "日" else "回"))
         db.commit()
         flash("実績記録票の項目を保存しました。", "ok")
         return redirect(url_for("docs.record_columns_settings"))

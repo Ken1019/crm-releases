@@ -164,9 +164,6 @@ post("/m/residents/2/edit", {"name": "石田 健", "kana": "いしだけん", "s
                              "support_level": "区分3", "disability_type": "精神障害", "allergy": "えび・かに", "move_in": "2025-04-01",
                              "rent": "38000", "rent_subsidy": "10000", "utility": "12000", "daily_goods": "3000",
                              "food_type": "日額（食べた日数で計算）", "food_amount": "900", "burden_cap": "0", "pay_method": "口座振替"})
-post("/docs/record-columns", {**{f"{k}::{i}": v for i, lb in [(1, "日中支援"), (2, "帰宅時支援"), (3, "入院時支援"), (4, "夜間支援")]
-                                 for k, v in (("active", "1"), ("label", lb), ("sort", str(i * 10)))},
-                              "auto::4": "stay", "new": "通院の付き添い", "new_auto": ""})
 post("/docs/renewal", {"done_3": "1", "done_8": "1", "note_3": "勤務表から作成", "due": "2027-03-31"})
 
 # 行事・レクリエーション（参加者は複数えらぶ）

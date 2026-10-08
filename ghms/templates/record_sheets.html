@@ -9,29 +9,57 @@
 <a class="b" href="{{ url_for('docs.record_sheets_export', ym=ym, rid=rid or '') }}">Excelで出す</a>
 <a class="b" href="{{ url_for('docs.record_marks', ym=ym) }}">✅ 夜間支援などを入れる</a>
 <a class="b" href="{{ url_for('docs.record_columns_settings') }}">➕ 項目を増やす・変える</a>
-<span class="note">実績は「請求・お金」→「実績を入れる」の内容です。様式18-1の記載例に合わせ、ふつうに支援した日の「サービス提供の状況」は空欄です。</span>
+<span class="note">実績は「請求・お金」→「実績を入れる」の内容です。様式18-1に合わせた形です。サービス提供の状況は実績から「住居→外泊」「外泊」「外泊戻り」のように自動で入り、ふつうに支援した日は空欄です。</span>
 {% endblock %}
 {% block pages %}
+<style>
+.r18 h1{font-size:17px;margin:0 0 4px}
+.r18 table{margin:0 0 4px;table-layout:fixed;width:100%} .r18 th,.r18 td{padding:2px 3px;font-size:11px;vertical-align:middle}
+.r18 .digits td{width:5.5mm;text-align:center;padding:2px 0}
+.r18 .grid th{font-size:9.5px;line-height:1.25;font-weight:bold}
+.r18 .grid td{height:4.9mm;padding:0 3px}
+.r18 .grid td.st{font-size:9.5px;line-height:1.15;word-break:break-all}
+.r18 .digits{table-layout:fixed}
+.r18 .na{background:linear-gradient(to top right,transparent calc(50% - .5px),#555 50%,transparent calc(50% + .5px))}
+.r18 .foot{width:62%}
+</style>
+{% set reiwa = first.year - 2018 %}
 {% for sh in sheets %}{% set r = sh.r %}
-<div class="page">
-  <h1>サービス提供実績記録票（共同生活援助）</h1>
-  <div class="meta"><span>{{ first.strftime('%Y年%m月') }}分</span><span>事業所番号 {{ office.office_no }}　{{ office.office_name }}</span></div>
+<div class="page r18">
+  <div class="meta" style="margin:0;align-items:flex-end"><span style="font-size:13px">令和 {{ reiwa }} 年 {{ first.month }} 月分</span>
+    <h1 style="flex:1">共同生活援助サービス提供実績記録票</h1><span style="width:70px"></span></div>
   <table>
-    <tr><th style="width:22%">受給者証番号</th><td>{{ r['recipient_no'] or '' }}</td><th style="width:18%">支給決定市町村</th><td>{{ r['municipality'] or '' }}</td></tr>
-    <tr><th>支給決定障害者等氏名</th><td>{{ r['name'] }}</td><th>障害支援区分</th><td>{{ r['support_level'] or '' }}</td></tr>
-    <tr><th>住居</th><td>{{ r['hname'] or '' }}</td><th>入居日／退居日</th><td>{{ r['move_in'] or '' }}{% if r['move_out'] %}／{{ r['move_out'] }}{% endif %}</td></tr>
+    <colgroup><col style="width:9%"><col style="width:29%"><col style="width:12%"><col style="width:14%"><col style="width:9%"><col></colgroup>
+    <tr><th>受給者証<br>番号</th>
+      <td style="padding:0"><table class="digits" style="margin:0;border:0"><tr>{% for ch in sh.rec_digits %}<td style="border-top:0;border-bottom:0{{ ';border-left:0' if loop.first }}">{{ ch }}</td>{% endfor %}</tr></table></td>
+      <th>支給決定障害者等氏名</th><td style="text-align:center">{{ r['name'] }}</td>
+      <th>事業所番号</th>
+      <td style="padding:0"><table class="digits" style="margin:0;border:0"><tr>{% for ch in (office.office_no or '')|string|truncate(10, True, '') %}<td style="border-top:0;border-bottom:0{{ ';border-left:0' if loop.first }}">{{ ch }}</td>{% endfor %}{% for _ in range(10 - ((office.office_no or '')|string|length)) %}<td style="border-top:0;border-bottom:0">&nbsp;</td>{% endfor %}</tr></table></td></tr>
+    <tr><td colspan="4" style="border-left:0;border-bottom:0"></td><th>事業者及び<br>その事業所</th><td style="text-align:center">{{ office.corp_name }}{% if office.corp_name %}<br>{% endif %}{{ office.office_name }}</td></tr>
   </table>
-  <table>
-    {% set w = [11, 54 // (cols|length or 1)]|min %}
-    <thead><tr><th class="c" style="width:6%">日</th><th class="c" style="width:6%">曜日</th><th style="min-width:22%">サービス提供の状況</th>
-      {% for c in cols %}<th class="c" style="width:{{ w }}%">{{ c['label'] }}</th>{% endfor %}<th class="c" style="width:12%">利用者確認</th></tr></thead>
-    {% for x in sh.rows %}<tr class="{{ 'sat' if x.d.weekday() == 5 else 'sun' if x.d.weekday() == 6 }}">
-      <td class="c">{{ x.d.day }}</td><td class="c">{{ x.w }}</td><td>{{ x.label or ('（未入力）' if not x.code else '') }}</td>
-      {% for m in x.marks %}<td class="c">{{ m }}</td>{% endfor %}<td></td></tr>{% endfor %}
-    <tr><th colspan="3">合計：在居 {{ sh.stay }}日・外泊 {{ sh.out }}日・帰宅 {{ sh.home }}日・入院 {{ sh.hosp }}日{% if sh.empty %}・<span style="color:#c00">未入力 {{ sh.empty }}日</span>{% endif %}</th>
-      {% for t in sh.totals %}<td class="c">{{ t }}</td>{% endfor %}<td></td></tr>
+  <table class="grid">
+    <colgroup><col style="width:4%"><col style="width:4%"><col style="width:16%">{% for c in cols %}<col>{% endfor %}<col style="width:6%"><col style="width:9%"></colgroup>
+    <thead>
+      <tr><th rowspan="2" class="c">日付</th><th rowspan="2" class="c">曜日</th>
+        <th colspan="{{ cols|length + 1 }}" class="c">支援実績</th>
+        <th rowspan="2" class="c">利用者<br>確認欄</th><th rowspan="2" class="c">備考</th></tr>
+      <tr><th class="c">サービス提供の<br>状況</th>{% for c in cols %}<th class="c">{{ c['label']|replace('加算', '<br>加算')|safe if c['label']|length > 6 else c['label'] }}</th>{% endfor %}</tr>
+    </thead>
+    {% for x in sh.rows %}<tr>
+      <td class="c">{{ x.d.day }}</td><td class="c">{{ x.w }}</td><td class="st">{{ x.label }}</td>
+      {% for m in x.marks %}<td class="c">{{ m }}</td>{% endfor %}<td></td><td></td></tr>{% endfor %}
+    {% for _ in range(31 - sh.rows|length) %}<tr><td></td><td></td><td></td>{% for c in cols %}<td></td>{% endfor %}<td></td><td></td></tr>{% endfor %}
+    <tr><th colspan="3" class="c">合計</th>
+      {% for t in sh.totals %}{% set c = cols[loop.index0] %}{% if c['label'] == '退居後支援' and not t %}<td class="na"></td>{% else %}<td class="r">{{ t }}{{ c['unit'] or '回' }}</td>{% endif %}{% endfor %}
+      <td colspan="2" class="na"></td></tr>
   </table>
-  <div class="meta" style="margin-top:14px"><span>上記の内容を確認しました。　利用者氏名（署名）＿＿＿＿＿＿＿＿＿＿　印</span><span>事業所確認＿＿＿＿＿＿　印</span></div>
+  {% if sh.empty %}<p class="noprint" style="color:#c00;font-size:12px">実績が未入力の日が {{ sh.empty }}日 あります（「実績を入れる」で入れてください）。</p>{% endif %}
+  <table class="foot">
+    <tr><th style="width:38%">退居日</th><td colspan="2">{{ r['move_out'] or '' }}</td></tr>
+    <tr><th>自立生活支援加算（Ⅱ）</th><th style="width:26%">退居後算定日</th><td></td></tr>
+    <tr><th>移行支援住居</th><th>入居日</th><td></td></tr>
+    <tr><th>集中的支援加算</th><th>支援開始日</th><td></td></tr>
+  </table>
 </div>
 {% else %}<div class="page"><p>この月の入居者がいません。</p></div>{% endfor %}
 {% endblock %}

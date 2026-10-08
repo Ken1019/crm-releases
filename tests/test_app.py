@@ -711,8 +711,7 @@ def test_menus_week_copy_print(client, app):
 def test_record_sheets(client):
     _setup_billing(client)
     page = client.get("/docs/record-sheets?ym=2026-10").get_data(as_text=True)
-    assert "サービス提供実績記録票（共同生活援助）" in page and "山田太郎" in page
-    assert "在居 28日・外泊 3日" in page
+    assert "共同生活援助サービス提供実績記録票" in page and "山田太郎" in page
     assert client.get("/docs/record-sheets.xlsx?ym=2026-10").data[:2] == b"PK"
 
 
@@ -722,44 +721,53 @@ def test_record_sheet_columns(client, app):
 
     from ghms.docs import record_sheet_data
 
-    def totals():
+    def data():
         with app.test_request_context():
             sheets, cols = record_sheet_data(date(2026, 10, 1), date(2026, 10, 31))
-            return dict(zip([c["label"] for c in cols], sheets[0]["totals"]))
+            return sheets[0], [c["label"] for c in cols]
 
-    # 最初から「夜間支援」があり、在居の日（○・日）に自動で○
-    assert totals() == {"日中支援": 1, "帰宅時支援": 0, "入院時支援": 0, "夜間支援": 28}
-    page = client.get("/docs/record-marks?ym=2026-10&home_id=1").get_data(as_text=True)
-    assert "夜間支援" in page and 'name="m1_1" value="1" data-r="1" data-stay="1" checked' in page
-    # 1日だけ外す
+    def totals():
+        sh, labels = data()
+        return {k: v for k, v in zip(labels, sh["totals"]) if v}
+
+    # 様式18-1と同じ並び。夜間支援等体制加算は在居の日（外泊から戻った日も）に自動、日中支援加算は実績の「日」
+    sh, labels = data()
+    assert labels[:3] == ["住居外利用", "退居後支援", "夜間支援等体制加算"] and labels[-1] == "集中的支援加算"
+    assert totals() == {"夜間支援等体制加算": 28, "日中支援加算": 1}
+    # サービス提供の状況：出た日「住居→外泊」、中日「外泊」、戻った日「外泊戻り」、ふつうの日は空欄
+    assert [x["label"] for x in sh["rows"][3:8]] == ["", "ひまわり→外泊", "外泊", "外泊", "外泊戻り"]
+    assert sh["rows"][4]["marks"][2] == "" and sh["rows"][7]["marks"][2] == "1"
+    page = client.get("/docs/record-sheets?ym=2026-10").get_data(as_text=True)
+    assert "共同生活援助サービス提供実績記録票" in page and "令和 8 年 10 月分" in page and "ひまわり→外泊" in page
+    assert "28回" in page and "移行支援住居" in page
+    assert client.get("/docs/record-sheets.xlsx?ym=2026-10").data[:2] == b"PK"
+    # 夜間支援を1日外す・帰宅時支援加算を手でつける
     form = {f"m1_{d}": "1" for d in range(1, 32) if d not in (1, 5, 6, 7)}
-    post(client, "/docs/record-marks", dict(form, ym="2026-10", home_id="1", col="4"))
-    assert totals()["夜間支援"] == 27
-    # 実績を入院に直すと、夜間支援の○も自動で外れる
+    post(client, "/docs/record-marks", dict(form, ym="2026-10", home_id="1", col="3"))
+    post(client, "/docs/record-marks", {"m1_5": "1", "ym": "2026-10", "home_id": "1", "col": "5"})
+    assert totals() == {"夜間支援等体制加算": 27, "帰宅時支援加算": 1, "日中支援加算": 1}
+    # 実績を入院に直すと、夜間支援の印も自動で外れ、状況は「ひまわり→入院」「入院戻り」
     form = {f"a1_{d}": "○" for d in range(1, 32)}
     form.update({"a1_5": "外", "a1_6": "外", "a1_7": "外", "a1_10": "日", "a1_2": "入", "ym": "2026-10", "home_id": "1"})
     post(client, "/billing/attendance", form)
-    assert totals() == {"日中支援": 1, "帰宅時支援": 0, "入院時支援": 1, "夜間支援": 26}
-    # 項目を増やす（手で○）・名前を変える・使わない
-    post(client, "/docs/record-columns", {"active::1": "1", "label::1": "日中支援", "sort::1": "10",
-                                          "label::2": "帰宅時支援", "sort::2": "20",
-                                          "active::3": "1", "label::3": "入院時支援", "sort::3": "30",
-                                          "active::4": "1", "label::4": "夜間支援体制", "sort::4": "40", "auto::4": "stay",
-                                          "new": "送迎", "new_auto": ""})
-    post(client, "/docs/record-marks", {"m1_3": "1", "ym": "2026-10", "home_id": "1", "col": "5"})
-    assert totals() == {"日中支援": 1, "入院時支援": 1, "夜間支援体制": 26, "送迎": 1}
+    sh, _ = data()
+    assert [x["label"] for x in sh["rows"][1:3]] == ["ひまわり→入院", "入院戻り"]
+    assert totals()["夜間支援等体制加算"] == 26
+    # 列の名前・記号・単位を変える、使わない、増やす
+    cols = {"active::3": "1", "label::3": "夜間支援", "mark::3": "2", "sort::3": "30", "auto::3": "stay",
+            "active::6": "1", "label::6": "日中支援加算", "sort::6": "60",
+            "active::1": "1", "label::1": "住居外利用", "unit::1": "日", "sort::1": "10",
+            "new": "送迎", "new_auto": "", "new_unit": "回"}
+    post(client, "/docs/record-columns", cols)
+    sh, labels = data()
+    assert labels == ["住居外利用", "夜間支援", "日中支援加算", "送迎"]
+    assert sh["rows"][2]["marks"][1] == "2"
     page = client.get("/docs/record-sheets?ym=2026-10").get_data(as_text=True)
-    assert "送迎" in page and "夜間支援体制" in page and "帰宅時支援" not in page
-    assert '<td class="c">1</td>' in page and '<td class="c">○</td>' not in page   # 記号はふつう「1」
-    with app.test_request_context():
-        sheets, cols = record_sheet_data(date(2026, 10, 1), date(2026, 10, 31))
-        assert sheets[0]["rows"][2]["marks"][-1] == "1"
-    assert client.get("/docs/record-sheets.xlsx?ym=2026-10").data[:2] == b"PK"
+    assert "送迎" in page and "医療連携体制加算" not in page
     # 消す
-    post(client, "/docs/record-columns", {"active::1": "1", "label::1": "日中支援", "active::4": "1", "label::4": "夜間支援体制",
-                                          "auto::4": "stay", "active::5": "1", "label::5": "送迎", "delete::5": "1"})
-    assert "送迎" not in totals()
-    # 職員は○を入れられるが、項目の変更は管理者だけ
+    post(client, "/docs/record-columns", dict(cols, new="", **{"active::11": "1", "label::11": "送迎", "delete::11": "1"}))
+    assert "送迎" not in data()[1]
+    # 職員は印を入れられるが、項目の変更は管理者だけ
     staff = staff_client(client, app)
     assert staff.get("/docs/record-marks").status_code == 200
     assert staff.get("/docs/record-columns").status_code == 403
