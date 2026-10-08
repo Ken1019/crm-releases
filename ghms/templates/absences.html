@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}入院・帰宅・外泊{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>🏥 入院・帰宅（帰省）・外泊</h1>
+  <a class="btn primary" href="{{ url_for('crud.new', key='absences') }}">＋ 入院・帰省を登録する</a>
+  <a class="btn" href="{{ url_for('crud.index', key='contact_logs') }}">📞 連絡記録の一覧</a>
+</div>
+<p class="guide">いま不在の方と、最後に連絡した日です。名前を押すと、連絡のやりとりを時系列で見たり、新しい連絡を記録したりできます。入院中に{{ 7 }}日以上連絡がない方は赤で表示します。</p>
+
+<section class="card">
+  <h2>いま不在の方</h2>
+  <ul class="todo">
+  {% for x in current %}{% set a = x.a %}
+    <li class="{{ 'over' if x.need_contact }}"><a href="{{ url_for('absences.detail', aid=a['id']) }}">
+      <span class="pill {{ 'ng' if a['kind'] == '入院' else 'warn' }}">{{ a['kind'] }}</span>
+      <span><b>{{ a['rname'] }}</b> さん　{{ a['place'] or '' }}<br>
+        <small class="muted">{{ a['start_date'] }} から{% if a['end_plan'] %}・{{ a['end_plan'] }} に戻る予定{% endif %}</small></span>
+      <span class="when">{% if a['last_contact'] %}最後の連絡 {{ a['last_contact'] }}{% else %}連絡の記録なし{% endif %}
+        {% if x.need_contact %}<br><b class="ng">{{ x.days }}日 連絡なし</b>{% endif %}</span></a></li>
+  {% else %}
+    <li class="allgood">✔ いま入院・帰省している方はいません。</li>
+  {% endfor %}
+  </ul>
+</section>
+
+<section class="card">
+  <h2>これまでの入院・帰省（最近30件）</h2>
+  <table class="list"><tbody>
+  {% for a in recent %}
+    <tr class="click" data-href="{{ url_for('absences.detail', aid=a['id']) }}"><td>{{ a['rname'] }}</td><td>{{ a['kind'] }}</td>
+      <td class="nowrap">{{ a['start_date'] }} 〜 {{ a['end_date'] or a['end_plan'] or '' }}</td><td>{{ a['place'] or '' }}</td>
+      <td>{{ a['status'] }}</td></tr>
+  {% else %}<tr><td class="empty">まだ記録がありません。</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

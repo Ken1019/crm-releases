@@ -16,6 +16,11 @@
   <noscript><button class="btn">表示</button></noscript>
 </form>
 
+{% if away %}
+<div class="away">🏥 いま不在の方：
+  {% for x in away %}<a href="{{ url_for('absences.detail', aid=x.a['id']) }}">{{ x.a['rname'] }}さん（{{ x.a['kind'] }}{{ '・' ~ x.a['place'] if x.a['place'] }}）</a>{{ '、' if not loop.last }}{% endfor %}
+  　<small class="muted">名前を押すと連絡を記録できます</small></div>
+{% endif %}
 <form method="post" data-guard>
 <input type="hidden" name="_csrf" value="{{ csrf_token }}">
 <input type="hidden" name="date" value="{{ d.isoformat() }}">

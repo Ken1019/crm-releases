@@ -135,12 +135,33 @@ for rid in (1, 2, 3):
     for t in ["利用契約書", "重要事項説明書", "個人情報使用同意書"]:
         post("/m/resident_documents/new", {"resident_id": str(rid), "doc_type": t, "signed_on": "2025-04-01", "place": "事務所 書庫"})
 post("/m/resident_documents/new", {"resident_id": "4", "doc_type": "利用契約書", "signed_on": "2025-04-01", "expires_on": d(20)})
+# 入院・帰省と連絡記録
+post("/m/absences/new", {"resident_id": "5", "kind": "入院", "start_date": d(-12), "end_plan": d(5), "place": "△△病院 3階病棟",
+                         "place_tel": "011-000-1111", "contact_person": "主治医 〇〇先生／担当看護師 △△さん",
+                         "reason": "肺炎の治療のため", "belongings": "着替え3日分・保険証・お薬手帳", "auto_attendance": "1"})
+post("/absences/1", {"date": d(-12), "time": "10:30", "counterpart": "医療機関・病院", "counterpart_name": "△△病院 外来",
+                     "method": "電話", "direction": "こちらから", "content": "発熱のため受診。肺炎の診断で入院となる。", "staff": "鈴木",
+                     "next_action": "家族へ連絡済。着替えを明日届ける。"})
+post("/absences/1", {"date": d(-9), "time": "14:00", "counterpart": "医療機関・病院", "counterpart_name": "3階病棟 看護師",
+                     "method": "面会・訪問", "direction": "こちらから", "content": "面会。熱は下がり、食事は半分ほど食べられている。",
+                     "staff": "佐藤", "next_action": "退院の見込みは来週。サビ管が退院前カンファレンスに参加予定。"})
+post("/m/absences/new", {"resident_id": "4", "kind": "帰宅（帰省）", "start_date": d(-2), "end_plan": d(1), "place": "実家（母）",
+                         "contact_person": "母 江口〇〇（090-0000-0000）", "reason": "週末の帰省", "auto_attendance": "1",
+                         "belongings": "お薬3日分"})
+post("/absences/2", {"date": d(-1), "time": "19:00", "counterpart": "家族", "counterpart_name": "母", "method": "電話",
+                     "direction": "先方から", "content": "家で落ち着いて過ごしている。お薬も飲めているとのこと。", "staff": "中村"})
+post("/m/contact_logs/new", {"date": d(-3), "time": "11:00", "resident_id": "1", "counterpart": "相談支援専門員",
+                             "counterpart_name": "〇〇相談支援事業所 田中さん", "method": "電話", "direction": "先方から",
+                             "content": "モニタリングの日程調整。来月10日に来所予定。", "staff": "佐藤"})
 shift = {"ym": ym}
 pattern = {1: "日日日日日休休", 2: "日日休日日日休", 3: "遅遅日休日日休", 4: "早早休早早休休", 5: "夜明休夜明休休"}
 for sid, p in pattern.items():
     for day in range(1, last + 1):
         shift[f"s{sid}_{day}"] = p[(day - 1) % 7]
 post("/shift/", shift)
+
+# サンプル登録で溜まった「登録しました」の表示を消しておく
+c.get("/m/homes/")
 
 # ---------------- 画面を集める ----------------
 SKIP = ("/logout", "/backup", "/setup", "/login")
@@ -152,7 +173,9 @@ PRIORITY = ["/", "/do/daily", "/do/residents", "/do/staff", "/do/money", "/do/bi
             "/reports", "/billing/attendance", "/billing/benefit", "/billing/invoices", "/billing/invoice/1/print",
             "/billing/invoice/1/print?kind=receipt", "/billing/deposits", "/billing/documents", "/shift/", "/career",
             "/shogu/", "/shogu/1", "/addons/check", "/settings", "/users", "/audit", "/password",
-            "/m/residents/1", "/m/residents/1/edit", "/m/residents/new", "/m/incidents/new", "/m/support_plans/1"]
+            "/m/residents/1", "/m/residents/1/edit", "/m/residents/new", "/m/incidents/new", "/m/support_plans/1",
+            "/absences/", "/absences/1", "/absences/2", "/m/absences/new", "/m/contact_logs/", "/m/contact_logs/new",
+            "/m/residents/5", "/m/residents/4"]
 pages, queue, seen = {}, deque(PRIORITY), set(PRIORITY)
 per_path, per_kind = Counter(), Counter()
 

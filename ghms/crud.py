@@ -15,6 +15,12 @@ PAGE_SIZE = 100
 
 # 保存前に値を計算するフック {entity_key: fn(data) -> None}
 COMPUTE = {}
+# 保存後に関連データを更新するフック {entity_key: fn(rid) -> None}
+AFTER_SAVE = {}
+# 削除後に関連データを片付けるフック {entity_key: fn(rid) -> None}
+AFTER_DELETE = {}
+# 一覧・選択肢での表示名 {entity_key: fn(row) -> str}
+LABELS = {}
 
 
 def get_entity(key):
@@ -33,6 +39,8 @@ def label_of(key, row):
         return f'{row["fiscal_year"] and int(row["fiscal_year"])}年度 区分{row["category"] or ""}'
     if key == "career_grades":
         return f'{row["name"]}（{row["position"] or ""}）'
+    if key in LABELS:
+        return LABELS[key](row)
     if key in ("resident_addons", "shogu_allocations"):
         return f"#{row['id']}"
     v = row[ENTITIES[key]["display"]]
@@ -154,6 +162,9 @@ def save(key, data, rid=None):
         )
         audit("update", key, rid)
     db.commit()
+    if key in AFTER_SAVE:
+        AFTER_SAVE[key](rid)
+        db.commit()
     return rid
 
 
@@ -225,7 +236,24 @@ def view(key, rid):
         for f in e["fields"]:
             if f["type"] == "ref" and f["ref"] == key:
                 related.append((k, e, f["name"]))
-    return render_template("crud_view.html", key=key, ent=ent, row=row, maps=ref_maps(ent), fmt=fmt, related=related)
+    summary = resident_summary(rid) if key == "residents" else None
+    return render_template("crud_view.html", key=key, ent=ent, row=row, maps=ref_maps(ent), fmt=fmt, related=related,
+                           summary=summary)
+
+
+def resident_summary(rid):
+    """入居者の詳細画面に出す「最近のようす」"""
+    db = get_db()
+    return {
+        "away": db.execute("SELECT * FROM absences WHERE resident_id=? AND status='不在中' ORDER BY start_date DESC LIMIT 1",
+                           (rid,)).fetchone(),
+        "records": db.execute("SELECT * FROM support_records WHERE resident_id=? ORDER BY date DESC, id DESC LIMIT 5",
+                              (rid,)).fetchall(),
+        "contacts": db.execute("SELECT * FROM contact_logs WHERE resident_id=? ORDER BY date DESC, id DESC LIMIT 5",
+                               (rid,)).fetchall(),
+        "plan": db.execute("SELECT * FROM support_plans WHERE resident_id=? AND (status IS NULL OR status != '終了') "
+                           "ORDER BY period_end DESC LIMIT 1", (rid,)).fetchone(),
+    }
 
 
 @bp.route("/<key>/<int:rid>/edit", methods=["GET", "POST"])
@@ -260,6 +288,9 @@ def delete(key, rid):
     db.execute(f'DELETE FROM "{key}" WHERE id=?', (rid,))
     audit("delete", key, rid)
     db.commit()
+    if key in AFTER_DELETE:
+        AFTER_DELETE[key](rid)
+        db.commit()
     flash("削除しました。", "ok")
     return redirect(url_for("crud.index", key=key))
 

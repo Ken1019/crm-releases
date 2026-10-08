@@ -33,13 +33,14 @@ def create_app(test_config=None):
     db.init_db(app.config["DATABASE"])
     app.teardown_appcontext(db.close_db)
 
-    from . import auth, billing, crud, shift, views
+    from . import absences, auth, billing, crud, shift, views
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(crud.bp)
     app.register_blueprint(views.bp)
     app.register_blueprint(billing.bp)
     app.register_blueprint(shift.bp)
+    app.register_blueprint(absences.bp)
     auth.install(app)
 
     from .entities import ENTITIES, GROUP_ICONS, GROUPS

@@ -9,6 +9,7 @@
 }
 html.font-large { --fs:20px; }
 * { box-sizing:border-box; }
+[hidden] { display:none !important; }
 body { margin:0; font-family:"BIZ UDPGothic","BIZ UDゴシック","Meiryo UI","Yu Gothic UI","Hiragino Sans",sans-serif;
   font-size:var(--fs); line-height:1.7; color:var(--text); background:var(--bg); }
 a { color:var(--sky); } a:hover { text-decoration:underline; }
@@ -140,3 +141,13 @@ table.mgrid tr.total td { background:#fff6ec; font-weight:bold; }
 .btn.mini { min-height:32px; padding:2px 10px; font-size:.8em; border-radius:8px; }
 .legend { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:.85em; color:var(--muted); }
 .legend b { color:var(--text); }
+/* 連絡のやりとり */
+.timeline { list-style:none; margin:0; padding:0 0 0 18px; border-left:3px solid var(--line); display:grid; gap:14px; }
+.timeline li { position:relative; padding-left:8px; }
+.timeline li::before { content:""; position:absolute; left:-27px; top:8px; width:14px; height:14px; border-radius:50%; background:var(--pri); border:3px solid var(--bg); }
+.timeline li.empty::before { display:none; }
+.tl-head { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.timeline p { margin:4px 0 0; }
+.away { background:var(--warn-soft); border-radius:12px; padding:10px 16px; margin-bottom:16px; }
+.away a { font-weight:bold; }
+.cols h3 { margin:0 0 8px; font-size:1em; }

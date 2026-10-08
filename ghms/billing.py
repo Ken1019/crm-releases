@@ -16,6 +16,12 @@ from .crud import COMPUTE, audit, save
 from .db import get_db, get_setting, now
 from .views import fiscal_year, parse_date, parse_ym
 
+
+def sync_open():
+    from .absences import sync_open as _s
+
+    _s()
+
 bp = Blueprint("billing", __name__, url_prefix="/billing")
 
 # 実績の記号
@@ -80,6 +86,8 @@ def attendance():
     home_id = request.values.get("home_id", type=int) or (homes[0]["id"] if homes else None)
     residents = residents_in_month(first, last, home_id)
     days = month_days(first, last)
+    if request.method == "GET":
+        sync_open()
     valid = {c for c, _ in CODES}
     if request.method == "POST":
         for r in residents:
@@ -132,6 +140,7 @@ def _addon_days(name, codes, billable):
 
 def compute_benefit(first, last, home_id=None):
     db = get_db()
+    sync_open()
     residents = residents_in_month(first, last, home_id)
     amap = attendance_map(first, last)
     price, rate = unit_price(), _shogu_rate(first)

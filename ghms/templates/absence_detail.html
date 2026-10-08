@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block title %}{{ a['rname'] }} {{ a['kind'] }}{% endblock %}
+{% block content %}
+<p class="noprint"><a href="{{ url_for('absences.index') }}">◀ 入院・帰省の一覧にもどる</a></p>
+<div class="head">
+  <h1>🏥 {{ a['rname'] }} さん　{{ a['kind'] }}</h1>
+  <a class="btn" href="{{ url_for('crud.edit', key='absences', rid=a['id'], next=request.path) }}">✏️ 期間・行き先を直す</a>
+  <button class="btn" onclick="window.print()">🖨️ 印刷</button>
+</div>
+
+<div class="tiles">
+  <div class="tile"><b>{{ a['status'] }}</b><span>状態</span></div>
+  <div class="tile"><b>{{ a['start_date'] }}</b><span>出発した日</span></div>
+  <div class="tile"><b>{{ a['end_date'] or a['end_plan'] or '未定' }}</b><span>{{ '戻った日' if a['end_date'] else '戻る予定日' }}</span></div>
+  <div class="tile"><b>{{ logs|length }}件</b><span>連絡の記録（今月の面会・訪問 {{ visits }}回）</span></div>
+</div>
+
+<section class="card">
+  <table class="detail">
+    <tr><th>行き先</th><td>{{ a['place'] or '' }}　{{ a['place_tel'] or '' }}</td></tr>
+    <tr><th>先方の担当者</th><td>{{ a['contact_person'] or '' }}</td></tr>
+    <tr><th>理由・病名・目的</th><td class="pre">{{ a['reason'] or '' }}</td></tr>
+    <tr><th>持ち物・お薬・預けたもの</th><td class="pre">{{ a['belongings'] or '' }}</td></tr>
+    {% if a['notes'] %}<tr><th>備考</th><td class="pre">{{ a['notes'] }}</td></tr>{% endif %}
+  </table>
+  {% if a['status'] == '不在中' %}
+  <p class="guide noprint">戻ってきたら「期間・行き先を直す」で<b>戻った日</b>を入れてください。状態が「戻った」になり、実績にも反映されます。</p>
+  {% endif %}
+</section>
+
+<form method="post" class="card form noprint" data-guard>
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <h2 class="wide">📞 連絡を記録する</h2>
+  <label><span>日付<span class="must">必須</span></span><input type="date" name="date" value="{{ today }}" required></label>
+  <label><span>時刻</span><input type="time" name="time"></label>
+  <label><span>連絡した相手</span><select name="counterpart"><option></option>
+    {% for o in COUNTERPART %}<option{% if (a['kind'] == '入院' and o == '医療機関・病院') or (a['kind'] != '入院' and o == '家族') %} selected{% endif %}>{{ o }}</option>{% endfor %}</select></label>
+  <label><span>相手の名前・所属</span><input name="counterpart_name" placeholder="例：〇〇病院 3階病棟 看護師"></label>
+  <label><span>方法</span><select name="method"><option></option>{% for o in CONTACT_METHOD %}<option>{{ o }}</option>{% endfor %}</select></label>
+  <label><span>どちらから</span><select name="direction"><option></option>{% for o in CONTACT_DIRECTION %}<option>{{ o }}</option>{% endfor %}</select></label>
+  <label class="wide"><span>連絡の内容<span class="must">必須</span></span><textarea name="content" rows="3" required placeholder="例：本日面会。食事は半分ほど。来週退院の見込みと主治医より説明あり。"></textarea></label>
+  <label class="wide"><span>今後の対応・申し送り</span><textarea name="next_action" rows="2"></textarea></label>
+  <label><span>対応した職員</span><input name="staff" value="{{ me }}"></label>
+  <div class="actions wide"><button class="btn primary big">💾 連絡を保存する</button></div>
+</form>
+
+<section class="card">
+  <h2>連絡のやりとり（新しい順）</h2>
+  <ol class="timeline">
+  {% for c in logs %}
+    <li><div class="tl-head"><b>{{ c['date'] }} {{ c['time'] or '' }}</b>
+        <span class="pill warn">{{ c['method'] or '連絡' }}</span>
+        <span>{{ c['counterpart'] or '' }} {{ c['counterpart_name'] or '' }}</span>
+        <small class="muted">{{ c['direction'] or '' }}・{{ c['staff'] or '' }}</small>
+        <a class="noprint" href="{{ url_for('crud.edit', key='contact_logs', rid=c['id'], next=request.path) }}">直す</a></div>
+      <p class="pre">{{ c['content'] }}</p>
+      {% if c['next_action'] %}<p class="pre muted">→ {{ c['next_action'] }}</p>{% endif %}</li>
+  {% else %}
+    <li class="empty">まだ連絡の記録がありません。</li>
+  {% endfor %}
+  </ol>
+</section>
+{% endblock %}

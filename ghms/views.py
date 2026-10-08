@@ -86,6 +86,14 @@ def dashboard():
         for i in db.execute("SELECT i.*, r.name AS rname FROM invoices i JOIN residents r ON r.id=i.resident_id "
                             "WHERE i.status != '入金済' AND i.due_date IS NOT NULL AND i.due_date < ?", (today.isoformat(),)):
             alerts.append((f"{i['ym']}分の利用料が未入金", i["rname"], i["due_date"], url_for("crud.edit", key="invoices", rid=i["id"])))
+    from .absences import current_absences, sync_open
+
+    sync_open()
+    away = current_absences()
+    for x in away:
+        if x["need_contact"]:
+            alerts.append((f"入院中の連絡が{x['days']}日ありません", x["a"]["rname"], "",
+                           url_for("absences.detail", aid=x["a"]["id"])))
     alerts.sort(key=lambda a: a[2] or "0000")
 
     meetings = []
@@ -111,7 +119,7 @@ def dashboard():
     recent = db.execute("SELECT i.*, r.name AS rname FROM incidents i LEFT JOIN residents r ON r.id=i.resident_id "
                         "ORDER BY i.date DESC, i.id DESC LIMIT 5").fetchall()
     all_tasks = [dict(t, hub=h) for h in visible_hubs() for t in visible_tasks(h)]
-    return render_template("dashboard.html", all_tasks=all_tasks, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
+    return render_template("dashboard.html", all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
                            recent=recent, today=today)
 
 
@@ -192,13 +200,16 @@ def journal():
         flash(f"保存しました（支援記録 {saved}件）。", "ok")
         return redirect(url_for("views.journal", date=d.isoformat(), home_id=home_id, slot=slot))
 
+    from .absences import current_absences
+
+    away = current_absences(home_id)
     log = db.execute("SELECT * FROM daily_logs WHERE date=? AND home_id IS ?", (d.isoformat(), home_id)).fetchone()
     recs = {r["resident_id"]: r for r in db.execute(
         "SELECT * FROM support_records WHERE date=? AND time_slot=?", (d.isoformat(), slot))}
     day_all = db.execute("SELECT s.*, r.name AS rname FROM support_records s JOIN residents r ON r.id=s.resident_id "
                          "WHERE s.date=? AND (? IS NULL OR r.home_id=?) ORDER BY r.kana, s.id",
                          (d.isoformat(), home_id, home_id)).fetchall()
-    return render_template("journal.html", d=d, homes=homes, home_id=home_id, slot=slot, residents=residents, log=log,
+    return render_template("journal.html", away=away, d=d, homes=homes, home_id=home_id, slot=slot, residents=residents, log=log,
                            recs=recs, day_all=day_all, prev=(d - timedelta(days=1)).isoformat(),
                            next=(d + timedelta(days=1)).isoformat(), MEAL=MEAL, MED=MED, MOOD=MOOD, TIME_SLOT=TIME_SLOT)
 

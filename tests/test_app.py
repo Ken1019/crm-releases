@@ -223,3 +223,81 @@ def test_shift_roster(client):
     html = client.get("/shift/?ym=2026-10").get_data(as_text=True)
     assert "0.5" in html and "1.5" in html  # パート 80/160、世話人合計 1.5
     assert client.get("/shift/export.xlsx?ym=2026-10").data[:2] == b"PK"
+
+
+def _codes(app, rid):
+    import sqlite3
+    con = sqlite3.connect(app.config["DATABASE"])
+    rows = dict(con.execute("SELECT date, code FROM attendance WHERE resident_id=?", (rid,)).fetchall())
+    status = con.execute("SELECT status FROM residents WHERE id=?", (rid,)).fetchone()[0]
+    con.close()
+    return rows, status
+
+
+def test_absence_fills_attendance_and_status(client, app):
+    from datetime import date, timedelta
+
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "status": "入居中"})
+    # 終わった入院：出発日・戻った日は在居のまま、その間だけ「入」
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "入院", "start_date": "2026-09-20", "end_date": "2026-09-25",
+                                     "auto_attendance": "1", "place": "〇〇病院"})
+    codes, status = _codes(app, 1)
+    assert [k for k, v in sorted(codes.items()) if v == "入"] == ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"]
+    assert status == "入居中"
+    assert "戻った" in client.get("/m/absences/1").get_data(as_text=True)
+
+    # いま入院中（戻った日なし）：今日までのびる・状態が入院中・10日連絡なしでお知らせ
+    start = date.today() - timedelta(days=10)
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "入院", "start_date": start.isoformat(),
+                                     "auto_attendance": "1", "place": "△△病院"})
+    codes, status = _codes(app, 1)
+    assert codes[date.today().isoformat()] == "入" and start.isoformat() not in codes
+    assert status == "入院中"
+    home = client.get("/").get_data(as_text=True)
+    assert "入院中の連絡が10日ありません" in home and "△△病院" in home
+    assert "△△病院" in client.get("/journal?home_id=1").get_data(as_text=True)
+
+    # 詳細画面から連絡を記録 → お知らせが消える
+    r = post(client, "/absences/2", {"date": date.today().isoformat(), "counterpart": "医療機関・病院",
+                                     "method": "面会・訪問", "content": "面会。食事は半分ほど。"})
+    assert r.status_code == 302
+    page = client.get("/absences/2").get_data(as_text=True)
+    assert "面会。食事は半分ほど。" in page and "今月の面会・訪問 1回" in page
+    assert "連絡が10日ありません" not in client.get("/").get_data(as_text=True)
+    assert "面会。食事は半分ほど。" in client.get("/m/contact_logs/?resident_id=1").get_data(as_text=True)
+
+    # 退院：戻った日を入れると状態が戻る
+    post(client, "/m/absences/2/edit", {"resident_id": "1", "kind": "入院", "status": "不在中", "start_date": start.isoformat(),
+                                        "end_date": date.today().isoformat(), "auto_attendance": "1"})
+    codes, status = _codes(app, 1)
+    assert status == "入居中" and date.today().isoformat() not in codes
+
+
+def test_absence_delete_clears_attendance(client, app):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "status": "入居中"})
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "帰宅（帰省）", "start_date": "2026-09-01",
+                                     "end_date": "2026-09-05", "auto_attendance": "1"})
+    assert set(_codes(app, 1)[0].values()) == {"帰"}
+    post(client, "/m/absences/1/delete", {})
+    assert _codes(app, 1)[0] == {}
+    # 自動反映をオフにすると実績は変えない
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "外泊", "start_date": "2026-09-10", "end_date": "2026-09-13"})
+    assert _codes(app, 1)[0] == {}
+
+
+def test_resident_summary(client):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "status": "入居中"})
+    post(client, "/m/contact_logs/new", {"date": "2026-10-01", "resident_id": "1", "counterpart": "家族",
+                                         "content": "週末の帰省について母と相談"})
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "帰宅（帰省）", "start_date": "2026-10-03"})
+    page = client.get("/m/residents/1").get_data(as_text=True)
+    assert "最近のようす" in page and "週末の帰省について母と相談" in page and "いま<b>帰宅（帰省）</b>中です" in page
+
+
+def test_hidden_attribute_wins_over_css(app):
+    # .todo { display:grid } などに負けて hidden の要素が見えてしまわないこと
+    css = open(app.static_folder + "/style.css", encoding="utf-8").read()
+    assert "[hidden] { display:none !important; }" in css

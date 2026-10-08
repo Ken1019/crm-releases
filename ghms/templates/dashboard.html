@@ -60,13 +60,25 @@
   {% endfor %}
   </ul>
 
+  <h2 style="margin-top:20px">🏥 入院中・帰省中の方</h2>
+  <ul class="todo">
+  {% for x in away %}{% set a = x.a %}
+    <li class="{{ 'over' if x.need_contact }}"><a href="{{ url_for('absences.detail', aid=a['id']) }}">
+      <span class="pill {{ 'ng' if a['kind'] == '入院' else 'warn' }}">{{ a['kind'] }}</span>
+      <span><b>{{ a['rname'] }}</b> さん {{ a['place'] or '' }}</span>
+      <span class="when">{{ ('最後の連絡 ' ~ a['last_contact']) if a['last_contact'] else '連絡の記録なし' }}</span></a></li>
+  {% else %}
+    <li class="muted">いま不在の方はいません。<a href="{{ url_for('crud.new', key='absences') }}">入院・帰省を登録する</a></li>
+  {% endfor %}
+  </ul>
+
   <h2 style="margin-top:20px">🗣️ 委員会の最終実施日</h2>
   <table class="list">
   {% for kind, last, warn in meetings %}
     <tr><td>{{ kind }}</td><td>{% if warn %}<span class="pill ng">{{ last or '記録なし' }}</span>{% else %}{{ last }}{% endif %}</td></tr>
   {% endfor %}
   </table>
-  <p class="muted small">1年以上記録がないものは赤で表示します。必要な開催回数は運営基準・自治体の指導で確認してください。</p>
+  <p class="muted small">目安の期間（委員会は1年・避難訓練は半年）より前のもの・記録がないものは赤で表示します。必要な回数は運営基準・自治体の指導で確認してください。</p>
 </section>
 </div>
 

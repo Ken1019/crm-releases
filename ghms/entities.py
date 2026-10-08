@@ -35,6 +35,11 @@ INCOME_CLASS = ["生活保護", "低所得", "一般1", "一般2"]
 FOOD_TYPE = ["日額（食べた日数で計算）", "月額"]
 PAY_METHOD_RES = ["口座振替", "振込", "現金", "預り金から"]
 INVOICE_STATUS = ["未請求", "請求済", "入金済"]
+ABSENCE_KIND = ["入院", "帰宅（帰省）", "外泊", "その他"]
+ABSENCE_STATUS = ["予定", "不在中", "戻った"]
+COUNTERPART = ["家族", "医療機関・病院", "相談支援専門員", "日中活動先", "市町村", "成年後見人等", "その他"]
+CONTACT_METHOD = ["電話", "面会・訪問", "メール・FAX", "来所", "その他"]
+CONTACT_DIRECTION = ["こちらから", "先方から"]
 DEPOSIT_KIND = ["入金", "出金"]
 DOC_TYPE = [
     "利用契約書", "重要事項説明書", "個人情報使用同意書", "個別支援計画への同意", "受給者証の写し",
@@ -112,6 +117,30 @@ ENTITIES = {
             F("pay_method", "支払方法", "select", options=PAY_METHOD_RES, list=False),
         ],
     },
+    "absences": {
+        "icon": "🏥",
+        "guide": "入院・帰宅（帰省）・外泊を登録します。期間は「実績」に自動で入り、入院中・帰省中の方はホームと日誌の画面に表示されます。連絡したときは「連絡を記録する」から残しましょう。",
+        "title": "入院・帰宅・外泊",
+        "group": "入居者",
+        "display": "kind",
+        "order": "CASE status WHEN '不在中' THEN 0 WHEN '予定' THEN 1 ELSE 2 END, start_date DESC",
+        "fields": [
+            F("resident_id", "入居者", "ref", ref="residents", required=True),
+            F("kind", "種類", "select", options=ABSENCE_KIND, required=True),
+            F("status", "状態", "select", options=ABSENCE_STATUS, default="不在中", help="戻った日を入れると自動で「戻った」になります"),
+            F("start_date", "出発した日（入院した日）", "date", required=True, default="today"),
+            F("end_plan", "戻る予定日", "date"),
+            F("end_date", "戻った日（退院した日）", "date"),
+            F("place", "行き先（病院名・帰省先）"),
+            F("place_tel", "行き先の電話番号", list=False),
+            F("contact_person", "先方の担当者（主治医・家族など）", list=False),
+            F("reason", "理由・病名・目的", "textarea", list=False),
+            F("belongings", "持ち物・お薬・預けたもの", "textarea", list=False),
+            F("auto_attendance", "実績（在居・入院など）に自動で反映する", "check", list=False, default=1,
+              help="出発した日と戻った日は「在居」のまま、その間の日を入院・帰宅・外泊にします。算定の扱いは報酬告示で確認してください"),
+            F("notes", "備考", "textarea", list=False),
+        ],
+    },
     "support_plans": {
         "guide": "計画期間の終わりや次のモニタリング日を入れておくと、ホーム画面でお知らせします。",
         "icon": "📋",
@@ -152,6 +181,27 @@ ENTITIES = {
             F("mood", "様子", "select", options=MOOD),
             F("content", "記録内容", "textarea"),
             F("staff", "記録者"),
+        ],
+    },
+    "contact_logs": {
+        "icon": "📞",
+        "guide": "家族・病院・相談支援専門員などとの連絡を残します。入院中・帰省中の連絡は、その入院・帰省を選ぶとまとめて見られます。",
+        "title": "連絡記録",
+        "group": "日誌・記録",
+        "display": "date",
+        "order": "date DESC, time DESC, id DESC",
+        "fields": [
+            F("date", "日付", "date", required=True, default="today"),
+            F("time", "時刻", "time"),
+            F("resident_id", "入居者", "ref", ref="residents"),
+            F("absence_id", "入院・帰宅（関係するとき）", "ref", ref="absences", list=False),
+            F("counterpart", "連絡した相手", "select", options=COUNTERPART),
+            F("counterpart_name", "相手の名前・所属", list=False),
+            F("method", "方法", "select", options=CONTACT_METHOD),
+            F("direction", "どちらから", "select", options=CONTACT_DIRECTION, list=False),
+            F("content", "連絡の内容", "textarea", required=True),
+            F("next_action", "今後の対応・申し送り", "textarea", list=False),
+            F("staff", "対応した職員"),
         ],
     },
     "daily_logs": {

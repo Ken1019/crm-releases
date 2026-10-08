@@ -5,6 +5,7 @@
   <h1>{{ ent.icon }} {{ ent.title }}</h1>
   <a class="btn primary" href="{{ url_for('crud.new', key=key) }}">＋ 新しく追加する</a>
   <a class="btn" href="{{ url_for('crud.export', key=key, **args) }}">🖨️ Excelで出す</a>
+  {% if key == 'absences' %}<a class="btn" href="{{ url_for('absences.index') }}">🏥 いま不在の方を見る</a>{% endif %}
   {% if key == 'shogu_plans' %}<a class="btn" href="{{ url_for('views.shogu_index') }}">💴 処遇改善の画面へ</a>{% endif %}
 </div>
 {% if ent.guide %}<p class="guide">{{ ent.guide }}</p>{% endif %}
@@ -26,7 +27,7 @@
   <thead><tr>{% for f in cols %}<th>{{ f.label }}</th>{% endfor %}<th></th></tr></thead>
   <tbody>
   {% for r in rows %}
-    <tr class="click" data-href="{{ url_for('crud.view', key=key, rid=r['id']) }}">{% for f in cols %}<td class="{{ f.type }}">{{ fmt(f, r[f.name], maps)|truncate(60) }}</td>{% endfor %}
+    <tr class="click" data-href="{{ url_for('absences.detail', aid=r['id']) if key == 'absences' else url_for('crud.view', key=key, rid=r['id']) }}">{% for f in cols %}<td class="{{ f.type }}">{{ fmt(f, r[f.name], maps)|truncate(60) }}</td>{% endfor %}
       <td class="nowrap"><a class="btn" href="{{ url_for('crud.edit', key=key, rid=r['id']) }}">✏️ 直す</a></td></tr>
   {% else %}
     <tr><td colspan="{{ cols|length + 1 }}" class="empty">まだ登録がありません。<br>

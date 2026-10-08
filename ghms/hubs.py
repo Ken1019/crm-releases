@@ -12,9 +12,10 @@ from .auth import is_admin
 HUBS = [
     {
         "key": "daily", "icon": "📔", "title": "毎日の記録", "desc": "日誌・ヒヤリハット・会議の記録を書く・見る",
-        "entities": ["daily_logs", "support_records", "incidents", "meetings"], "endpoints": ["views.journal"],
+        "entities": ["daily_logs", "support_records", "incidents", "meetings", "contact_logs"], "endpoints": ["views.journal"],
         "tasks": [
             ("今日の日誌を書く", "業務日誌と入居者ごとの様子を1画面でまとめて", lambda: url_for("views.journal"), False),
+            ("連絡を記録する（家族・病院・相談員など）", "電話・面会・メールの内容を残す", lambda: url_for("crud.new", key="contact_logs"), False),
             ("ヒヤリハット・事故を書く", "ヒヤッとしたら小さなことでもすぐ記録", lambda: url_for("crud.new", key="incidents"), False),
             ("会議・委員会の記録を書く", "虐待防止・身体拘束・感染症・BCPなど", lambda: url_for("crud.new", key="meetings"), False),
             ("避難訓練の記録を書く", "火災・地震などの訓練（実施日・参加者・反省点）", lambda: url_for("crud.new", key="meetings", kind="避難訓練"), False),
@@ -22,13 +23,17 @@ HUBS = [
             ("入居者の記録をさかのぼって見る", "入居者や日付でさがせます", lambda: url_for("crud.index", key="support_records"), False),
             ("ヒヤリハットの一覧を見る", "これまでの報告と再発防止策", lambda: url_for("crud.index", key="incidents"), False),
             ("会議・委員会の一覧を見る", "開催日・内容をふりかえる", lambda: url_for("crud.index", key="meetings"), False),
+            ("連絡記録の一覧を見る", "入居者・相手・日付でさがせます", lambda: url_for("crud.index", key="contact_logs"), False),
         ],
     },
     {
-        "key": "residents", "icon": "👤", "title": "入居者のこと", "desc": "入居者の情報・個別支援計画",
-        "entities": ["residents", "support_plans", "resident_documents"], "endpoints": ["billing.documents"],
+        "key": "residents", "icon": "👤", "title": "入居者のこと", "desc": "入居者の情報・個別支援計画・入院や帰省",
+        "entities": ["residents", "support_plans", "resident_documents", "absences"],
+        "endpoints": ["billing.documents", "absences.index", "absences.detail"],
         "tasks": [
             ("入居者をさがす・情報を見る", "連絡先・服薬・受給者証など", lambda: url_for("crud.index", key="residents"), False),
+            ("入院・帰宅（帰省）・外泊を登録する", "期間は実績に自動で入ります", lambda: url_for("crud.new", key="absences"), False),
+            ("入院中・帰省中の方と連絡のやりとりを見る", "最後に連絡した日・面会の回数", lambda: url_for("absences.index"), False),
             ("新しい入居者を登録する", "入居が決まったら", lambda: url_for("crud.new", key="residents"), False),
             ("個別支援計画を作る", "目標と支援内容・計画期間", lambda: url_for("crud.new", key="support_plans"), False),
             ("個別支援計画・モニタリングを見る", "期限が近いものはホームにも出ます", lambda: url_for("crud.index", key="support_plans"), False),
