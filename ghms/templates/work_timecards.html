@@ -15,11 +15,12 @@
 <form method="post" data-guard>
 <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}"><input type="hidden" name="staff_id" value="{{ staff['id'] }}">
 <div class="tablewrap card"><table class="list tc">
-  <thead><tr><th>日</th><th>出勤</th><th>退勤</th><th>休憩（分）</th><th>実働</th><th>残業</th><th>深夜</th><th>体温</th><th>備考</th>{% if admin %}<th>消す</th>{% endif %}</tr></thead>
+  <thead><tr><th>日</th><th>勤務表</th><th>出勤</th><th>退勤</th><th>休憩（分）</th><th>実働</th><th>残業</th><th>深夜</th><th>体温</th><th>備考</th>{% if admin %}<th>消す</th>{% endif %}</tr></thead>
   {% for r in rows %}
     {% for x in r.cards %}{% set c = x.c %}
     <tr class="{{ 'sat' if r.d.weekday() == 5 else 'sun' if r.d.weekday() == 6 }}">
       <td class="nowrap">{{ r.d.day }}（{{ WEEK[r.d.weekday()] }}）{% if x.w and x.w.yakin %} <span class="pill warn">夜勤</span>{% endif %}</td>
+      <td class="nowrap">{% if loop.first %}{{ r.plan_t['name'] if r.plan_t else r.plan }}{% for k, m in r.diffs %}<br><span class="pill ng" title="{{ m }}">{{ k }}</span>{% endfor %}{% endif %}</td>
       {% if admin %}<td><input type="time" name="in_{{ c['id'] }}" value="{{ c['clock_in'] or '' }}"></td><td><input type="time" name="out_{{ c['id'] }}" value="{{ c['clock_out'] or '' }}"></td>
         <td><input type="number" name="br_{{ c['id'] }}" value="{{ c['break_min'] if c['break_min'] is not none else '' }}" min="0" class="w5"></td>
       {% else %}<td>{{ c['clock_in'] }}</td><td>{{ c['clock_out'] or '—' }}</td><td>{{ c['break_min'] or 0 }}</td>{% endif %}
@@ -29,7 +30,8 @@
       {% if admin %}<td><input type="checkbox" name="del_{{ c['id'] }}" value="1" aria-label="消す"></td>{% endif %}
     </tr>
     {% else %}
-    <tr class="muted {{ 'sat' if r.d.weekday() == 5 else 'sun' if r.d.weekday() == 6 }}"><td class="nowrap">{{ r.d.day }}（{{ WEEK[r.d.weekday()] }}）</td>
+    <tr class="{{ '' if r.diffs else 'muted' }} {{ 'sat' if r.d.weekday() == 5 else 'sun' if r.d.weekday() == 6 }}"><td class="nowrap">{{ r.d.day }}（{{ WEEK[r.d.weekday()] }}）</td>
+      <td class="nowrap">{{ r.plan_t['name'] if r.plan_t else r.plan }}{% for k, m in r.diffs %}<br><span class="pill ng" title="{{ m }}">{{ k }}</span>{% endfor %}</td>
       {% if admin %}<td><input type="time" name="in_new_{{ r.d.day }}" aria-label="出勤"></td><td><input type="time" name="out_new_{{ r.d.day }}" aria-label="退勤"></td>
         <td><input type="number" name="br_new_{{ r.d.day }}" min="0" class="w5" aria-label="休憩"></td><td colspan="4"></td><td><input name="note_new_{{ r.d.day }}" aria-label="備考"></td><td></td>
       {% else %}<td colspan="8"></td>{% endif %}</tr>

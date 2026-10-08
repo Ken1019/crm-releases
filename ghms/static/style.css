@@ -214,3 +214,5 @@ table.monthly td.name { min-width:6.5em; }
 .w8 { width: 8.5em; }
 fieldset { border: 0; padding: 0; margin: 0; }
 fieldset legend { font-weight: 700; margin-bottom: 6px; }
+table.myshift th, table.myshift td { text-align: center; min-width: 4.2em; }
+table.myshift .today, table.list tr.today td { background: #fff4e6; }

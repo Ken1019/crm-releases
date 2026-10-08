@@ -236,7 +236,7 @@ with app.app_context():
                    " WHERE id=?", vals + (sid,))
     db.execute("UPDATE users SET staff_id=2 WHERE username='suzuki'")
     db.execute("UPDATE users SET staff_id=3 WHERE username='takahashi'")
-    TIMES = {"日": ("09:00", "18:00", 60), "早": ("07:00", "16:00", 60), "遅": ("11:00", "20:00", 60), "夜": ("16:00", "10:00", 120)}
+    TIMES = {"日": ("09:00", "18:00", 60), "早": ("06:00", "10:00", 0), "遅": ("15:00", "20:00", 0), "夜": ("16:00", "10:00", 120)}
     for sid, p in pattern.items():
         for day in range(1, today.day):
             code = p[(day - 1) % 7]
@@ -244,6 +244,8 @@ with app.app_context():
                 cin, cout, brk = TIMES[code]
                 if sid == 4 and day == today.day - 2:
                     cout = None          # 退勤の押し忘れ（実地指導チェックに出る）
+                if sid == 1 and day == 2:
+                    cin = "09:25"        # 遅刻（勤務表とのちがいに出る）
                 dd = today.replace(day=day).isoformat()
                 db.execute("INSERT INTO timecards (staff_id, date, clock_in, clock_out, break_min, updated_by, updated_at)"
                            " VALUES (?,?,?,?,?,'demo','')", (sid, dd, cin, cout, brk))
@@ -339,9 +341,11 @@ sc = app.test_client()
 sc.post("/login", data={"username": "suzuki", "password": "mypass2026"})
 pages["/?staff"] = sc.get("/").get_data(as_text=True)
 pages["/work/clock?staff"] = sc.get("/work/clock").get_data(as_text=True)
+pages["/work/my-shift?staff"] = sc.get("/work/my-shift").get_data(as_text=True)
 
 names = {"/": "p_home.html", "/login": "p_login.html", "/pin/2": "p_pin.html", "/?staff": "p_home_staff.html",
-         "/work/kiosk": "p_kiosk.html", "/work/clock?staff": "p_clock_staff.html"}
+         "/work/kiosk": "p_kiosk.html", "/work/clock?staff": "p_clock_staff.html",
+         "/work/my-shift?staff": "p_myshift_staff.html"}
 import hashlib  # noqa: E402
 
 for url in (u for u in pages if u not in names):

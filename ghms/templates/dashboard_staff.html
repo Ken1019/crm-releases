@@ -22,6 +22,16 @@
 </section>
 {% endif %}
 
+{% if shifts %}
+<section class="card">
+  <h2>📅 自分の勤務（これから2週間）</h2>
+  <div class="tablewrap"><table class="list myshift"><tr>
+    {% for x in shifts %}<th class="{{ 'sat' if x.d.weekday() == 5 else 'sun' if x.d.weekday() == 6 }}{{ ' today' if loop.first }}">{{ x.d.month }}/{{ x.d.day }}<br><small>{{ x.w }}</small></th>{% endfor %}</tr><tr>
+    {% for x in shifts %}<td class="{{ 'today' if loop.first }}"><b>{{ x.t['name'] if x.t else (x.code or '—') }}</b>{% if x.t and x.t['start'] %}<br><small>{{ x.t['start'] }}〜{{ x.t['end'] }}</small>{% endif %}</td>{% endfor %}</tr></table></div>
+  <p><a href="{{ url_for('work.my_shift') }}">月の勤務表を見る</a>　<span class="muted small">勤務表は管理者が組みます。変えたいときは管理者に相談してください。</span></p>
+</section>
+{% endif %}
+
 <div class="cols">
 <section class="card">
   <h2>📔 今日の日誌</h2>

@@ -931,3 +931,34 @@ def test_compliance_warnings_on_home(client, app):
     assert "出勤する" in page and "業務日誌がない日" in page
     assert "実地指導チェック" not in page and "受給者証番号" not in page and "収支" not in page
     assert staff.get("/compliance/").status_code == 403
+
+
+def test_shift_view_for_staff_and_differences(client, app):
+    post(client, "/m/staff/new", {"name": "佐藤 一郎", "status": "在籍", "pay_type": "時給", "hourly_wage": "1200"})
+    staff = staff_client(client, app)
+    post(client, "/users", {"action": "staff", "id": "2", "staff_id": "1"})
+    # 管理者が勤務表を組む（2026年9月）：1日 日勤・2日 日勤・3日 夜勤・4日 明け・5日 公休
+    post(client, "/shift/", {"ym": "2026-09", "s1_1": "日", "s1_2": "日", "s1_3": "夜", "s1_4": "明", "s1_5": "休"})
+    # 打刻：1日は20分おくれ、2日は打刻なし、3日は夜勤どおり、5日は公休なのに出勤
+    post(client, "/work/timecards", {"ym": "2026-09", "staff_id": "1", "in_new_1": "09:20", "out_new_1": "18:00", "br_new_1": "60",
+                                     "in_new_3": "16:00", "out_new_3": "10:00", "br_new_3": "120",
+                                     "in_new_5": "09:00", "out_new_5": "17:00", "br_new_5": "60"})
+    from datetime import date as _d
+
+    from ghms.work import shift_differences
+
+    with app.test_request_context():
+        diffs = shift_differences(1, _d(2026, 9, 1), _d(2026, 9, 30))
+    kinds = {k: [x[0] for x in v] for k, v in diffs.items()}
+    assert kinds == {"2026-09-01": ["遅刻"], "2026-09-02": ["打刻なし"], "2026-09-05": ["予定外"]}
+    page = client.get("/work/timecards?ym=2026-09&staff_id=1").get_data(as_text=True)
+    assert "遅刻" in page and "打刻なし" in page and "予定外" in page and "日勤" in page
+    # 職員は自分の勤務表を見られる（変えられない）
+    page = staff.get("/work/my-shift?ym=2026-09").get_data(as_text=True)
+    assert "日勤" in page and "夜勤" in page and "16:00〜10:00" in page
+    assert staff.get("/shift/").status_code == 403
+    # 職員のホームに、これから2週間の自分の勤務
+    t = date.today()
+    post(client, "/shift/", {"ym": t.strftime("%Y-%m"), f"s1_{t.day}": "夜"})
+    home = staff.get("/").get_data(as_text=True)
+    assert "自分の勤務（これから2週間）" in home and "夜勤" in home

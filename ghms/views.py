@@ -140,8 +140,11 @@ def dashboard():
 
         sid = my_staff_id()
         comp = run_checks(staff_id=sid or -1)
+        from .work import my_upcoming_shifts
+
         return render_template("dashboard_staff.html", birthdays=birthdays, all_tasks=all_tasks, away=away, home_stats=home_stats,
-                               today=today, comp=comp, card=open_card(sid) if sid and feature_on("timecard") else None, sid=sid)
+                               today=today, comp=comp, card=open_card(sid) if sid and feature_on("timecard") else None, sid=sid,
+                               shifts=my_upcoming_shifts(sid) if sid and feature_on("shift") else [])
     comp = run_checks()
     work_today = profit_now = None
     if feature_on("timecard"):

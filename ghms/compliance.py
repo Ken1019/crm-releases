@@ -30,6 +30,7 @@ CHECKS = [
     ("attendance", "実績の入力もれ（請求）", "先月の実績（在居・外泊・入院）が全部の日に入っているか", "billing"),
     ("staff_info", "職員の情報（勤務体制の書類）", "職種・雇用形態・週の勤務時間がそろっているか（勤務形態一覧表・常勤換算）", None),
     ("timecard", "タイムカードの退勤忘れ", "勤務の実績（出勤簿）に抜けがないか", "timecard"),
+    ("shift_match", "勤務表とタイムカードのちがい", "勤務表（勤務形態一覧表）と実際の勤務（出勤簿）が合っているか。人員配置・夜間支援の体制の根拠", "timecard"),
     ("health", "職員の体調", "37.5℃以上・体調不良で出勤した職員がいないか（感染症対策）", "timecard"),
     ("payroll", "給与の確定", "先月の給与が確定しているか", "payroll"),
 ]
@@ -199,6 +200,25 @@ def run_checks(staff_id=None):
         for c in forgotten_cards(staff_id):
             items.append(_item("warn", "timecard", names.get(c["staff_id"], "?"), f"{c['date']} {c['clock_in']}〜 の退勤の打刻がありません",
                                url_for("work.timecards", ym=c["date"][:7], staff_id=c["staff_id"])))
+    if on("shift_match") and feature_on("shift"):
+        from .work import shift_differences
+
+        first = (today.replace(day=1) - timedelta(days=1)).replace(day=1) if today.day <= 7 else today.replace(day=1)
+        for s in staff_rows:
+            found = {}
+            m = first
+            while m <= today:
+                nxt = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
+                for dd, diffs in shift_differences(s["id"], m, nxt - timedelta(days=1)).items():
+                    for kind, _ in diffs:
+                        found.setdefault(kind, []).append(parse_date(dd))
+                m = nxt
+            if found:
+                msg = "・".join(f"{k} {len(v)}日（{_fmt_days(v)}）" for k, v in found.items())
+                latest = max(d for v in found.values() for d in v)
+                items.append(_item("warn", "shift_match", s["name"], msg,
+                                   url_for("work.timecards", ym=latest.strftime("%Y-%m"), staff_id=s["id"]) if not staff_id
+                                   else url_for("work.timecards", ym=latest.strftime("%Y-%m"))))
     if on("health") and not staff_id:
         from .work import is_unwell
 

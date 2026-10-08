@@ -352,9 +352,14 @@ def timecards():
         for h in db.execute("SELECT * FROM health_checks WHERE staff_id=? AND date BETWEEN ? AND ? ORDER BY time",
                             (sid, first.isoformat(), last.isoformat())):
             temps.setdefault(h["date"], h)
+        plan = planned_shifts(sid, first, last)
+        tmap = shift_types_map()
+        diffs = shift_differences(sid, first, last)
         for d in month_days(first, last):
             cs = by_day.get(d.isoformat(), [])
-            rows.append({"d": d, "cards": [{"c": c, "w": work_minutes(c)} for c in cs], "health": temps.get(d.isoformat())})
+            code = plan.get(d.isoformat(), "")
+            rows.append({"d": d, "cards": [{"c": c, "w": work_minutes(c)} for c in cs], "health": temps.get(d.isoformat()),
+                         "plan": code, "plan_t": tmap.get(code), "diffs": diffs.get(d.isoformat(), [])})
     return render_template("work_timecards.html", staff=staff, staff_list=staff_list, rows=rows, ym=ym, first=first, WEEK=WEEK,
                            hm=hm, summary=month_summary(sid, first, last) if staff else None, admin=admin, fever=fever_line(),
                            night_label=night_label())
@@ -419,3 +424,89 @@ def today_status():
     unwell = [(names.get(h["staff_id"], "?"), h) for h in db.execute("SELECT * FROM health_checks WHERE date=? ORDER BY time", (today,))
               if is_unwell(h)]
     return {"working": working, "unwell": unwell}
+
+
+# ---------------------------------------------------------------- 勤務表（管理者が組む）とのつき合わせ
+def shift_types_map():
+    return {t["code"]: t for t in get_db().execute("SELECT * FROM shift_types")}
+
+
+def planned_shifts(staff_id, first, last):
+    return {s["date"]: s["code"] for s in get_db().execute(
+        "SELECT * FROM shifts WHERE staff_id=? AND date BETWEEN ? AND ?", (staff_id, first.isoformat(), last.isoformat()))}
+
+
+def _is_work_type(t):
+    return bool(t and t["start"] and _min(t["start"]) is not None)
+
+
+def shift_differences(staff_id, first, last):
+    """勤務表と打刻のちがい（今日より前の日だけ）。{日付: [(種類, 説明)]}"""
+    grace = int(setting_num("pay_late_grace", 10))
+    tmap = shift_types_map()
+    plan = planned_shifts(staff_id, first, last)
+    cards = {}
+    for c in month_cards(staff_id, first, last):
+        cards.setdefault(c["date"], []).append(c)
+    out = {}
+    today = date.today()
+    for d in month_days(first, last):
+        if d >= today:
+            break
+        key = d.isoformat()
+        t = tmap.get(plan.get(key, ""))
+        cs = cards.get(key, [])
+        diffs = []
+        if _is_work_type(t) and not cs:
+            diffs.append(("打刻なし", f"勤務表は「{t['name']}」ですが打刻がありません"))
+        elif cs and not _is_work_type(t):
+            diffs.append(("予定外", f"勤務表は「{t['name'] if t else '空欄'}」ですが {cs[0]['clock_in']} に打刻があります"))
+        elif cs and t:
+            first_in = min(_min(c["clock_in"]) for c in cs if _min(c["clock_in"]) is not None)
+            ps, pe = _min(t["start"]), _min(t["end"])
+            if first_in is not None and ps is not None and first_in > ps + grace:
+                diffs.append(("遅刻", f"予定 {t['start']} → 出勤 {first_in // 60}:{first_in % 60:02d}"))
+            last = cs[-1]
+            w = work_minutes(last)
+            if pe is not None and last["clock_out"] and w is not None:
+                end_plan = pe + (1440 if pe <= ps else 0)
+                end_real = _min(last["clock_out"]) + (1440 if _min(last["clock_out"]) <= _min(last["clock_in"]) else 0)
+                if end_real < end_plan - grace:
+                    diffs.append(("早退", f"予定 {t['end']} → 退勤 {last['clock_out']}"))
+            yk = any((work_minutes(c) or {}).get("yakin") for c in cs)
+            if bool(t["night"]) != yk:
+                diffs.append(("夜勤のちがい", "勤務表は夜勤ですが、打刻は夜勤になっていません" if t["night"]
+                              else "勤務表は夜勤ではありませんが、打刻が夜勤（日をまたぐ）になっています"))
+        if diffs:
+            out[key] = diffs
+    return out
+
+
+def my_upcoming_shifts(staff_id, days=14):
+    tmap = shift_types_map()
+    start = date.today()
+    end = start + timedelta(days=days - 1)
+    plan = {}
+    for s in get_db().execute("SELECT * FROM shifts WHERE staff_id=? AND date BETWEEN ? AND ?",
+                              (staff_id, start.isoformat(), end.isoformat())):
+        plan[s["date"]] = s["code"]
+    rows = []
+    for i in range(days):
+        d = start + timedelta(days=i)
+        t = tmap.get(plan.get(d.isoformat(), ""))
+        rows.append({"d": d, "w": WEEK[d.weekday()], "code": plan.get(d.isoformat(), ""), "t": t})
+    return rows
+
+
+@bp.route("/my-shift")
+def my_shift():
+    """職員：自分の勤務表（見るだけ。勤務表は管理者が組む）"""
+    first, last = parse_ym(request.args.get("ym"))
+    sid = my_staff_id()
+    tmap = shift_types_map()
+    plan = planned_shifts(sid, first, last) if sid else {}
+    rows = [{"d": d, "w": WEEK[d.weekday()], "code": plan.get(d.isoformat(), ""), "t": tmap.get(plan.get(d.isoformat(), ""))}
+            for d in month_days(first, last)]
+    hours = sum((r["t"]["hours"] or 0) for r in rows if r["t"])
+    return render_template("work_my_shift.html", rows=rows, first=first, ym=first.strftime("%Y-%m"), linked=bool(sid),
+                           hours=hours, today=date.today(), types=list(tmap.values()))

@@ -99,9 +99,10 @@ HUBS = [
     {
         "key": "work", "icon": "⏰", "title": "勤怠・給与", "desc": "出勤・退勤・体温・タイムカード・給与明細", "staff_menu": True,
         "entities": [], "endpoints": ["work.clock", "work.timecards", "work.health", "payroll.index", "payroll.edit",
-                                      "payroll.mine", "payroll.settings"],
+                                      "payroll.mine", "payroll.settings", "work.my_shift"],
         "tasks": [
             ("出勤・退勤を打刻する", "出勤のときに体温と体調も記録します", lambda: url_for("work.clock"), False),
+            ("自分の勤務表（シフト）を見る", "管理者が組んだ勤務。見るだけ", lambda: url_for("work.my_shift"), "staff"),
             ("自分のタイムカードを見る", "今月の出勤日数・実働・残業", lambda: url_for("work.timecards"), "staff"),
             ("自分の体温の記録を見る", "出勤のときに入れた体温", lambda: url_for("work.health"), "staff"),
             ("自分の給与明細を見る", "管理者が見せた月だけ出ます", lambda: url_for("payroll.mine"), "staff"),
