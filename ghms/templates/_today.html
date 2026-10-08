@@ -1,0 +1,21 @@
+{# 今日のやること（ホームのいちばん上） #}
+<section class="card todaylist" id="today">
+  <h2>✅ 今日のやること <span class="count">{% if todo.left %}のこり <b>{{ todo.left }}</b>件{% else %}ぜんぶ済みました 🎉{% endif %}／全{{ todo.total }}件</span></h2>
+  <div class="progress" role="progressbar" aria-valuenow="{{ todo.done }}" aria-valuemax="{{ todo.total }}"><span style="width:{{ (todo.done * 100 // (todo.total or 1)) }}%"></span></div>
+  <p class="muted small">上から順に片づければ、記録・請求・給与・研修・委員会などの決まりが守れるようにしてあります。終わるとデータを見て自動で「済」になります。</p>
+  {% for gp in todo.groups %}
+  <h3 class="lv lv-{{ gp.level }}">{{ gp.label }}{% if gp.left %}（のこり {{ gp.left }}）{% else %} ✔{% endif %}</h3>
+  <ul class="todo">
+    {% for x in gp['items'] %}
+    {% if loop.index == 11 %}</ul><details><summary class="muted">ほか {{ gp['items']|length - 10 }}件を見る</summary><ul class="todo">{% endif %}
+    <li class="{{ 'done' if x.done }}{{ ' over' if gp.level == 'over' and not x.done }}">
+      <a href="{{ x.url }}">{% if x.done %}<span class="pill ok">済</span>{% else %}<span class="pill {{ 'ng' if gp.level == 'over' else 'warn' }}">まだ</span>{% endif %}
+        <span><b>{{ x.title }}</b><br><small class="muted">{{ x.detail }}</small></span>{% if not x.manual %}<span class="when">{{ '見る' if x.done else 'やる ▶' }}</span>{% endif %}</a>
+      {% if x.manual %}<form method="post" action="{{ url_for('today.mark') }}" class="inline mark"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <input type="hidden" name="key" value="{{ x.key }}"><button class="btn mini{{ '' if x.done else ' primary' }}">{{ '取り消す' if x.done else '✔ 済にする' }}</button></form>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>{% if gp['items']|length > 10 %}</details>{% endif %}
+  {% endfor %}
+  {% if is_admin %}<p><a href="{{ url_for('compliance.index') }}">🚨 実地指導チェックの内容と設定</a></p>{% endif %}
+</section>

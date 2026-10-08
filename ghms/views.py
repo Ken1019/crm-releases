@@ -50,8 +50,8 @@ def years_between(start, end):
 
 
 # ---------------------------------------------------------------- ダッシュボード
-@bp.route("/")
-def dashboard():
+def _alerts_and_away():
+    """受給者証・計画などの期限のお知らせと、いま不在の入居者"""
     db = get_db()
     today = date.today()
     cert_days = int(get_setting("cert_alert_days", "60") or 60)
@@ -95,6 +95,18 @@ def dashboard():
             alerts.append((f"入院中の連絡が{x['days']}日ありません", x["a"]["rname"], "",
                            url_for("absences.detail", aid=x["a"]["id"])))
     alerts.sort(key=lambda a: a[2] or "0000")
+    return alerts, away
+
+
+def dashboard_alerts():
+    return _alerts_and_away()[0]
+
+
+@bp.route("/")
+def dashboard():
+    db = get_db()
+    today = date.today()
+    alerts, away = _alerts_and_away()
 
     meetings = []
     for kind, limit in (tracked_meetings() if feature_on("meetings") else []):
@@ -142,7 +154,9 @@ def dashboard():
         comp = run_checks(staff_id=sid or -1)
         from .work import my_upcoming_shifts
 
-        return render_template("dashboard_staff.html", birthdays=birthdays, all_tasks=all_tasks, away=away, home_stats=home_stats,
+        from .today import build
+
+        return render_template("dashboard_staff.html", todo=build(user_admin=False, staff_id=sid), birthdays=birthdays, all_tasks=all_tasks, away=away, home_stats=home_stats,
                                today=today, comp=comp, card=open_card(sid) if sid and feature_on("timecard") else None, sid=sid,
                                shifts=my_upcoming_shifts(sid) if sid and feature_on("shift") else [])
     comp = run_checks()
@@ -156,7 +170,9 @@ def dashboard():
 
         first = today.replace(day=1)
         profit_now = month_profit(first, (first + timedelta(days=32)).replace(day=1) - timedelta(days=1))
-    return render_template("dashboard.html", comp=comp, comp_groups=grouped(comp), work_today=work_today, profit_now=profit_now, birthdays=birthdays, update_available=update_available, all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
+    from .today import build
+
+    return render_template("dashboard.html", todo=build(user_admin=True), comp=comp, comp_groups=grouped(comp), work_today=work_today, profit_now=profit_now, birthdays=birthdays, update_available=update_available, all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
                            recent=recent, today=today)
 
 

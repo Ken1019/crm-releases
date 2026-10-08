@@ -216,3 +216,15 @@ fieldset { border: 0; padding: 0; margin: 0; }
 fieldset legend { font-weight: 700; margin-bottom: 6px; }
 table.myshift th, table.myshift td { text-align: center; min-width: 4.2em; }
 table.myshift .today, table.list tr.today td { background: #fff4e6; }
+
+/* 今日のやること */
+.todaylist { border-left: 6px solid var(--pri, #ff8a3d); }
+.todaylist h2 .count { font-size: .7em; font-weight: 400; color: var(--muted); margin-left: 8px; }
+.todaylist .progress { height: 10px; background: #f1e6d8; border-radius: 99px; overflow: hidden; margin: 6px 0 4px; }
+.todaylist .progress span { display: block; height: 100%; background: #4caf50; }
+.todaylist h3.lv { font-size: 15px; margin: 14px 0 6px; }
+.todaylist h3.lv-over { color: var(--ng); } .todaylist h3.lv-today { color: var(--pri, #e86f1f); }
+.todaylist li { display: flex; align-items: center; gap: 8px; }
+.todaylist li > a { flex: 1; }
+.todaylist li.done > a { opacity: .55; } .todaylist li.done b { text-decoration: line-through; }
+.todaylist form.mark { flex: none; }

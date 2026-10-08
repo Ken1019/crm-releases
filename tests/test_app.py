@@ -998,3 +998,26 @@ def test_paid_leave_grants_balance_and_pay(client, app):
     # 付与を直す・足す
     post(client, "/leave/1", {"action": "add", "grant_date": "2025-04-01", "days": "3", "basis": "前のソフトからの繰り越し"})
     assert "前のソフトからの繰り越し" in client.get("/leave/1").get_data(as_text=True)
+
+
+def test_today_list_on_home(client, app):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "status": "入居中", "move_in": "2026-01-01"})
+    t = date.today().isoformat()
+    home = client.get("/").get_data(as_text=True)
+    assert "今日のやること" in home and "ひまわりの業務日誌を書く" in home and "支援記録を書く（1名）" in home
+    assert "国保連に請求する" in home and "まだ：山田太郎" in home
+    # 日誌と記録を書くと「済」
+    post(client, "/journal", {"date": t, "home_id": "1", "slot": "終日", "summary": "穏やか", "r1_content": "落ち着いて過ごす"})
+    home = client.get("/").get_data(as_text=True)
+    assert "全員書きました" in home
+    m = re.search(r'name="key" value="(kokuho:\d{4}-\d{2})"', home)
+    assert m
+    post(client, "/today/done", {"key": m.group(1)})
+    home = client.get("/").get_data(as_text=True)
+    assert "取り消す" in home
+    # 職員のホームにも（打刻・日誌・記録）。お金の仕事は出ない
+    staff = staff_client(client, app)
+    page = staff.get("/").get_data(as_text=True)
+    assert "今日のやること" in page and "ひまわりの業務日誌を書く" in page and "国保連" not in page
+    assert staff.post("/today/done", data={"key": m.group(1), "_csrf": csrf(staff)}).status_code == 403

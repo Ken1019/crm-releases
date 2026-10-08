@@ -7,16 +7,7 @@
 {% if update_available %}
 <p class="flash ok">🎁 ソフトの新しい版 {{ update_available['version'] }} があります。<a href="{{ url_for('system.update') }}">内容を見て更新する</a></p>
 {% endif %}
-{% if comp %}{% set ng = comp|selectattr('level', 'equalto', 'ng')|list %}
-<section class="card comp {{ 'ng' if ng else 'warn' }}">
-  <h2>🚨 実地指導チェック：規定を満たしていないものが <b>{{ comp|length }}件</b>{% if ng %}（うち急ぎ {{ ng|length }}件）{% endif %}</h2>
-  <ul class="todo">
-  {% for x in comp[:8] %}<li class="{{ 'over' if x.level == 'ng' }}"><a href="{{ x.url }}"><span class="pill {{ x.level }}">{{ x.name }}</span>
-    <span><b>{{ x.who }}</b>：{{ x.msg }}</span><span class="when">直す ▶</span></a></li>{% endfor %}
-  </ul>
-  <p><a class="btn" href="{{ url_for('compliance.index') }}">全部見る（{% for gp in comp_groups %}{{ gp.name }} {{ gp['items']|length }}{% if not loop.last %}・{% endif %}{% endfor %}）</a></p>
-</section>
-{% else %}<p class="flash ok">✔ 実地指導チェック：いま見つかっている不足はありません。<a href="{{ url_for('compliance.index') }}">チェックの内容</a></p>{% endif %}
+{% include '_today.html' %}
 
 {% if work_today or profit_now %}
 <div class="cols">

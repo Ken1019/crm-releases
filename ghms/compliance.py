@@ -227,7 +227,7 @@ def run_checks(staff_id=None):
             b = my_balance(s["id"])
             for f in (b or {}).get("five", []):
                 left = (f["deadline"] - today).days
-                if f["took"] < 5 and f["grant"] <= today and left <= 120:
+                if f["took"] < 5 and f["grant"] <= today and -60 <= left <= 120:  # 何年も前の付与は出さない
                     items.append(_item("ng" if left < 0 else "warn", "leave5", s["name"],
                                        f"{f['grant']}付与の有給：{f['deadline']}までに5日のうち {f['took']}日" + ("（期限切れ）" if left < 0 else f"（あと{left}日）"),
                                        url_for("leave.staff", sid=s["id"]) if not staff_id else url_for("work.my_shift")))

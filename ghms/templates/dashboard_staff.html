@@ -4,6 +4,8 @@
 <h1>{{ g.user['display_name'] }} さん、おつかれさまです 🌼</h1>
 <p class="hello muted">今日は {{ today.strftime('%Y年%m月%d日') }}（{{ '月火水木金土日'[today.weekday()] }}）です。</p>
 
+{% include '_today.html' %}
+
 <div class="bigmenu">
   {% if feature_on('timecard') %}<a class="main" href="{{ url_for('work.clock') }}"><span class="ic">⏰</span><b>{{ '退勤する' if card else '出勤する' }}</b>
     <small>{{ (card['clock_in'] ~ ' から勤務中') if card else '体温を入れて打刻' }}</small></a>{% endif %}
@@ -25,12 +27,7 @@
 </section>
 {% endif %}
 
-{% if comp %}
-<section class="card comp warn">
-  <h2>🔔 書きもれ・受けていない研修（{{ comp|length }}件）</h2>
-  <ul class="todo">{% for x in comp[:10] %}<li><a href="{{ x.url }}"><span class="pill {{ x.level }}">{{ x.name }}</span><span><b>{{ x.who }}</b>：{{ x.msg }}</span><span class="when">▶</span></a></li>{% endfor %}</ul>
-</section>
-{% endif %}
+
 
 
 

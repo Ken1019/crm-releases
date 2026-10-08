@@ -4,7 +4,7 @@
 <h1>🚨 実地指導チェック</h1>
 <p class="guide">運営指導（実地指導）でよく見られる「記録・研修・委員会・書類」の不足を、システムのデータから自動でさがしています。<b>{{ total }}件</b>見つかっています。押すとその入力画面が開きます。回数や日数は目安なので、自治体の指導内容に合わせて下の設定で変えてください。</p>
 {% for gp in groups %}
-<section class="card">
+<section class="card" id="c-{{ gp.key }}">
   <h2>{{ gp.name }}（{{ gp['items']|length }}件{% if gp.ng %}・急ぎ {{ gp.ng }}件{% endif %}）</h2>
   <p class="muted small">見られること：{{ gp.why }}</p>
   <ul class="todo">{% for x in gp['items'] %}<li class="{{ 'over' if x.level == 'ng' }}"><a href="{{ x.url }}"><span class="pill {{ x.level }}">{{ '急ぎ' if x.level == 'ng' else '確認' }}</span>
