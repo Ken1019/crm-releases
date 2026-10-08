@@ -735,3 +735,32 @@ def test_renewal_documents(client):
     assert "区分4" in client.get("/docs/residents-status").get_data(as_text=True)
     assert "佐藤 一郎" in client.get("/docs/staff-list").get_data(as_text=True)
     assert client.get("/docs/committee").status_code == 200
+
+
+# ---------------------------------------------------------------- 行事・レクリエーション
+def test_activities_with_participants_and_birthdays(client):
+    from datetime import date
+    today = date.today()
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "birthdate": f"1980-{today.month:02d}-15"})
+    post(client, "/m/residents/new", {"name": "鈴木花子", "home_id": "1"})
+    post(client, "/m/residents/new", {"name": "佐藤次郎", "home_id": "1"})
+    # 今月の誕生日がホームに出て、押すと誕生日会の記録が入った状態で開く
+    home = client.get("/").get_data(as_text=True)
+    assert "今月の誕生日" in home and f"15日で{today.year - 1980}歳" in home
+    form = client.get("/m/activities/new?kind=誕生日会&title=山田太郎さんの誕生日会&participants=1").get_data(as_text=True)
+    assert 'value="1" checked' in form and "山田太郎さんの誕生日会" in form
+    # 参加者を複数えらんで記録
+    r = client.post("/m/activities/new", data={"_csrf": csrf(client), "date": "2026-10-04", "kind": "バーベキュー",
+                                               "title": "秋のバーベキュー", "participants": ["1", "3"], "cost": "6000"})
+    assert r.status_code == 302
+    lst = client.get("/m/activities/").get_data(as_text=True)
+    assert "山田太郎、佐藤次郎" in lst
+    # 入居者で絞り込める・入居者の画面に出る
+    assert "秋のバーベキュー" in client.get("/m/activities/?participants=3").get_data(as_text=True)
+    assert "秋のバーベキュー" not in client.get("/m/activities/?participants=2").get_data(as_text=True)
+    assert "秋のバーベキュー" in client.get("/m/residents/1").get_data(as_text=True)
+    assert client.get("/m/activities/export.xlsx").status_code == 200
+    # 参加した記録がある入居者は削除できない
+    post(client, "/m/residents/3/delete", {})
+    assert "佐藤次郎" in client.get("/m/residents/").get_data(as_text=True)

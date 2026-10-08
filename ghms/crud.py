@@ -55,7 +55,11 @@ def ref_options(key):
 
 
 def ref_maps(ent):
-    return {f["name"]: dict(ref_options(f["ref"])) for f in ent["fields"] if f["type"] == "ref"}
+    return {f["name"]: dict(ref_options(f["ref"])) for f in ent["fields"] if f["type"] in ("ref", "multiref")}
+
+
+def multiref_ids(value):
+    return [int(x) for x in str(value or "").split(",") if x.strip().isdigit()]
 
 
 def fmt(field, value, maps):
@@ -64,6 +68,9 @@ def fmt(field, value, maps):
     t = field["type"]
     if t == "ref":
         return maps.get(field["name"], {}).get(value, f"(#{value})")
+    if t == "multiref":
+        m = maps.get(field["name"], {})
+        return "、".join(m.get(int(i), f"(#{i})") for i in multiref_ids(value))
     if t == "check":
         return "✓" if value else ""
     if t == "number":
@@ -82,7 +89,10 @@ def query_rows(key, ent, args, limit=None, offset=0):
             params += [f"%{q}%"] * len(text_cols)
     for f in ent["fields"]:
         v = args.get(f["name"])
-        if v not in (None, "") and f["type"] in ("ref", "select", "number", "check", "date"):
+        if v not in (None, "") and f["type"] == "multiref":
+            where.append(f'"{f["name"]}" LIKE ?')
+            params.append(f"%,{int(v) if str(v).isdigit() else 0},%")
+        elif v not in (None, "") and f["type"] in ("ref", "select", "number", "check", "date"):
             where.append(f'"{f["name"]}" = ?')
             params.append(v)
     # 期間で絞り込むのは、一覧に表示している最初の日付項目（記録日など）
@@ -111,6 +121,12 @@ def parse_form(ent, form):
         raw = raw.strip() if isinstance(raw, str) else raw
         if f["type"] == "check":
             data[f["name"]] = 1 if raw else 0
+            continue
+        if f["type"] == "multiref":
+            ids = sorted({int(x) for x in form.getlist(f["name"]) if str(x).isdigit()}) if hasattr(form, "getlist") else []
+            data[f["name"]] = "," + ",".join(map(str, ids)) + "," if ids else None
+            if f.get("required") and not ids:
+                errors.append(f'「{f["label"]}」をえらんでください。')
             continue
         if raw == "":
             if f.get("required"):
@@ -178,8 +194,10 @@ def references_to(key, rid):
     db, found = get_db(), []
     for k, ent in ENTITIES.items():
         for f in ent["fields"]:
-            if f["type"] == "ref" and f["ref"] == key:
-                n = db.execute(f'SELECT COUNT(*) FROM "{k}" WHERE "{f["name"]}"=?', (rid,)).fetchone()[0]
+            if f["type"] in ("ref", "multiref") and f["ref"] == key:
+                cond = f'"{f["name"]}" LIKE ?' if f["type"] == "multiref" else f'"{f["name"]}"=?'
+                arg = f"%,{rid},%" if f["type"] == "multiref" else rid
+                n = db.execute(f'SELECT COUNT(*) FROM "{k}" WHERE {cond}', (arg,)).fetchone()[0]
                 if n:
                     found.append(f'{ent["title"]} {n}件')
     return found
@@ -192,8 +210,8 @@ def index(key):
     rows, total, date_field = query_rows(key, ent, request.args, PAGE_SIZE, (page - 1) * PAGE_SIZE)
     maps = ref_maps(ent)
     cols = [f for f in ent["fields"] if f.get("list")]
-    filters = [f for f in ent["fields"] if f["type"] in ("ref", "select") and f.get("list")]
-    options = {f["name"]: (ref_options(f["ref"]) if f["type"] == "ref" else [(o, o) for o in options_for(f, request.args.get(f["name"]))])
+    filters = [f for f in ent["fields"] if f["type"] in ("ref", "select", "multiref") and f.get("list")]
+    options = {f["name"]: (ref_options(f["ref"]) if f["type"] in ("ref", "multiref") else [(o, o) for o in options_for(f, request.args.get(f["name"]))])
                for f in filters}
     return render_template(
         "crud_list.html", key=key, ent=ent, rows=rows, cols=cols, maps=maps, fmt=fmt, total=total,
@@ -203,7 +221,7 @@ def index(key):
 
 
 def _form_context(ent):
-    return {f["name"]: ref_options(f["ref"]) for f in ent["fields"] if f["type"] == "ref"}
+    return {f["name"]: ref_options(f["ref"]) for f in ent["fields"] if f["type"] in ("ref", "multiref")}
 
 
 @bp.route("/<key>/new", methods=["GET", "POST"])
@@ -223,8 +241,9 @@ def new(key):
         for f in ent["fields"]:
             d = f.get("default")
             values[f["name"]] = date.today().isoformat() if d == "today" else d
+        fields = {f["name"]: f for f in ent["fields"]}
         for k, v in request.args.items():  # ?resident_id=3 のような初期値
-            values[k] = v
+            values[k] = f",{v}," if k in fields and fields[k]["type"] == "multiref" and v.isdigit() else v
     return render_template("crud_form.html", key=key, ent=ent, values=values, refs=_form_context(ent), rid=None,
                            next=request.args.get("next", ""))
 
@@ -240,7 +259,7 @@ def view(key, rid):
         if (e.get("admin_only") and not is_admin()) or not entity_on(k):
             continue
         for f in e["fields"]:
-            if f["type"] == "ref" and f["ref"] == key:
+            if f["type"] in ("ref", "multiref") and f["ref"] == key:
                 related.append((k, e, f["name"]))
     if key in VIEW_LOGGED:
         audit("view", key, rid)
@@ -260,6 +279,8 @@ def resident_summary(rid):
                               (rid,)).fetchall(),
         "contacts": db.execute("SELECT * FROM contact_logs WHERE resident_id=? ORDER BY date DESC, id DESC LIMIT 5",
                                (rid,)).fetchall(),
+        "activities": db.execute("SELECT * FROM activities WHERE participants LIKE ? ORDER BY date DESC, id DESC LIMIT 5",
+                                 (f"%,{rid},%",)).fetchall(),
         "plan": db.execute("SELECT * FROM support_plans WHERE resident_id=? AND (status IS NULL OR status != '終了') "
                            "ORDER BY period_end DESC LIMIT 1", (rid,)).fetchone(),
     }

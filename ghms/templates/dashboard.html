@@ -63,6 +63,17 @@
   {% endfor %}
   </ul>
 
+  {% if birthdays %}
+  <h2 style="margin-top:20px">🎂 今月の誕生日</h2>
+  <ul class="todo">
+  {% for b in birthdays %}
+    <li><a href="{{ url_for('crud.new', key='activities', kind='誕生日会', title=b.name ~ 'さんの誕生日会', participants=b.id) if feature_on('activities') else url_for('crud.view', key='residents', rid=b.id) }}">
+      {% if b.today %}<span class="pill ok">今日！</span>{% endif %}
+      <span><b>{{ b.name }}</b> さん　{{ b.day }}日で{{ b.age }}歳</span>
+      {% if feature_on('activities') %}<span class="when">誕生日会を記録 ▶</span>{% endif %}</a></li>
+  {% endfor %}
+  </ul>
+  {% endif %}
   {% if feature_on('absences') %}
   <h2 style="margin-top:20px">🏥 入院中・帰省中の方</h2>
   <ul class="todo">

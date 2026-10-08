@@ -28,6 +28,8 @@ MEETING_KIND = [
 ]
 TRAINING_KIND = ["内部研修", "外部研修", "OJT", "資格取得"]
 INCIDENT_KIND = ["ヒヤリハット", "事故", "苦情", "その他"]
+ACTIVITY_KIND = ["外出", "誕生日会", "バーベキュー", "季節の行事", "買い物", "外食", "散歩", "創作活動", "運動・体操",
+                 "地域の行事", "その他"]
 SHOGU_CATEGORY = ["Ⅰ", "Ⅱ", "Ⅲ", "Ⅳ"]
 PAY_METHOD = ["基本給", "手当（毎月）", "賞与・一時金"]
 PLAN_STATUS = ["作成中", "同意済", "モニタリング済", "終了"]
@@ -222,6 +224,28 @@ ENTITIES = {
             F("events", "行事・来訪・通院", "textarea", list=False),
             F("handover", "申し送り", "textarea", list=False),
             F("checker", "確認者（管理者）"),
+        ],
+    },
+    "activities": {
+        "icon": "🎉",
+        "guide": "外出・誕生日会・バーベキューなどの行事やレクリエーションを記録します。参加した入居者をえらぶと、入居者ごとの記録にも出ます。",
+        "title": "行事・レクリエーション",
+        "group": "日誌・記録",
+        "display": "title",
+        "order": "date DESC, id DESC",
+        "fields": [
+            F("date", "日付", "date", required=True, default="today"),
+            F("time", "時間", list=False),
+            F("kind", "種類", "select", options=ACTIVITY_KIND),
+            F("title", "行事の名前", required=True, help="例：〇〇さんの誕生日会、〇〇公園でお花見"),
+            F("home_id", "住居", "ref", ref="homes"),
+            F("place", "場所"),
+            F("participants", "参加した入居者", "multiref", ref="residents"),
+            F("staff", "担当した職員"),
+            F("cost", "費用の合計（円）", "number", list=False),
+            F("cost_note", "費用の内訳・だれが払ったか", list=False, help="例：材料費 3,000円（事業所負担）、入場料は各自の預り金から"),
+            F("content", "内容・入居者のようす", "textarea", list=False),
+            F("reflection", "感想・次回への申し送り", "textarea", list=False),
         ],
     },
     "incidents": {

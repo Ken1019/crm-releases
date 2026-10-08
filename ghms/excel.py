@@ -20,6 +20,9 @@ def cell_value(field, value, maps):
         return ""
     if field["type"] == "ref":
         return maps.get(field["name"], {}).get(value, "")
+    if field["type"] == "multiref":
+        m = maps.get(field["name"], {})
+        return "、".join(m.get(int(i), "") for i in str(value).split(",") if i.strip().isdigit())
     if field["type"] == "check":
         return "✓" if value else ""
     return value

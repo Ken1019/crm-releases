@@ -8,6 +8,12 @@
 {% elif f.type == 'ref' %}
   <select name="{{ name }}"><option value=""></option>
   {% for id, lab in refs[f.name] %}<option value="{{ id }}"{% if v is not none and v|string == id|string %} selected{% endif %}>{{ lab }}</option>{% endfor %}</select>
+{% elif f.type == 'multiref' %}
+  {% set chosen = (v or '')|string %}
+  <div class="multi">{% for id, lab in refs[f.name] %}
+    <label class="chip"><input type="checkbox" name="{{ name }}" value="{{ id }}"{% if (',' ~ id ~ ',') in chosen %} checked{% endif %}> {{ lab }}</label>
+  {% else %}<span class="muted small">えらべるものがありません</span>{% endfor %}
+  {% if refs[f.name]|length > 3 %}<button type="button" class="btn mini" onclick="this.parentNode.querySelectorAll('input').forEach(function(i){i.checked=true})">全員</button>{% endif %}</div>
 {% elif f.type == 'check' %}
   <input type="checkbox" name="{{ name }}" value="1"{% if v %} checked{% endif %}>
 {% elif f.type == 'number' %}

@@ -30,6 +30,10 @@
       {% for r in summary.records %}<li><a href="{{ url_for('crud.view', key='support_records', rid=r['id']) }}"><span class="nowrap">{{ r['date'] }}</span>
         <span>{{ r['mood'] or '' }} {{ (r['content'] or '')|truncate(40) }}</span></a></li>
       {% else %}<li class="muted">まだありません</li>{% endfor %}</ul></div>
+    {% if feature_on('activities') %}<div><h3>🎉 参加した行事</h3><ul class="todo">
+      {% for a in summary.activities %}<li><a href="{{ url_for('crud.view', key='activities', rid=a['id']) }}"><span class="nowrap">{{ a['date'] }}</span>
+        <span>{{ a['title'] }}</span></a></li>
+      {% else %}<li class="muted">まだありません</li>{% endfor %}</ul></div>{% endif %}
     {% if feature_on('contact_logs') %}<div><h3>📞 連絡記録</h3><ul class="todo">
       {% for c in summary.contacts %}<li><a href="{{ url_for('crud.view', key='contact_logs', rid=c['id']) }}"><span class="nowrap">{{ c['date'] }}</span>
         <span>{{ c['counterpart'] or '' }}：{{ (c['content'] or '')|truncate(36) }}</span></a></li>

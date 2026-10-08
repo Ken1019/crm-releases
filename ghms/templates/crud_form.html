@@ -9,7 +9,7 @@
   <div class="card form">
   {% for f in ent.fields if f.type != 'hidden' %}
   {% if f.section %}<h2 class="wide section">{{ f.section }}</h2>{% endif %}
-  <label class="{{ 'wide' if f.type == 'textarea' }}">
+  <label class="{{ 'wide' if f.type in ('textarea', 'multiref') }}">
     <span>{{ f.label }}{% if f.required %}<span class="must">必須</span>{% endif %}</span>
     {% set v = values.get(f.name) %}{% include '_form_field.html' %}
     {% if f.help %}<small class="muted">{{ f.help }}</small>{% endif %}

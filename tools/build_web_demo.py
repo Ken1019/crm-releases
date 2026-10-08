@@ -166,6 +166,22 @@ post("/m/residents/2/edit", {"name": "石田 健", "kana": "いしだけん", "s
                              "food_type": "日額（食べた日数で計算）", "food_amount": "900", "burden_cap": "0", "pay_method": "口座振替"})
 post("/docs/renewal", {"done_3": "1", "done_8": "1", "note_3": "勤務表から作成", "due": "2027-03-31"})
 
+# 行事・レクリエーション（参加者は複数えらぶ）
+for date_, kind, title, place, who, cost, content in [
+    (d(-4), "バーベキュー", "秋のバーベキュー", "〇〇公園", ["1", "2", "3", "4"], "8000",
+     "みんなで焼きそばと焼き肉。石田さんは火の番を手伝ってくれた。"),
+    (d(-10), "外出", "紅葉狩りドライブ", "〇〇峠", ["1", "3"], "2400", "車で紅葉を見に行く。上野さんは写真をたくさん撮っていた。"),
+    (d(-20), "誕生日会", "江口さんの誕生日会", "ひだまり第2ホーム", ["4", "5"], "3000", "ケーキでお祝い。江口さんが好きな歌をみんなで歌った。"),
+]:
+    c.post("/m/activities/new", data={"_csrf": TOKEN, "date": date_, "kind": kind, "title": title, "place": place,
+                                      "participants": who, "home_id": "1", "staff": "鈴木", "cost": cost,
+                                      "content": content, "reflection": "次は春にお花見をしたいという声あり。"})
+c.post("/m/residents/1/edit", data={"_csrf": TOKEN, "name": "青木 春子", "kana": "あおきはるこ", "status": "入居中", "home_id": "1",
+                                    "room": "101", "support_level": "区分4", "disability_type": "知的障害", "cert_end": d(40),
+                                    "move_in": "2025-04-01", "birthdate": f"1975-{today.month:02d}-{min(today.day + 5, 28):02d}",
+                                    "rent": "38000", "rent_subsidy": "10000", "utility": "12000", "daily_goods": "3000",
+                                    "food_type": "日額（食べた日数で計算）", "food_amount": "900", "burden_cap": "9300", "pay_method": "口座振替"})
+
 # 入院・帰省と連絡記録
 post("/m/absences/new", {"resident_id": "5", "kind": "入院", "start_date": d(-12), "end_plan": d(5), "place": "△△病院 3階病棟",
                          "place_tel": "011-000-1111", "contact_person": "主治医 〇〇先生／担当看護師 △△さん",
@@ -222,7 +238,8 @@ PRIORITY = ["/", "/do/daily", "/do/residents", "/do/staff", "/do/money", "/do/bi
             "/absences/", "/absences/1", "/absences/2", "/m/absences/new", "/m/contact_logs/", "/m/contact_logs/new",
             "/m/residents/5", "/m/residents/4", "/do/docs", "/docs/renewal", "/docs/record-sheets", "/docs/menus",
             "/docs/menus?print=1", "/docs/rules", "/docs/resumes", "/docs/staff-list", "/docs/residents-status", "/docs/committee",
-            "/settings/features", "/settings/choices", "/settings/fields", "/update"]
+            "/settings/features", "/settings/choices", "/settings/fields", "/update", "/m/activities/", "/m/activities/new",
+            "/m/activities/1"]
 pages, queue, seen = {}, deque(PRIORITY), set(PRIORITY)
 per_path, per_kind = Counter(), Counter()
 

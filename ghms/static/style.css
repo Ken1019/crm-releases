@@ -195,3 +195,6 @@ table.monthly td.name, table.monthly th.name { position:sticky; left:0; backgrou
 table.monthly th { position:sticky; top:0; z-index:2; }
 table.monthly th.name { z-index:3; background:var(--pri-soft); }
 table.monthly td.name { min-width:6.5em; }
+.multi { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.form label.chip, .chip { display:inline-flex; flex-direction:row; gap:6px; align-items:center; padding:4px 12px; border:2px solid var(--line); border-radius:99px; background:#fff; cursor:pointer; font-weight:normal; }
+.chip:has(input:checked) { border-color:var(--pri); background:var(--pri-soft); }

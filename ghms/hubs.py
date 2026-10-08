@@ -11,11 +11,12 @@ from .auth import is_admin
 # (ラベル, 説明, url を作る関数, 管理者のみ)
 HUBS = [
     {
-        "key": "daily", "icon": "📔", "title": "毎日の記録", "desc": "日誌・ヒヤリハット・会議の記録を書く・見る",
-        "entities": ["daily_logs", "support_records", "incidents", "meetings", "contact_logs"], "endpoints": ["views.journal"],
+        "key": "daily", "icon": "📔", "title": "毎日の記録", "desc": "日誌・行事・ヒヤリハット・会議の記録",
+        "entities": ["daily_logs", "support_records", "incidents", "meetings", "contact_logs", "activities"], "endpoints": ["views.journal"],
         "tasks": [
             ("今日の日誌を書く", "業務日誌と入居者ごとの様子を1画面でまとめて", lambda: url_for("views.journal"), False),
             ("連絡を記録する（家族・病院・相談員など）", "電話・面会・メールの内容を残す", lambda: url_for("crud.new", key="contact_logs"), False),
+            ("行事・レクリエーションを記録する", "外出・誕生日会・バーベキューなど。参加者をえらぶだけ", lambda: url_for("crud.new", key="activities"), False),
             ("ヒヤリハット・事故を書く", "ヒヤッとしたら小さなことでもすぐ記録", lambda: url_for("crud.new", key="incidents"), False),
             ("会議・委員会の記録を書く", "虐待防止・身体拘束・感染症・BCPなど", lambda: url_for("crud.new", key="meetings"), False),
             ("献立表を作る", "1週間分の献立を入力・印刷", lambda: url_for("docs.menus"), False),
@@ -23,6 +24,7 @@ HUBS = [
             ("前に書いた日誌を見る・直す", "日付や住居でさがせます", lambda: url_for("crud.index", key="daily_logs"), False),
             ("入居者の記録をさかのぼって見る", "入居者や日付でさがせます", lambda: url_for("crud.index", key="support_records"), False),
             ("ヒヤリハットの一覧を見る", "これまでの報告と再発防止策", lambda: url_for("crud.index", key="incidents"), False),
+            ("行事・レクリエーションの一覧を見る", "種類・住居・入居者でさがせます", lambda: url_for("crud.index", key="activities"), False),
             ("会議・委員会の一覧を見る", "開催日・内容をふりかえる", lambda: url_for("crud.index", key="meetings"), False),
             ("連絡記録の一覧を見る", "入居者・相手・日付でさがせます", lambda: url_for("crud.index", key="contact_logs"), False),
         ],

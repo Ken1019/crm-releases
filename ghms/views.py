@@ -124,8 +124,15 @@ def dashboard():
 
         maybe_check_in_background(current_app._get_current_object())
         update_available = cached_latest()
+    birthdays = []
+    for r in db.execute(f"SELECT id, name, birthdate FROM residents WHERE ({ACTIVE_RES}) AND birthdate LIKE ?",
+                        (f"%-{today.month:02d}-%",)):
+        b = parse_date(r["birthdate"])
+        if b and b.month == today.month:
+            birthdays.append({"id": r["id"], "name": r["name"], "day": b.day, "age": today.year - b.year, "today": b.day == today.day})
+    birthdays.sort(key=lambda x: x["day"])
     all_tasks = [dict(t, hub=h) for h in visible_hubs() for t in visible_tasks(h)]
-    return render_template("dashboard.html", update_available=update_available, all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
+    return render_template("dashboard.html", birthdays=birthdays, update_available=update_available, all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
                            recent=recent, today=today)
 
 
