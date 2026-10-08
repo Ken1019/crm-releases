@@ -21,8 +21,11 @@ from ghms import create_app  # noqa: E402
 
 app = create_app({"TESTING": True})
 c = app.test_client()
+from ghms.customize import FEATURES  # noqa: E402
+
 c.post("/setup", data={"office_name": "グループホーム ひだまり（デモ）", "username": "admin", "display_name": "管理者",
-                       "password": "password123"})
+                       "password": "password123", "home_types": "介護サービス包括型",
+                       "features": [k for k, *_ in FEATURES]})
 
 
 def token():

@@ -73,6 +73,41 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 Type: filesandordirs; Name: "{app}"
 
 [Code]
+var
+  OfficePage: TInputQueryWizardPage;
+
+function ConfigFile(): String;
+begin
+  Result := ExpandConstant('{commonappdata}\GHMS\config.ini');
+end;
+
+// はじめて入れるときだけ、事業所名・事業所番号をたずねる（最初の設定画面に入った状態で始まる）
+procedure InitializeWizard();
+begin
+  OfficePage := CreateInputQueryPage(wpSelectTasks, '事業所の情報',
+    'あなたの事業所の名前と番号を入れてください。',
+    'インストール後に最初に開く「はじめての設定」に、この内容が入った状態で始まります（あとから変更できます）。');
+  OfficePage.Add('事業所名:', False);
+  OfficePage.Add('事業所番号（わからなければ空欄で大丈夫です）:', False);
+  OfficePage.Values[0] := GetIniString('office', 'name', '', ConfigFile());
+  OfficePage.Values[1] := GetIniString('office', 'no', '', ConfigFile());
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  // 更新（すでに入っている）ときは聞かない
+  Result := (PageID = OfficePage.ID) and FileExists(ExpandConstant('{commonappdata}\GHMS\data\ghms.sqlite3'));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and (Trim(OfficePage.Values[0]) <> '') then
+  begin
+    SetIniString('office', 'name', Trim(OfficePage.Values[0]), ConfigFile());
+    SetIniString('office', 'no', Trim(OfficePage.Values[1]), ConfigFile());
+  end;
+end;
+
 // 入れ替える前に、動いているGHMSを止める
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var

@@ -34,10 +34,21 @@ def config_path():
     return os.path.join(base_dir(), "config.ini")
 
 
+def _read_ini():
+    """config.ini を読む。インストーラー（Windows）は日本語をShift-JIS（cp932）で書くため、UTF-8 でなければ cp932 で読む"""
+    cp = configparser.ConfigParser()
+    for enc in ("utf-8-sig", "cp932"):
+        try:
+            cp.read(config_path(), encoding=enc)
+            return cp
+        except (UnicodeError, configparser.Error):
+            cp = configparser.ConfigParser()
+    return cp
+
+
 def load_config():
     """config.ini（インストーラーの選択や手で書いた設定）を読む"""
-    cp = configparser.ConfigParser()
-    cp.read(config_path(), encoding="utf-8")
+    cp = _read_ini()
     sec = cp["server"] if cp.has_section("server") else {}
     return {
         "lan": str(sec.get("lan", "0")).strip() in ("1", "true", "yes"),
@@ -48,3 +59,10 @@ def load_config():
 def token_path():
     """起動中のサーバーを止めるための合い言葉（このPCの中だけで使う）"""
     return os.path.join(data_dir(), "run.token")
+
+
+def load_office():
+    """インストーラーで入力した事業所名・事業所番号（config.ini の [office]）"""
+    cp = _read_ini()
+    sec = cp["office"] if cp.has_section("office") else {}
+    return {"name": sec.get("name", "").strip(), "no": sec.get("no", "").strip()}

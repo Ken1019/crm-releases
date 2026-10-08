@@ -179,31 +179,46 @@ def _safe_next(default="views.dashboard"):
 
 @bp.route("/setup", methods=["GET", "POST"])
 def setup():
+    """はじめての設定：事業所・類型・住居・使う機能・管理者をまとめて入力し、それに合わせて整える"""
+    from . import runtime, setup_wizard
+    from .db import set_setting
+    from .entities import HOME_TYPE
+
     db = get_db()
     if db.execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0:
         return redirect(url_for("auth.login"))
+    values = setup_wizard.prefill(runtime.load_office())
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         pw = request.form.get("password", "")
-        problem = "ユーザー名を入力してください。" if not username else password_problem(pw, username)
+        errors = setup_wizard.validate(request.form)
+        problem = "管理者のユーザー名を入れてください。" if not username else password_problem(pw, username)
         if problem:
-            flash(problem, "error")
+            errors.append(problem)
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            values = request.form.to_dict()
+            values["home_types"] = request.form.getlist("home_types")
+            values["features"] = set(request.form.getlist("features"))
         else:
             db.execute(
                 "INSERT INTO users (username, display_name, password_hash, role, active, must_change, created_at, updated_at)"
                 " VALUES (?,?,?,?,1,0,?,?)",
                 (username, request.form.get("display_name") or username, generate_password_hash(pw), "admin", now(), now()),
             )
-            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('office_name', ?)",
-                       (request.form.get("office_name") or "グループホーム",))
+            done = setup_wizard.apply(db, request.form, set_setting)
             user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
             _login(user)
             g.user = user
-            log_event("login", detail="初期設定で管理者を作成")
+            log_event("login", detail="はじめての設定で管理者を作成")
+            log_event("settings", detail="はじめての設定：" + "／".join(done))
             db.commit()
-            flash("管理者アカウントを作成しました。", "ok")
+            flash("はじめての設定が終わりました。" + "。".join(done) + "。", "ok")
             return redirect(url_for("views.dashboard"))
-    return render_template("setup.html")
+    from .customize import FEATURES
+
+    return render_template("setup.html", v=values, HOME_TYPE=HOME_TYPE, FEATURES=FEATURES, homes=range(1, setup_wizard.MAX_HOMES + 1))
 
 
 @bp.route("/login", methods=["GET", "POST"])

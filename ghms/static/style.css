@@ -184,3 +184,4 @@ table.mgrid tr.total td { background:#fff6ec; font-weight:bold; }
 .feat input { margin-top:4px; }
 .customrow { border-bottom:1px dashed var(--line); padding-bottom:10px; margin-bottom:10px; align-items:end; }
 tr.muted td { color:var(--muted); }
+.setup { max-width:1000px; margin:24px auto; padding:0 16px; }

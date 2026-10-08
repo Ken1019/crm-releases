@@ -1,15 +1,64 @@
 {% extends 'base.html' %}
-{% block title %}初期設定{% endblock %}
+{% block title %}はじめての設定{% endblock %}
 {% block content %}
-<div class="auth card">
-  <h1>初期設定</h1>
-  <p>最初に管理者アカウントを作成します。</p>
+<div class="setup">
+  <h1>🌼 はじめての設定</h1>
+  <p class="guide">事業所に合わせてシステムを整えます。①〜⑤を入れて、いちばん下の「設定して始める」を押してください。あとから「設定」でいつでも変えられます。</p>
   <form method="post">
-    <label><span>事業所名</span><input name="office_name" required></label>
-    <label><span>管理者 ユーザー名（半角英数）</span><input name="username" required autocomplete="username"></label>
-    <label><span>表示名（氏名）</span><input name="display_name"></label>
-    <label><span>パスワード（8文字以上）</span><input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
-    <button class="btn primary">作成して開始</button>
+
+  <section class="card form">
+    <h2 class="wide">① 事業所の情報</h2>
+    <label><span>事業所名<span class="must">必須</span></span><input name="office_name" value="{{ v.get('office_name', '') }}" required></label>
+    <label><span>事業所番号</span><input name="office_no" value="{{ v.get('office_no', '') }}" inputmode="numeric"></label>
+    <label><span>電話番号</span><input name="office_tel" value="{{ v.get('office_tel', '') }}"></label>
+    <label class="wide"><span>住所（請求書に印字します）</span><input name="office_address" value="{{ v.get('office_address', '') }}"></label>
+    <label><span>1単位の単価（円）</span><input name="unit_price" value="{{ v.get('unit_price', '10.00') }}" inputmode="decimal">
+      <small class="muted">地域区分で決まります（「その他」の地域は 10.00）。給付費の概算に使います。</small></label>
+  </section>
+
+  <section class="card">
+    <h2>② サービスの類型（共同生活援助）</h2>
+    <div class="featgrid">
+    {% for t in HOME_TYPE %}
+      <label class="feat"><input type="checkbox" name="home_types" value="{{ t }}"{% if t in v.get('home_types', []) %} checked{% endif %}><span><b>{{ t }}</b></span></label>
+    {% endfor %}
+    </div>
+    <p class="muted small">類型に合わせて、加算の一覧から関係のないものを外します。</p>
+  </section>
+
+  <section class="card">
+    <h2>③ 住居（ユニット）</h2>
+    <p class="muted small">建物ごとに1行ずつ。あとで「設定」から追加・変更できます。</p>
+    <div class="tablewrap"><table class="list">
+      <thead><tr><th>住居名</th><th>定員</th><th>類型（複数の類型があるとき）</th></tr></thead>
+      {% for i in homes %}
+      <tr><td><input name="home_name_{{ i }}" value="{{ v.get('home_name_' ~ i, '') }}" placeholder="{{ '例：第1ホーム' if i == 1 else '' }}" style="width:100%"></td>
+        <td><input name="home_cap_{{ i }}" value="{{ v.get('home_cap_' ~ i, '') }}" inputmode="numeric" class="w5"></td>
+        <td><select name="home_type_{{ i }}"><option value="">（②の最初の類型）</option>{% for t in HOME_TYPE %}<option{% if v.get('home_type_' ~ i) == t %} selected{% endif %}>{{ t }}</option>{% endfor %}</select></td></tr>
+      {% endfor %}
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2>④ 使う機能</h2>
+    <p class="muted small">使わない機能のチェックを外すと、メニューやホームに出なくなり、画面がすっきりします。日誌・入居者・個別支援計画・職員はいつでも使えます。</p>
+    <div class="featgrid">
+    {% for k, name, desc, paths in FEATURES %}
+      <label class="feat"><input type="checkbox" name="features" value="{{ k }}"{% if k in v.get('features', []) %} checked{% endif %}>
+        <span><b>{{ name }}</b>{% if desc %}<br><small class="muted">{{ desc }}</small>{% endif %}</span></label>
+    {% endfor %}
+    </div>
+  </section>
+
+  <section class="card form">
+    <h2 class="wide">⑤ 管理者のアカウント</h2>
+    <label><span>ユーザー名（半角英数）<span class="must">必須</span></span><input name="username" value="{{ v.get('username', '') }}" required autocomplete="username"></label>
+    <label><span>名前</span><input name="display_name" value="{{ v.get('display_name', '') }}" placeholder="例：佐藤 一郎"></label>
+    <label><span>パスワード<span class="must">必須</span></span><input type="password" name="password" required minlength="8" autocomplete="new-password">
+      <small class="muted">8文字以上・英字と数字の両方</small></label>
+  </section>
+
+  <div class="actions"><button class="btn primary big">✔ 設定して始める</button></div>
   </form>
 </div>
 {% endblock %}

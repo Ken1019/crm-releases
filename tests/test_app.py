@@ -22,7 +22,9 @@ def csrf(client, path="/"):
 @pytest.fixture()
 def client(app):
     c = app.test_client()
-    r = c.post("/setup", data={"office_name": "テストホーム", "username": "admin", "password": "password123"})
+    from ghms.customize import FEATURES
+    r = c.post("/setup", data={"office_name": "テストホーム", "username": "admin", "password": "password123",
+                               "home_types": "介護サービス包括型", "features": [k for k, *_ in FEATURES]})
     assert r.status_code == 302
     return c
 
@@ -626,3 +628,41 @@ def test_custom_fields(client):
     # 使わないにすると隠れる（データは残る）
     post(client, "/settings/fields", {"entity": "residents", "action": "update", "id": "1", "label": "好きな食べ物"})
     assert "好きな食べ物" not in client.get("/m/residents/new").get_data(as_text=True)
+
+
+def test_first_setup_optimizes(tmp_path, monkeypatch):
+    home = tmp_path / "ghms_home"
+    home.mkdir()
+    (home / "config.ini").write_text("[office]\nname = ひだまり\nno = 0110000000\n", encoding="utf-8")
+    monkeypatch.setenv("GHMS_HOME", str(home))
+    monkeypatch.setenv("GHMS_DATA_DIR", str(tmp_path / "data"))
+    app = create_app({"TESTING": True})
+    c = app.test_client()
+    page = c.get("/setup").get_data(as_text=True)
+    assert 'value="ひだまり"' in page and 'value="0110000000"' in page  # インストーラーで入れた値
+    # 入力が足りないときは、入れた内容を残してやり直し
+    r = c.post("/setup", data={"office_name": "ひだまり", "username": "admin", "password": "password123"})
+    assert "類型を1つ以上" in r.get_data(as_text=True)
+    c.post("/setup", data={
+        "office_name": "ひだまり", "office_no": "0110000000", "unit_price": "10.30", "home_types": "介護サービス包括型",
+        "home_name_1": "第1ホーム", "home_cap_1": "5", "home_name_2": "第2ホーム",
+        "features": ["incidents", "meetings", "billing"], "username": "admin", "password": "password123"})
+    home_page = c.get("/").get_data(as_text=True)
+    assert "はじめての設定が終わりました" in home_page and "第1ホーム" in home_page
+    assert c.get("/shift/").status_code == 302          # 使わない機能
+    assert c.get("/billing/attendance").status_code == 200
+    with app.app_context():
+        from ghms.db import get_db, get_setting
+        assert get_setting("unit_price") == "10.30"
+        assert get_db().execute("SELECT COUNT(*) FROM homes").fetchone()[0] == 2
+        assert get_db().execute("SELECT COUNT(*) FROM addons WHERE name='夜勤職員加配加算'").fetchone()[0] == 0
+
+
+def test_config_ini_written_by_installer_in_cp932(tmp_path, monkeypatch):
+    from ghms import runtime
+    monkeypatch.setenv("GHMS_HOME", str(tmp_path))
+    (tmp_path / "config.ini").write_bytes("[office]\r\nname=グループホーム ひだまり\r\nno=0110000000\r\n[server]\r\nlan=1\r\n".encode("cp932"))
+    assert runtime.load_office() == {"name": "グループホーム ひだまり", "no": "0110000000"}
+    assert runtime.load_config()["lan"] is True
+    (tmp_path / "config.ini").write_text("[server]\nport = 8100\n", encoding="utf-8")
+    assert runtime.load_config()["port"] == 8100
