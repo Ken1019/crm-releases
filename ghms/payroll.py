@@ -12,7 +12,7 @@ import math
 import re
 import unicodedata
 from datetime import date, timedelta
-from decimal import ROUND_HALF_DOWN, Decimal, InvalidOperation
+from decimal import ROUND_HALF_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation
 
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 from openpyxl import Workbook
@@ -39,6 +39,7 @@ PAY_SETTINGS = [
     ("pay_night_rate", "深夜の割増（%）", "25", "上の時間帯に働いた分"),
     ("pay_break_default", "休憩の目安（分）", "60", "6時間をこえる勤務で退勤するときの初期値"),
     ("pay_max_shift_hours", "1回の勤務の上限（時間）", "20", "これをこえると退勤を押せず「退勤忘れ」として管理者が直します（夜勤に合わせて）"),
+    ("pay_forgot_hours", "退勤忘れとみなす時間（時間）", "12", "出勤からこの時間をすぎて、また「出勤」を押したときは、前の打刻を「退勤忘れ」として残し、新しく出勤します（前の打刻は管理者が直します）"),
     ("pay_fever", "体温のお知らせ（℃以上）", "37.5", ""),
     ("pay_leave_method", "有給1日分の賃金（時給・日給の人）", "平均賃金", "「平均賃金」：直近3か月の賃金÷暦日数（最低保障は÷労働日数×60%）／「通常の賃金」：時給×1日の所定時間、日給。就業規則に合わせてください"),
     ("pay_late_grace", "遅刻・早退とみなすずれ（分）", "10", "勤務表の時刻とタイムカードがこの分数よりずれたら、タイムカードと実地指導チェックに出します"),
@@ -79,6 +80,16 @@ def pct(key):
     except (InvalidOperation, ValueError):
         pass
     return Decimal(pset(key)) / 100
+
+
+def _dec(v):
+    """数字を Decimal に（float の誤差を持ちこまないよう、いったん文字にする）"""
+    return v if isinstance(v, Decimal) else Decimal(repr(float(v or 0)))
+
+
+def yen_half_up(x):
+    """1円未満は四捨五入（ちょうど50銭は切り上げ。Python の round は偶数に寄せるので使わない）"""
+    return int(_dec(x).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def half_down(x):
@@ -190,7 +201,8 @@ def compute_pay(s, first, last, earnings=None, leave=True):
     from .leave import leave_day_pay, leave_days_in
 
     leave_n = leave_days_in(s["id"], first, last)
-    hours, over_h, night_h = sm["total"] / 60, sm["over"] / 60, sm["night"] / 60
+    # 時間は分で持ち、お金の計算は Decimal（1円未満は四捨五入。862.5円 → 863円）
+    t_min, o_min, n_min = sm["total"], sm["over"], sm["night"]
     flat = (get_setting("pay_yakin_mode", pset("pay_yakin_mode")) or "").startswith("1回")
     na = s["night_allowance"]
     na_blank = na is None or str(na).strip() == ""
@@ -201,7 +213,7 @@ def compute_pay(s, first, last, earnings=None, leave=True):
     warnings = []
     if flat:
         # 夜勤は1回の金額だけ（深夜手当こみ）。時間・日数の計算から夜勤の分を外す
-        hours, over_h, night_h = (sm["total"] - sm["yk_total"]) / 60, (sm["over"] - sm["yk_over"]) / 60, (sm["night"] - sm["yk_night"]) / 60
+        t_min, o_min, n_min = sm["total"] - sm["yk_total"], sm["over"] - sm["yk_over"], sm["night"] - sm["yk_night"]
         days_for_pay = sm["day_days"]
         mw = setting_num("pay_min_wage", pset("pay_min_wage"))
         for c, w in sm["yk_cards"]:
@@ -214,18 +226,20 @@ def compute_pay(s, first, last, earnings=None, leave=True):
     shogu = shogu_monthly(s["id"], first)
     # 残業代・深夜手当の時間単価には、通勤手当以外の毎月の手当（資格手当・その他手当・処遇改善手当）も入れる
     allowances = (s["allowance_qual"] or 0) + (s["allowance_other"] or 0) + shogu
+    hours_d, over_d, night_d = Decimal(t_min) / 60, Decimal(o_min) / 60, Decimal(n_min) / 60
     if pt == "時給":
-        unit = hourly + allowances / max(hours, 1)
+        unit = _dec(hourly) + _dec(allowances) / max(hours_d, Decimal(1))
     elif pt == "日給":
-        unit = daily / 8 + allowances / max(hours, 1)
+        unit = _dec(daily) / 8 + _dec(allowances) / max(hours_d, Decimal(1))
     else:
-        unit = (base_salary + allowances) / (setting_num("pay_monthly_hours", 160) or 160)
+        unit = _dec(base_salary + allowances) / (_dec(setting_num("pay_monthly_hours", 160)) or Decimal(160))
     if earnings is None:
-        base = round(hourly * hours) if pt == "時給" else round(daily * days_for_pay) if pt == "日給" else int(base_salary)
-        ot_factor = rate("pay_ot_rate") + (0 if pt == "時給" else 1)
+        base = yen_half_up(_dec(hourly) * hours_d) if pt == "時給" else yen_half_up(_dec(daily) * days_for_pay) if pt == "日給" \
+            else int(base_salary)
+        ot_factor = pct("pay_ot_rate") + (0 if pt == "時給" else 1)
         ctype = s["commute_type"] or "支給しない"
         commute = (s["commute"] or 0) if ctype == "毎月定額" else (s["commute"] or 0) * sm["days"] if ctype.startswith("1日") else 0
-        earnings = {"base": base, "ot": round(unit * over_h * ot_factor), "night": round(unit * night_h * rate("pay_night_rate")),
+        earnings = {"base": base, "ot": yen_half_up(unit * over_d * ot_factor), "night": yen_half_up(unit * night_d * pct("pay_night_rate")),
                     "yakin": per_yakin * sm["yakin"], "qual": int(s["allowance_qual"] or 0),
                     "shogu": shogu, "other": int(s["allowance_other"] or 0), "commute": int(commute),
                     "leave": leave_n * leave_day_pay(s, first) if leave and leave_n else 0}
@@ -233,7 +247,7 @@ def compute_pay(s, first, last, earnings=None, leave=True):
     commute = int(earnings.get("commute") or 0)
     ded = {k: 0 for k, _ in DEDUCTIONS}
     # 労災保険は賃金の総額（交通費もふくむ）
-    er = {"health": 0, "care": 0, "kodomo": 0, "pension": 0, "emp": 0, "child": 0, "rosai": round(gross * rate("ins_rosai"))}
+    er = {"health": 0, "care": 0, "kodomo": 0, "pension": 0, "emp": 0, "child": 0, "rosai": yen_half_up(gross * pct("ins_rosai"))}
     std = None
     if s["social_insurance"]:
         std = std_monthly(s, gross)
@@ -245,10 +259,10 @@ def compute_pay(s, first, last, earnings=None, leave=True):
         if (first.year, first.month) >= (2026, 5):  # 4月分の保険料（5月の給与）から
             ded["kodomo"] = half_down(hs * pct("ins_kodomo") / 2)
         er.update(health=ded["health"], care=ded["care"], pension=ded["pension"], kodomo=ded["kodomo"],
-                  child=round(std["pension"] * rate("ins_child")))
+                  child=yen_half_up(std["pension"] * pct("ins_child")))
     if s["employment_insurance"]:
         ded["emp"] = half_down(Decimal(gross) * pct("ins_emp_ee"))
-        er["emp"] = round(gross * rate("ins_emp_er"))
+        er["emp"] = yen_half_up(gross * pct("ins_emp_er"))
     social = ded["health"] + ded["care"] + ded["kodomo"] + ded["pension"] + ded["emp"]
     ded["itax"] = income_tax(gross - commute - social, s["dependents"], first.year)
     ded["rtax"] = int(s["resident_tax"] or 0)
@@ -257,7 +271,7 @@ def compute_pay(s, first, last, earnings=None, leave=True):
             "work": {"days": sm["days"], "hours": sm["total"], "ot_h": sm["over"], "night_h": sm["night"], "yakin_n": sm["yakin"],
                      "leave_n": leave_n},
             "missing": sm["missing"], "warnings": warnings, "gross": gross, "total_ded": total_ded, "net": gross - total_ded,
-            "employer": er, "employer_total": sum(er.values()), "pay_type": pt, "unit": round(unit), "std": std}
+            "employer": er, "employer_total": sum(er.values()), "pay_type": pt, "unit": yen_half_up(unit), "std": std}
 
 
 def _totals(data):
@@ -308,13 +322,30 @@ def payroll_staff(first, last):
         (last.isoformat(), first.isoformat(), last.isoformat(), ym)).fetchall()
 
 
+def staff_notes(s):
+    """職員の情報から、給与の前に直してほしいこと（いまの職員の情報で見る）"""
+    from .compliance import STD_MISSING
+
+    return [STD_MISSING] if s["social_insurance"] and not s["std_monthly"] else []
+
+
 def month_payroll(first, last):
     ym = first.strftime("%Y-%m")
     rows = []
     for s in payroll_staff(first, last):
         slip = load_slip(s["id"], ym)
-        rows.append({"s": s, "d": slip or compute_pay(s, first, last), "saved": slip is not None})
+        rows.append({"s": s, "d": slip or compute_pay(s, first, last), "saved": slip is not None, "notes": staff_notes(s)})
     return rows
+
+
+# 納付書に書く額（月の合計）：(名前, 控除のキー)
+NOFU = [("所得税（源泉所得税の納付書）", ("itax",)), ("住民税（特別徴収の納入書）", ("rtax",)),
+        ("社会保険（本人分：健康保険・介護保険・子ども子育て支援金・厚生年金）", ("health", "care", "kodomo", "pension")),
+        ("雇用保険（本人分）", ("emp",))]
+
+
+def nofu_totals(rows):
+    return [(label, sum(int((r["d"].get("deductions") or {}).get(k) or 0) for r in rows for k in keys)) for label, keys in NOFU]
 
 
 def hm(minutes):
@@ -337,8 +368,38 @@ def index():
         get_db().commit()
         flash(f"{first:%Y年%m月}の給与を{n}人分、下書きとして保存しました。内容を確かめて「確定」してください。", "ok")
         return redirect(url_for("payroll.index", ym=ym))
+    if request.method == "POST" and request.form.get("action") == "confirm_share":
+        # 自動計算・下書きの人を、いまの金額で確定して職員に見せる。退勤忘れ・注意がある人はとばす
+        done, skipped = 0, []
+        for r in rows:
+            d = r["d"]
+            if r["saved"] and d.get("status") == "確定":
+                if not d.get("shared"):
+                    save_slip(r["s"]["id"], ym, dict(d, shared=True), "確定")
+                    done += 1
+                continue
+            why = []
+            # 保存した下書きにも、いまのタイムカードで退勤忘れがないか見る
+            missing = month_summary(r["s"]["id"], first, last)["missing"] if r["saved"] else d.get("missing")
+            if missing:
+                why.append(f"退勤忘れ {missing}回")
+            if d.get("warnings") or r["notes"]:
+                why.append("注意 " + str(len(d.get("warnings") or []) + len(r["notes"])) + "件")
+            if why:
+                skipped.append(f"{r['s']['name']}（{'・'.join(why)}）")
+                continue
+            save_slip(r["s"]["id"], ym, dict(d, shared=True), "確定")
+            done += 1
+        log_event("payroll_confirm", "payslips", None, f"{ym} まとめて確定 {done}人")
+        get_db().commit()
+        flash(f"{first:%Y年%m月}の給与を{done}人分、確定して職員に見せました。", "ok")
+        if skipped:
+            flash("次の人は確定していません（名前を押して直してから確定してください）：" + "、".join(skipped), "error")
+        return redirect(url_for("payroll.index", ym=ym))
     total = {k: sum(r["d"][k] for r in rows) for k in ("gross", "total_ded", "net", "employer_total")}
-    return render_template("payroll.html", rows=rows, ym=ym, first=first, total=total, hm=hm, EARNINGS=EARNINGS)
+    return render_template("payroll.html", rows=rows, ym=ym, first=first, total=total, hm=hm, EARNINGS=EARNINGS,
+                           nofu=nofu_totals(rows),
+                           left=sum(1 for r in rows if not (r["saved"] and r["d"].get("status") == "確定" and r["d"].get("shared"))))
 
 
 @bp.route("/<int:sid>/<ym>", methods=["GET", "POST"])
@@ -377,7 +438,8 @@ def edit(sid, ym):
                 data = compute_pay(s, first, last, earnings)
                 flash("支給額から保険料・税を計算しなおしました（まだ保存していません。下の「保存する」を押してください）。", "ok")
                 return render_template("payroll_edit.html", s=s, ym=ym, first=first, d=data, auto=auto, slip=slip,
-                                       EARNINGS=EARNINGS, DEDUCTIONS=DEDUCTIONS, WORK_ITEMS=WORK_ITEMS, hm=hm, unsaved=True)
+                                       EARNINGS=EARNINGS, DEDUCTIONS=DEDUCTIONS, WORK_ITEMS=WORK_ITEMS, hm=hm, unsaved=True,
+                                       notes=staff_notes(s))
             base = slip or auto
             data = dict(base, earnings=earnings, deductions={k: _yen(request.form.get(f"d_{k}")) for k, _ in DEDUCTIONS},
                         memo=request.form.get("memo", ""), shared=False)
@@ -388,7 +450,7 @@ def edit(sid, ym):
         db.commit()
         return redirect(url_for("payroll.edit", sid=sid, ym=ym))
     return render_template("payroll_edit.html", s=s, ym=ym, first=first, d=slip or auto, auto=auto, slip=slip,
-                           EARNINGS=EARNINGS, DEDUCTIONS=DEDUCTIONS, WORK_ITEMS=WORK_ITEMS, hm=hm, unsaved=False)
+                           EARNINGS=EARNINGS, DEDUCTIONS=DEDUCTIONS, WORK_ITEMS=WORK_ITEMS, hm=hm, unsaved=False, notes=staff_notes(s))
 
 
 def _slip_view(s, ym, d):
@@ -547,16 +609,36 @@ def month_profit(first, last):
 def profit():
     today = date.today()
     fy = clamp(request.args.get("fy", type=db_int) or (today.year if today.month >= 4 else today.year - 1), 2000, 2099)
-    months = []
+    from .compliance import before_start
+
+    months, skipped = [], 0
     for i in range(12):
         y, m = (fy, 4 + i) if i < 9 else (fy + 1, i - 8)
         first, last = parse_ym(f"{y}-{m:02d}")
         if first > today.replace(day=1):
             break
-        months.append(month_profit(first, last))
+        current = first == today.replace(day=1)
+        # 使い始める前の月と、データが何もない月は出さない（0円の月が並んで合計がずれないように）。今月は見込みとして出す
+        if before_start(last) or (not current and not month_has_data(first, last)):
+            skipped += 1
+            continue
+        months.append(dict(month_profit(first, last), current=current))
     inc_keys = list(dict.fromkeys(k for x in months for k in x["income"]))
     exp_keys = list(dict.fromkeys(k for x in months for k in x["expense"]))
     return render_template("payroll_profit.html", fy=fy, months=months, inc_keys=inc_keys, exp_keys=exp_keys,
                            inc_tot={k: sum(x["income"].get(k, 0) for x in months) for k in inc_keys},
                            exp_tot={k: sum(x["expense"].get(k, 0) for x in months) for k in exp_keys},
-                           total={k: sum(x[k] for x in months) for k in ("income_total", "expense_total", "profit", "labor")})
+                           total={k: sum(x[k] for x in months) for k in ("income_total", "expense_total", "profit", "labor")},
+                           skipped=skipped)
+
+
+def month_has_data(first, last):
+    """その月に実績・請求・給与・タイムカード・経費のどれかがあるか"""
+    db = get_db()
+    a, b, ym = first.isoformat(), last.isoformat(), first.strftime("%Y-%m")
+    return any(db.execute(q, args).fetchone() for q, args in (
+        ("SELECT 1 FROM attendance WHERE date BETWEEN ? AND ? LIMIT 1", (a, b)),
+        ("SELECT 1 FROM invoices WHERE ym=? LIMIT 1", (ym,)),
+        ("SELECT 1 FROM payslips WHERE ym=? LIMIT 1", (ym,)),
+        ("SELECT 1 FROM timecards WHERE date BETWEEN ? AND ? LIMIT 1", (a, b)),
+        ("SELECT 1 FROM expenses WHERE date BETWEEN ? AND ? LIMIT 1", (a, b))))

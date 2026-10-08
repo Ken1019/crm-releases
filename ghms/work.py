@@ -71,8 +71,8 @@ def work_minutes(card):
     start, end = _min(card["clock_in"]), _min(card["clock_out"])
     if start is None or end is None:
         return None
-    if end <= start:
-        end += 1440
+    if end < start:
+        end += 1440  # 同じ時刻（押してすぐ退勤）は0分。24時間の夜勤にはしない（1回の勤務は上限20時間）
     brk = card["break_min"] or 0
     total = max(0, end - start - brk)
     night = sum(max(0, min(end, b) - max(start, a)) for a, b in night_windows())
@@ -123,28 +123,44 @@ def _started(card):
         return None
 
 
+def forgot_minutes():
+    """出勤からこの時間をすぎて、また出勤を押したら、前の打刻は「退勤忘れ」にして新しく出勤する"""
+    return int(setting_num("pay_forgot_hours", 12) * 60)
+
+
+# あとに出勤の打刻がある（＝そのあと新しく出勤した）打刻。退勤がなければ「退勤忘れ」
+LATER_CARD = ("EXISTS (SELECT 1 FROM timecards t2 WHERE t2.staff_id=timecards.staff_id AND t2.id != timecards.id"
+              " AND (t2.date > timecards.date OR (t2.date = timecards.date AND COALESCE(t2.clock_in, '') > COALESCE(timecards.clock_in, ''))))")
+
+
 def open_card(staff_id):
-    """まだ退勤していない打刻。出勤から上限の時間をすぎたものは「退勤忘れ」として扱い、ここでは返さない"""
+    """まだ退勤していない打刻。出勤から上限の時間をすぎたもの・あとに新しく出勤したものは「退勤忘れ」として扱い、ここでは返さない"""
     since = (date.today() - timedelta(days=2)).isoformat()
-    for c in get_db().execute("SELECT * FROM timecards WHERE staff_id=? AND clock_out IS NULL AND date >= ? ORDER BY date DESC, id DESC",
-                              (staff_id, since)):
+    for c in get_db().execute("SELECT * FROM timecards WHERE staff_id=? AND clock_out IS NULL AND date >= ? AND NOT " + LATER_CARD
+                              + " ORDER BY date DESC, id DESC", (staff_id, since)):
         st = _started(c)
         if st and datetime.now() - st <= timedelta(minutes=max_shift_minutes()):
             return c
     return None
 
 
+def is_stale(card):
+    """出勤から「退勤忘れとみなす時間」をすぎた打刻か（夜勤明けの退勤か、退勤の押し忘れかを本人にえらんでもらう）"""
+    st = _started(card) if card else None
+    return bool(st and datetime.now() - st > timedelta(minutes=forgot_minutes()))
+
+
 def forgotten_cards(staff_id=None, days=31):
-    """退勤の打刻がないまま上限をすぎたもの（管理者が直す）"""
+    """退勤の打刻がないまま上限をすぎたもの・そのあと新しく出勤したもの（管理者が直す）"""
     since = (date.today() - timedelta(days=days)).isoformat()
-    sql, args = "SELECT * FROM timecards WHERE clock_out IS NULL AND date >= ?", [since]
+    sql, args = f"SELECT *, {LATER_CARD} AS later FROM timecards WHERE clock_out IS NULL AND date >= ?", [since]
     if staff_id:
         sql += " AND staff_id=?"
         args.append(staff_id)
     out = []
     for c in get_db().execute(sql + " ORDER BY date", args):
         st = _started(c)
-        if st is None or datetime.now() - st > timedelta(minutes=max_shift_minutes()):
+        if c["later"] or st is None or datetime.now() - st > timedelta(minutes=max_shift_minutes()):
             out.append(c)
     return out
 
@@ -219,10 +235,20 @@ def punch(sid, action, form, username):
     card = open_card(sid)
     msgs = []
     if action == "in":
-        if card:
+        st = _started(card) if card else None
+        if card and st and t - st <= timedelta(minutes=forgot_minutes()):
             return [("error", f"すでに {card['clock_in']} に出勤しています。退勤のときは「退勤する」を押してください。")]
         if get_setting("pay_health_required", "1") == "1" and form.get("temp", type=finite_float) is None:
             return [("error", "出勤の前に体温を入れてください。")]
+        # 退勤を押さないまま時間がたった打刻は、そのまま「退勤忘れ」として残し（管理者が直す）、新しく出勤する
+        # 前回（いちばん新しい打刻）の退勤がないときだけ知らせる（もっと前の退勤忘れは、打刻の画面と管理者のホームに出る）
+        old = get_db().execute("SELECT * FROM timecards WHERE staff_id=? ORDER BY date DESC, clock_in DESC, id DESC LIMIT 1",
+                               (sid,)).fetchone()
+        if old is not None and not old["clock_out"]:
+            od = parse_date(old["date"])
+            msgs.append(("warn", f"前回（{od.month}/{od.day} {old['clock_in'] or ''}〜）の退勤が押されていません。"
+                                  "管理者に直してもらってください。" if od else
+                                  "前回の退勤が押されていません。管理者に直してもらってください。"))
         h = _save_health(sid, form, username)
         db.execute("INSERT INTO timecards (staff_id, date, clock_in, note, updated_by, updated_at) VALUES (?,?,?,?,?,?)",
                    (sid, t.date().isoformat(), t.strftime("%H:%M"), form.get("note") or "", username, now()))
@@ -252,7 +278,8 @@ def _kiosk_people():
     rows = []
     for s in db.execute("SELECT s.*, u.id AS uid, u.pin_hash, u.locked_until FROM staff s JOIN users u ON u.staff_id=s.id "
                         "WHERE u.active=1 AND u.role != 'admin' AND (s.status IS NULL OR s.status != '退職') ORDER BY s.kana, s.name"):
-        rows.append({"s": s, "card": open_card(s["id"]), "pin": bool(s["pin_hash"])})
+        card = open_card(s["id"])
+        rows.append({"s": s, "card": card, "stale": is_stale(card), "pin": bool(s["pin_hash"])})
     return rows
 
 
@@ -345,7 +372,7 @@ def kiosk():
             for cat, msg in msgs:
                 flash(f"{person['s']['name']} さん：{msg}", cat)
             db.commit()
-            if any(cat == "error" for cat, _ in msgs) and request.form.get("action") == "in" and not person["card"]:
+            if any(cat == "error" for cat, _ in msgs) and request.form.get("action") == "in" and (not person["card"] or person["stale"]):
                 return redirect(url_for("work.kiosk", staff_id=sid))
         db.commit()
         return redirect(url_for("work.kiosk"))
@@ -373,7 +400,7 @@ def clock():
     if sid:
         for c in reversed(month_cards(sid, first, last)[-10:]):
             cards.append({"c": c, "w": work_minutes(c)})
-    return render_template("work_clock.html", staff=staff, card=card, cards=cards, SYMPTOMS=SYMPTOMS, hm=hm,
+    return render_template("work_clock.html", staff=staff, card=card, stale=is_stale(card), cards=cards, SYMPTOMS=SYMPTOMS, hm=hm,
                            forgotten=forgotten_cards(sid) if sid else [], max_hours=max_shift_minutes() // 60,
                            default_break=int(setting_num("pay_break_default", 60)), fever=fever_line(),
                            summary=month_summary(sid, first, last) if sid else None,

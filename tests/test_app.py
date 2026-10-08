@@ -27,6 +27,12 @@ def client(app):
     r = c.post("/setup", data={"office_name": "テストホーム", "username": "admin", "password": "password123",
                                "home_types": "介護サービス包括型", "features": [k for k, *_ in FEATURES]})
     assert r.status_code == 302
+    # 前から使っている事業所として試す（使い始めた日より前の書きもれ・仕事は出ないため）
+    with app.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT value FROM settings WHERE key='system_start'").fetchone()[0] == date.today().isoformat()
+        get_db().execute("UPDATE settings SET value='2026-01-01' WHERE key='system_start'")
+        get_db().commit()
     return c
 
 
@@ -754,28 +760,30 @@ def test_record_sheet_columns(client, app):
         return {k: v for k, v in zip(labels, sh["totals"]) if v}
 
     # 様式18-1と同じ並び。夜間支援等体制加算は在居の日（外泊から戻った日も）に自動、日中支援加算は実績の「日」
+    # 出かけた日（4日）の夜は住居にいないので、夜間支援はつかない（31日 − 外泊3日 − 出かけた日の夜1日 = 27）
     sh, labels = data()
     assert labels[:3] == ["住居外利用", "退居後支援", "夜間支援等体制加算"] and labels[-1] == "集中的支援加算"
-    assert totals() == {"夜間支援等体制加算": 28, "日中支援加算": 1}
-    # サービス提供の状況：出た日「住居→外泊」、中日「外泊」、戻った日「外泊戻り」、ふつうの日は空欄
-    assert [x["label"] for x in sh["rows"][3:8]] == ["", "ひまわり→外泊", "外泊", "外泊", "外泊戻り"]
+    assert totals() == {"夜間支援等体制加算": 27, "日中支援加算": 1}
+    # サービス提供の状況：出かけた日（実績は○）に「住居→外泊」、その間「外泊」、戻った日「外泊戻り」、ふつうの日は空欄
+    assert [x["label"] for x in sh["rows"][2:8]] == ["", "ひまわり→外泊", "外泊", "外泊", "外泊", "外泊戻り"]
+    assert sh["rows"][3]["code"] == "○" and sh["rows"][3]["marks"][2] == ""
     assert sh["rows"][4]["marks"][2] == "" and sh["rows"][7]["marks"][2] == "1"
     page = client.get("/docs/record-sheets?ym=2026-10").get_data(as_text=True)
     assert "共同生活援助サービス提供実績記録票" in page and "令和 8 年 10 月分" in page and "ひまわり→外泊" in page
-    assert "28回" in page and "移行支援住居" in page
+    assert "27回" in page and "移行支援住居" in page
     assert client.get("/docs/record-sheets.xlsx?ym=2026-10").data[:2] == b"PK"
     # 夜間支援を1日外す・帰宅時支援加算を手でつける
-    form = {f"m1_{d}": "1" for d in range(1, 32) if d not in (1, 5, 6, 7)}
+    form = {f"m1_{d}": "1" for d in range(1, 32) if d not in (1, 4, 5, 6, 7)}
     post(client, "/docs/record-marks", dict(form, ym="2026-10", home_id="1", col="3"))
     post(client, "/docs/record-marks", {"m1_5": "1", "ym": "2026-10", "home_id": "1", "col": "5"})
-    assert totals() == {"夜間支援等体制加算": 27, "帰宅時支援加算": 1, "日中支援加算": 1}
-    # 実績を入院に直すと、夜間支援の印も自動で外れ、状況は「ひまわり→入院」「入院戻り」
+    assert totals() == {"夜間支援等体制加算": 26, "帰宅時支援加算": 1, "日中支援加算": 1}
+    # 実績を入院に直すと、夜間支援の印も自動で外れ、状況は「ひまわり→入院」「入院」「入院戻り」
     form = {f"a1_{d}": "○" for d in range(1, 32)}
     form.update({"a1_5": "外", "a1_6": "外", "a1_7": "外", "a1_10": "日", "a1_2": "入", "ym": "2026-10", "home_id": "1"})
     post(client, "/billing/attendance", form)
     sh, _ = data()
-    assert [x["label"] for x in sh["rows"][1:3]] == ["ひまわり→入院", "入院戻り"]
-    assert totals()["夜間支援等体制加算"] == 26
+    assert [x["label"] for x in sh["rows"][0:3]] == ["ひまわり→入院", "入院", "入院戻り"]
+    assert totals()["夜間支援等体制加算"] == 25
     # 列の名前・記号・単位を変える、使わない、増やす
     cols = {"active::3": "1", "label::3": "夜間支援", "mark::3": "2", "sort::3": "30", "auto::3": "stay",
             "active::6": "1", "label::6": "日中支援加算", "sort::6": "60",
@@ -1146,7 +1154,7 @@ def test_payroll_uses_grade_commute_and_allowances(client, app):
         d = compute_pay(s, date(2026, 9, 1), date(2026, 9, 30))
         assert d["gross"] == 220000 and d["std"]["health"] == 220000
         assert d["deductions"]["health"] == 11165       # 220,000 × 10.15% ÷ 2
-        assert d["unit"] == round(210000 / 160)         # 資格手当も時間単価に入る
+        assert d["unit"] == 1313                        # 資格手当も時間単価に入る（210,000÷160＝1,312.5 → 四捨五入で1,313）
         assert d["employer"]["rosai"] == round(220000 * 0.003)
         names = [r["name"] for r in payroll_staff(date(2026, 9, 1), date(2026, 9, 30))]
         assert names == ["A"]                            # 入職前の B は出さない
@@ -1710,3 +1718,181 @@ def test_features_ignore_unknown_keys(client, app):
         off = get_setting("features_off").split(",")
     assert set(off) == set(keys[1:])
     assert client.get("/").status_code == 200
+
+
+# ---------------------------------------------------------------- 見直し（記録票の状況・夜間支援・打刻・端数・使い始めた日など）
+def _sheet(app, ym_first, ym_last):
+    from ghms.docs import record_sheet_data
+
+    with app.test_request_context("/"):
+        from flask import g
+
+        from ghms.db import get_db
+        g.user = get_db().execute("SELECT * FROM users WHERE username='admin'").fetchone()
+        sheets, cols = record_sheet_data(ym_first, ym_last)
+        return sheets[0], [c["label"] for c in cols]
+
+
+def test_record_label_on_departure_day_and_no_night_support(client, app):
+    _setup_billing(client)
+    # 1泊だけの外泊（12日に出て13日に戻る）：実績はどちらも○のまま。11月1日からの外泊は10月31日が出かけた日
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "外泊", "start_date": "2026-10-12", "end_date": "2026-10-13",
+                                     "auto_attendance": "1"})
+    _sql(app, "INSERT INTO attendance (resident_id, date, code) VALUES (1, '2026-11-01', '外')")
+    sh, labels = _sheet(app, date(2026, 10, 1), date(2026, 10, 31))
+    night = labels.index("夜間支援等体制加算")
+    rows = {x["d"].day: x for x in sh["rows"]}
+    assert rows[12]["code"] == "○" and rows[12]["label"] == "ひまわり→外泊" and rows[12]["marks"][night] == ""
+    assert rows[13]["label"] == "外泊戻り" and rows[13]["marks"][night] == "1"
+    assert rows[4]["label"] == "ひまわり→外泊" and rows[4]["marks"][night] == ""      # 4日に出て5〜7日が外泊
+    assert [rows[d]["label"] for d in (5, 6, 7, 8)] == ["外泊", "外泊", "外泊", "外泊戻り"]
+    assert rows[31]["label"] == "ひまわり→外泊" and rows[31]["marks"][night] == ""    # 次の月の1日が外泊
+    assert rows[11]["label"] == "" and rows[11]["marks"][night] == "1"
+    # 31日 − 外泊3日 − 出かけた日の夜（4日・12日・31日）= 25
+    assert sh["totals"][night] == 25
+    # 月の1日から外泊がはじまるときは、前の月の末日が出かけた日
+    sh, _ = _sheet(app, date(2026, 11, 1), date(2026, 11, 30))
+    assert sh["rows"][0]["label"] == "外泊" and sh["rows"][1]["label"] == "外泊戻り"
+
+
+def test_benefit_counts_night_support_from_record_sheet(client, app):
+    _setup_billing(client)
+    _sql(app, "UPDATE addons SET active=1, units=100 WHERE name='夜間支援等体制加算（Ⅰ）'")
+    from ghms.billing import compute_benefit
+
+    def nights():
+        with app.test_request_context("/"):
+            res, _, _ = compute_benefit(date(2026, 10, 1), date(2026, 10, 31))
+            return {name: n for name, _, n, _ in res[0]["lines"]}.get("夜間支援等体制加算（Ⅰ）")
+
+    assert nights() == 27  # 外泊3日と、出かけた日（4日）の夜は数えない
+    # 記録票の表で20日の夜を外すと、概算も減る
+    form = {f"m1_{d}": "1" for d in range(1, 32) if d not in (4, 5, 6, 7, 20)}
+    post(client, "/docs/record-marks", dict(form, ym="2026-10", home_id="1", col="3"))
+    assert nights() == 26
+    from ghms.billing import addon_key
+    assert addon_key("夜間支援等体制加算（Ⅰ）") == addon_key("夜間支援等体制加算") == "夜間支援等体制加算"
+
+
+def test_forgotten_clock_out_then_new_clock_in(client, app):
+    from datetime import datetime, timedelta
+
+    from werkzeug.datastructures import MultiDict
+
+    sid = _sql(app, "INSERT INTO staff (name, status, pay_type, hourly_wage) VALUES ('佐藤 一郎', '在籍', '時給', '1200')")
+    start = datetime.now() - timedelta(hours=14)  # 退勤を押し忘れて14時間（上限の20時間より前）
+    _sql(app, "INSERT INTO timecards (staff_id, date, clock_in) VALUES (?, ?, ?)", (sid, start.date().isoformat(), start.strftime("%H:%M")))
+    with app.test_request_context("/"):
+        from flask import g
+
+        from ghms.db import get_db
+        from ghms.work import forgotten_cards, month_summary, open_card, punch
+        db = get_db()
+        g.user = db.execute("SELECT * FROM users WHERE username='admin'").fetchone()
+        assert open_card(sid) is not None and not forgotten_cards(sid)
+        msgs = punch(sid, "in", MultiDict({"temp": "36.5"}), "admin")
+        assert any(f"前回（{start.month}/{start.day} {start:%H:%M}〜）の退勤が押されていません" in m for _, m in msgs)
+        assert any("出勤しました" in m for _, m in msgs)
+        cards = db.execute("SELECT * FROM timecards WHERE staff_id=? ORDER BY id", (sid,)).fetchall()
+        assert len(cards) == 2 and cards[0]["clock_out"] is None
+        assert open_card(sid)["id"] == cards[1]["id"]                      # 退勤を押すと新しい打刻が閉じる
+        assert [c["id"] for c in forgotten_cards(sid)] == [cards[0]["id"]]  # 前の打刻は「退勤忘れ」
+        punch(sid, "out", MultiDict({"break_min": "0"}), "admin")
+        db.commit()
+        cards = db.execute("SELECT * FROM timecards WHERE staff_id=? ORDER BY id", (sid,)).fetchall()
+        assert cards[0]["clock_out"] is None and cards[1]["clock_out"] is not None
+        first = start.date().replace(day=1)
+        s = month_summary(sid, first, date.today())
+        assert s["yakin"] == 0 and s["missing"] == 1                     # 前の打刻と今日の退勤をつなげて夜勤にしない
+        # すぐにもう一度出勤を押すと、出勤中なので断る
+        punch(sid, "in", MultiDict({"temp": "36.5"}), "admin")
+        msgs = punch(sid, "in", MultiDict({"temp": "36.5"}), "admin")
+        assert msgs[0][0] == "error" and "すでに" in msgs[0][1]
+
+
+def test_pay_rounding_half_up(client, app):
+    from decimal import Decimal
+
+    from ghms.payroll import compute_pay, yen_half_up
+
+    assert yen_half_up(Decimal("862.5")) == 863 and yen_half_up(862.5) == 863 and yen_half_up(862.49) == 862
+    sid = _sql(app, "INSERT INTO staff (name, status, pay_type, hourly_wage) VALUES ('佐藤 一郎', '在籍', '時給', '1150')")
+    # 9:00〜20:00（休憩なし）= 11時間、時間外3時間 × 1,150円 × 25% = 862.5円 → 863円
+    _sql(app, "INSERT INTO timecards (staff_id, date, clock_in, clock_out, break_min) VALUES (?, '2026-09-01', '09:00', '20:00', 0)", (sid,))
+    with app.test_request_context("/"):
+        from ghms.db import get_db
+        s = get_db().execute("SELECT * FROM staff WHERE id=?", (sid,)).fetchone()
+        d = compute_pay(s, date(2026, 9, 1), date(2026, 9, 30))
+    assert d["earnings"]["ot"] == 863 and d["earnings"]["base"] == 12650
+
+
+def test_nothing_before_system_start(client, app):
+    from datetime import timedelta
+
+    today = date.today()
+    _sql(app, "INSERT INTO homes (name, created_at) VALUES ('みどり', '2020-01-01 00:00:00')")
+    _sql(app, "INSERT INTO residents (name, kana, home_id, move_in, status) VALUES ('いまの人', 'い', 1, '2020-01-01', '入居中')")
+    found = _checks(app)
+    assert any(x["check"] == "journal" for x in found) and any(x["check"] == "records" for x in found)
+    titles = [t for _, t, _, _ in _titles(_todo(app))]
+    pf = (today.replace(day=1) - timedelta(days=1))
+    assert any(t.startswith(f"{pf.month}月の実績を全員・全日入れる（みどり）") for t in titles)
+    # 今日から使い始めた：きのうまでの書きもれ・先月の仕事は出さない
+    _sql(app, "UPDATE settings SET value=? WHERE key='system_start'", (today.isoformat(),))
+    found = _checks(app)
+    assert not any(x["check"] in ("journal", "records", "attendance") for x in found)
+    titles = [t for _, t, _, _ in _titles(_todo(app))]
+    assert not any("実績を全員" in t or "国保連" in t or "源泉所得税" in t for t in titles)
+    assert "みどりの業務日誌を書く" in titles   # 今日の分は出る
+    # 先月の書きもれは先月の1日から見る（7日より前の分も、直すまで出つづける）
+    _sql(app, "UPDATE settings SET value='2020-01-01' WHERE key='system_start'")
+    x = next(x for x in _checks(app) if x["check"] == "journal")
+    assert f"{(today - pf.replace(day=1)).days}日（{pf.month}/1、" in x["msg"]
+    # 設定の画面で直せる
+    post(client, "/settings", {"system_start": today.isoformat()})
+    assert not any(x["check"] == "journal" for x in _checks(app))
+    assert today.isoformat() in client.get("/settings").get_data(as_text=True)
+
+
+def test_journal_lists_residents_living_there_on_that_day(client):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "退居した人", "home_id": "1", "status": "退居", "move_in": "2026-01-01",
+                                      "move_out": "2026-09-30"})
+    post(client, "/m/residents/new", {"name": "これから入る人", "home_id": "1", "status": "入居中", "move_in": "2026-10-20"})
+    page = client.get("/journal?date=2026-09-15&home_id=1").get_data(as_text=True)
+    assert "退居した人" in page and "これから入る人" not in page
+    page = client.get("/journal?date=2026-10-25&home_id=1").get_data(as_text=True)
+    assert "退居した人" not in page and "これから入る人" in page
+
+
+def test_admin_sets_initial_pin(client, app):
+    post(client, "/m/staff/new", {"name": "新人 さん", "status": "在籍"})
+    post(client, "/users", {"action": "add", "username": "newbie", "password": "temppass1", "role": "staff", "staff_id": "1",
+                            "pin": "1234"})   # 推測されやすいPINはだめ
+    with app.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT COUNT(*) FROM users WHERE username='newbie'").fetchone()[0] == 0
+    post(client, "/users", {"action": "add", "username": "newbie", "password": "temppass1", "role": "staff", "staff_id": "1",
+                            "pin": "4826"})
+    # 事務所のPCですぐ打刻できる（ログインの前でも）
+    _register_device(client)
+    _logout(client)
+    page = client.get("/work/kiosk?staff_id=1").get_data(as_text=True)
+    k = re.search(r'name="_k" value="([0-9a-f]+)"', page).group(1)
+    client.post("/work/kiosk", data={"_k": k, "staff_id": "1", "action": "in", "temp": "36.4", "pin": "4826"})
+    with app.app_context():
+        from ghms.db import get_db
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM timecards").fetchone()[0] == 1
+        uid = db.execute("SELECT id FROM users WHERE username='newbie'").fetchone()[0]
+    # あとから管理者が入れ直す
+    client.post("/login", data={"username": "admin", "password": "password123"})
+    post(client, "/users", {"action": "set_pin", "id": str(uid), "pin": "1111"})
+    post(client, "/users", {"action": "set_pin", "id": str(uid), "pin": "5937"})
+    with app.app_context():
+        from werkzeug.security import check_password_hash
+
+        from ghms.db import get_db
+        db = get_db()
+        assert check_password_hash(db.execute("SELECT pin_hash FROM users WHERE id=?", (uid,)).fetchone()[0], "5937")
+        assert db.execute("SELECT COUNT(*) FROM audit_log WHERE action='user_pin_set'").fetchone()[0] == 2

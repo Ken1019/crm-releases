@@ -192,13 +192,21 @@ def _addon_days(name, codes, on):
     return sum(1 for c in days if _present(c))
 
 
+def addon_key(name):
+    """加算と記録票の項目を名前で合わせる：空白と終わりの「（Ⅰ）」などを取る（夜間支援等体制加算（Ⅰ）↔ 夜間支援等体制加算）"""
+    import re
+
+    n = re.sub(r"[\s　]+", "", str(name or ""))
+    return re.sub(r"[（(][^（）()]*[）)]$", "", n)
+
+
 def _in_range(d, start, end):
     s, e = parse_date(start), parse_date(end)
     return (s is None or s <= d) and (e is None or d <= e)
 
 
 def compute_benefit(first, last, home_id=None):
-    from .docs import mark_of, marks_map, record_columns
+    from .docs import mark_of, marks_map, month_context, record_columns, resident_days
 
     db = get_db()
     sync_open()
@@ -207,13 +215,22 @@ def compute_benefit(first, last, home_id=None):
     amap = attendance_map(first, last)
     price, rate = unit_price(), _shogu_rate(first)
     addons = db.execute("SELECT * FROM addons WHERE active=1 AND name NOT LIKE '%処遇改善%'").fetchall()
-    # 回数で数える加算は、実績記録票の同じ名前の項目のチェックを数える
-    cols = {c["label"]: c for c in record_columns()}
+    # 実績記録票の同じ名前の項目がある加算は、記録票のチェックを数える（記録票で外した夜は概算からも減る）
+    cols = {}
+    for c in record_columns():
+        cols.setdefault(c["label"], c)
+        cols.setdefault(addon_key(c["label"]), c)
     mmap = marks_map(first, last)
+    ctx = month_context(first, last)
     results = []
     for r in residents:
         # 在居期間外の日は None（実績が入っていても数えない）。在居中で未入力の日は ""
         day_codes = [amap.get((r["id"], d.isoformat()), "") if in_residence(r, d) else None for d in days]
+        away_nights = [x["away_night"] for x in resident_days(r, first, last, *ctx)]
+
+        def col_days(col, on):
+            return sum(1 for d, c, ok, an in zip(days, day_codes, on, away_nights)
+                       if ok and c is not None and mark_of(col, c, mmap.get((r["id"], d.isoformat(), col["id"])), an))
         codes = [c or "" for c in day_codes]
         missing = sum(1 for c in day_codes if c == "")
         billable = sum(1 for c in day_codes if c is not None and _present(c))
@@ -241,17 +258,22 @@ def compute_benefit(first, last, home_id=None):
             if not a["units"]:
                 warnings.append(f"「{a['name']}」の単位数が未入力")
                 continue
+            col = cols.get(a["name"]) or cols.get(addon_key(a["name"]))
             if a["unit_type"] == "回":
-                col = cols.get(a["name"])
                 if col is None:
                     warnings.append(f"「{a['name']}」：回数の加算は自動で数えていません（実績記録票に同じ名前の項目を作ると数えます）")
                     continue
-                n = sum(1 for d, c, ok in zip(days, day_codes, on)
-                        if ok and c is not None and mark_of(col, c, mmap.get((r["id"], d.isoformat(), col["id"]))))
+                n = col_days(col, on)
                 if n:
                     lines.append((a["name"], a["units"], n, "回"))
                 continue
-            n = _addon_days(a["name"], day_codes, on)
+            if a["unit_type"] == "日" and col is not None:
+                n = col_days(col, on)
+            elif "夜間支援" in a["name"]:
+                # 記録票の項目がないとき：在居の日のうち、出かけた日の夜（次の日が外泊・入院）は数えない
+                n = sum(1 for c, ok, an in zip(day_codes, on, away_nights) if ok and c is not None and _present(c) and not an)
+            else:
+                n = _addon_days(a["name"], day_codes, on)
             if a["unit_type"] == "日" and n:
                 lines.append((a["name"], a["units"], n, "日"))
             elif a["unit_type"] == "月" and n:

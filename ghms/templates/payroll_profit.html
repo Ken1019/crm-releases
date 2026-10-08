@@ -9,7 +9,7 @@
 </form>
 {% if months %}
 <div class="tablewrap card"><table class="list">
-  <thead><tr><th></th>{% for m in months %}<th class="num">{{ m.first.month }}月{% if m.estimated %}<br><small class="muted">見込み</small>{% endif %}</th>{% endfor %}<th class="num">合計</th></tr></thead>
+  <thead><tr><th></th>{% for m in months %}<th class="num">{{ m.first.month }}月{% if m.current %}<br><span class="pill warn">今月・見込み</span>{% elif m.estimated %}<br><small class="muted">見込み</small>{% endif %}</th>{% endfor %}<th class="num">合計</th></tr></thead>
   <tr class="total"><th colspan="{{ months|length + 2 }}">収入</th></tr>
   {% for k in inc_keys %}<tr><td>{{ k }}</td>{% for m in months %}<td class="num">{{ '{:,}'.format(m.income.get(k, 0)) }}</td>{% endfor %}<td class="num">{{ '{:,}'.format(inc_tot[k]) }}</td></tr>{% endfor %}
   <tr><th>収入の合計</th>{% for m in months %}<th class="num">{{ '{:,}'.format(m.income_total) }}</th>{% endfor %}<th class="num">{{ '{:,}'.format(total.income_total) }}</th></tr>
@@ -21,6 +21,6 @@
   <tr><td>人件費率</td>{% for m in months %}<td class="num">{{ m.labor_ratio ~ '%' if m.labor_ratio is not none else '—' }}</td>{% endfor %}
     <td class="num">{{ ((total.labor * 1000 // total.income_total) / 10) ~ '%' if total.income_total else '—' }}</td></tr>
 </table></div>
-<p class="muted small">「見込み」の月は、給与が保存されていない、または利用料の請求書がまだの月です（自動計算の金額で出しています）。給付費は国保連の審査で変わることがあります。</p>
-{% else %}<div class="card"><p>この年度はまだ始まっていません。</p></div>{% endif %}
+<p class="muted small">合計は、表に出している月だけの合計です。{% if skipped %}使い始める前の月と、実績・請求・給与・タイムカード・経費が何もない月（{{ skipped }}か月）は出していません。{% endif %}今月は月の途中なので「見込み」です。<br>「見込み」の月は、給与が保存されていない、または利用料の請求書がまだの月です（自動計算の金額で出しています）。給付費は国保連の審査で変わることがあります。</p>
+{% else %}<div class="card"><p>この年度に出せる月がありません（まだ始まっていないか、使い始める前の年度です）。</p></div>{% endif %}
 {% endblock %}

@@ -208,7 +208,7 @@ def _safe_next(default="views.dashboard"):
 def setup():
     """はじめての設定：事業所・類型・住居・使う機能・管理者をまとめて入力し、それに合わせて整える"""
     from . import runtime, setup_wizard
-    from .db import set_setting
+    from .db import set_setting, start_today
     from .entities import HOME_TYPE
 
     db = get_db()
@@ -235,6 +235,7 @@ def setup():
                 (username, request.form.get("display_name") or username, generate_password_hash(pw), "admin", now(), now()),
             )
             done = setup_wizard.apply(db, request.form, set_setting)
+            start_today()  # 使い始めた日（これより前の書きもれ・前の月の仕事は出さない）
             user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
             _login(user)
             g.user = user
@@ -408,7 +409,10 @@ def users():
         if action == "add":
             username = request.form.get("username", "").strip()
             pw = request.form.get("password", "")
+            pin = request.form.get("pin", "").strip()
             problem = "ユーザー名を入力してください。" if not username else password_problem(pw, username)
+            if not problem and pin:
+                problem = pin_problem(pin)
             if problem:
                 flash(problem, "error")
             elif db.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
@@ -422,7 +426,11 @@ def users():
                      request.form.get("staff_id", type=db_int)),
                 )
                 log_event("user_add", "users", cur.lastrowid, f"{username}（{ROLES[role]}）")
-                flash(f"「{username}」を追加しました。最初のログインでパスワードを変えてもらいます。", "ok")
+                if pin:
+                    db.execute("UPDATE users SET pin_hash=? WHERE id=?", (generate_password_hash(pin), cur.lastrowid))
+                    log_event("user_pin_set", "users", cur.lastrowid, f"{username}：はじめのPIN")
+                flash(f"「{username}」を追加しました。最初のログインでパスワードを変えてもらいます。"
+                      + ("はじめのPINを本人に伝えてください（打刻の画面ですぐ使えます。本人があとで変えられます）。" if pin else ""), "ok")
         elif target is None:
             abort(400)
         elif action == "password":
@@ -453,6 +461,16 @@ def users():
                 bump_session(uid)
                 log_event("user_" + action, "users", uid, target["username"])
                 flash(f"「{target['username']}」を{'使えるように' if action == 'enable' else '停止'}しました。", "ok")
+        elif action == "set_pin":
+            pin = request.form.get("pin", "").strip()
+            problem = pin_problem(pin)
+            if problem:
+                flash(problem, "error")
+            else:
+                db.execute("UPDATE users SET pin_hash=?, updated_at=? WHERE id=?", (generate_password_hash(pin), now(), uid))
+                bump_session(uid)
+                log_event("user_pin_set", "users", uid, target["username"])
+                flash(f"「{target['username']}」のPINを入れました。本人に伝えてください（本人が「パスワード変更」の画面で変えられます）。", "ok")
         elif action == "clear_pin":
             db.execute("UPDATE users SET pin_hash=NULL WHERE id=?", (uid,))
             bump_session(uid)

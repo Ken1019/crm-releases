@@ -12,7 +12,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from .auth import admin_required, log_event
 from .customize import feature_on, tracked_meetings
-from .db import get_db, get_setting, set_setting
+from .db import get_db, get_setting, set_setting, system_start
 from .forms import db_int
 from .views import parse_date
 
@@ -44,6 +44,7 @@ CHECK_FEATURE = {k: f for k, _, _, f in CHECKS}
 DEFAULT_TRAININGS = "虐待防止研修=虐待|365\n身体拘束適正化の研修=身体拘束|365\n感染症の研修=感染症|365\n業務継続計画（BCP）の研修=BCP,業務継続|365"
 # 職員が自分では直せないもの（職員の画面では「管理者に伝えること」にまとめる）
 STAFF_CANT_FIX = {"timecard", "shift_match", "leave5", "staff_training"}
+STD_MISSING = "標準報酬月額が未入力です。毎月の総支給から仮に決めています。資格取得のときの届出の額を入れてください"
 LEAVE5_EXPIRED = "期限が過ぎています（次の付与で守れるようにしましょう）"
 
 
@@ -114,9 +115,27 @@ def _item(level, check, who, msg, url, done=False):
     return {"level": level, "check": check, "name": CHECK_NAMES[check], "who": who, "msg": msg, "url": url, "done": done}
 
 
-def _days_back(n):
-    today = date.today()
-    return [today - timedelta(days=i) for i in range(n, 0, -1)]
+def _fmt_few(days, k=3):
+    """件数と、はじめの何日か（例「12日（9/1、9/2、9/3 ほか）」）"""
+    s = "、".join(f"{d.month}/{d.day}" for d in days[:k])
+    return f"{len(days)}日（{s}{' ほか' if len(days) > k else ''}）"
+
+
+def check_days(today=None):
+    """書きもれを見る日：先月の1日（設定の日数のほうが長ければそちら）〜きのう。使い始めた日より前は見ない。
+    先月の書きもれは、直すまで出つづける"""
+    today = today or date.today()
+    lo = min(_month_first(today, 1), today - timedelta(days=look_days()))
+    ss = system_start()
+    if ss and ss > lo:
+        lo = ss
+    return [lo + timedelta(days=i) for i in range((today - lo).days)]
+
+
+def before_start(last):
+    """その月（の末日 last）がまるごと使い始めた日より前か"""
+    ss = system_start()
+    return bool(ss and last < ss)
 
 
 def _fmt_days(days):
@@ -139,6 +158,8 @@ def unconfirmed_payroll(months=3):
         first = _month_first(today, back)
         last = _month_first(today, back - 1) - timedelta(days=1)
         ym = first.strftime("%Y-%m")
+        if before_start(last):
+            continue  # 使い始める前の月は見ない
         worked = {r[0] for r in db.execute("SELECT DISTINCT staff_id FROM timecards WHERE date BETWEEN ? AND ?",
                                            (first.isoformat(), last.isoformat()))}
         if not worked:
@@ -220,12 +241,17 @@ def run_checks(staff_id=None, include_done=False):
                 items.append(_item("warn", "staff_training", s["name"], f"「{topic}」の受講が{days}日以内に確認できません", url))
 
     # 日誌・支援記録は職員みんなで書くので、職員の画面にも出す
-    n = look_days()
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
-    days = _days_back(n)
+    days = check_days(today)
     if on("journal") or on("records"):
         res_rows = db.execute(f"SELECT * FROM residents WHERE {RES_FOR_JOURNAL} ORDER BY kana").fetchall()
-    if on("journal"):
+        if staff_id:
+            # 職員は、自分の「主な勤務住居」が入っていれば、その住居の分だけ
+            me = db.execute("SELECT home_id FROM staff WHERE id=?", (staff_id,)).fetchone()
+            if me and me["home_id"] and any(h["id"] == me["home_id"] for h in homes):
+                homes = [h for h in homes if h["id"] == me["home_id"]]
+                res_rows = [r for r in res_rows if r["home_id"] == me["home_id"]]
+    if on("journal") and days:
         since = days[0].isoformat()
         done = {(r[0], r[1]) for r in db.execute("SELECT home_id, date FROM daily_logs WHERE date >= ?", (since,))}
         for h in homes:
@@ -235,9 +261,9 @@ def run_checks(staff_id=None, include_done=False):
             miss = [d for d in days if (start is None or d >= start) and any(lived_there(r, d) for r in hres)
                     and (h["id"], d.isoformat()) not in done]
             if miss:
-                items.append(_item("warn", "journal", h["name"], f"業務日誌がない日：{_fmt_days(miss)}",
+                items.append(_item("warn", "journal", h["name"], f"業務日誌がない日：{_fmt_few(miss)}",
                                    url_for("views.journal", home_id=h["id"], date=miss[0].isoformat())))
-    if on("records"):
+    if on("records") and days:
         since = days[0].isoformat()
         have = {(r[0], r[1]) for r in db.execute("SELECT resident_id, date FROM support_records WHERE date >= ?", (since,))}
         codes = {(r[0], r[1]): r[2] for r in db.execute("SELECT resident_id, date, code FROM attendance WHERE date >= ?", (since,))}
@@ -248,7 +274,7 @@ def run_checks(staff_id=None, include_done=False):
             miss = [d for d in days if (mi is None or mi <= d) and (mo is None or d <= mo)
                     and codes.get((r["id"], d.isoformat()), "○") in ("○", "日") and (r["id"], d.isoformat()) not in have]
             if miss:
-                items.append(_item("warn", "records", r["name"], f"支援記録がない日：{_fmt_days(miss)}",
+                items.append(_item("warn", "records", r["name"], f"支援記録がない日：{_fmt_few(miss)}",
                                    url_for("views.journal", home_id=r["home_id"], date=miss[0].isoformat())))
 
     if not staff_id:
@@ -284,7 +310,7 @@ def run_checks(staff_id=None, include_done=False):
             first = last.replace(day=1)
             codes = {(r[0], r[1]) for r in db.execute("SELECT resident_id, date FROM attendance WHERE date BETWEEN ? AND ?",
                                                       (first.isoformat(), last.isoformat()))}
-            for r in residents_in_month(first, last):
+            for r in ([] if before_start(last) else residents_in_month(first, last)):
                 miss = [d for d in month_days(first, last) if in_residence(r, d) and (r["id"], d.isoformat()) not in codes]
                 if miss:
                     # 請求は毎月10日まで。10日を過ぎたら急ぎ
@@ -297,6 +323,9 @@ def run_checks(staff_id=None, include_done=False):
                         if not (str(s[f] or "")).strip()]
                 if lack:
                     items.append(_item("warn", "staff_info", s["name"], "未入力：" + "・".join(lack),
+                                       url_for("crud.edit", key="staff", rid=s["id"])))
+                if feature_on("payroll") and s["social_insurance"] and not s["std_monthly"]:
+                    items.append(_item("warn", "staff_info", s["name"], STD_MISSING,
                                        url_for("crud.edit", key="staff", rid=s["id"])))
 
     names = None
@@ -359,13 +388,16 @@ def run_checks(staff_id=None, include_done=False):
                 took = sum(1 for d in taken.get(s["id"], []) if gd.isoformat() <= d < end.isoformat())
                 if took >= 5 or not -60 <= left <= 120:  # 何年も前の付与は出さない
                     continue
+                if before_start(end):
+                    continue  # 期限が使い始める前に過ぎていたもの
                 url = url_for("leave.staff", sid=s["id"]) if not staff_id else url_for("work.my_shift")
                 base = f"{gd}付与の有給：{end}までに5日のうち {took}日"
                 if left < 0:
                     # 過ぎてしまったものは直せない。60日だけ「今月」に出して、次の付与で守れるように
                     items.append(_item("warn", "leave5", s["name"], f"{base}。{LEAVE5_EXPIRED}", url))
                 else:
-                    items.append(_item("ng" if left <= 30 else "warn", "leave5", s["name"], f"{base}（あと{left}日）", url))
+                    items.append(_item("ng" if left <= 30 else "warn", "leave5", s["name"],
+                                       f"{base}（{'今日まで' if left == 0 else f'あと{left}日'}）", url))
     if on("health") and not staff_id:
         from .work import is_unwell
 

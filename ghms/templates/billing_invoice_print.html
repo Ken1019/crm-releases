@@ -15,6 +15,7 @@ th,td{border:1px solid #555;padding:8px 10px}th{background:#f2f2f2}td.r{text-ali
 .bar{text-align:center;padding:14px;font-family:sans-serif}
 .bar button,.bar a{font-size:16px;padding:10px 26px;margin:0 6px;border-radius:10px;border:2px solid #e86f1f;background:#ff8a3d;color:#fff;cursor:pointer;text-decoration:none;display:inline-block}
 .bar a{background:#fff;color:#333;border-color:#ccc}
+@page{size:A4;margin:10mm}
 @media print{body{background:#fff}.page{margin:0;width:auto;min-height:auto}.bar{display:none}}
 </style></head><body>
 <div class="bar"><button onclick="window.print()">🖨️ 印刷する</button><a href="{{ url_for('billing.invoices', ym=inv['ym']) }}">もどる</a></div>

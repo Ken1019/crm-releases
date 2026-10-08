@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 
 from flask import current_app, g
 
@@ -111,7 +111,40 @@ def init_db(path):
     from .docs import seed_record_columns
 
     seed_record_columns(con)
+    ensure_system_start(con)
     con.close()
+
+
+def ensure_system_start(con):
+    """「使い始めた日」（system_start）。前の版から使っているデータベースで、まだ入っていなければ1回だけ入れる：
+    住居・入居者・職員をいちばん早く登録した日（なければ今日）。はじめての設定の前（ログインする人がいない）は入れない"""
+    if con.execute("SELECT 1 FROM settings WHERE key='system_start'").fetchone():
+        return
+    if not con.execute("SELECT COUNT(*) FROM users").fetchone()[0]:
+        return
+    days = []
+    for t in ("homes", "residents", "staff"):
+        v = con.execute(f"SELECT MIN(substr(created_at, 1, 10)) FROM {t} WHERE created_at IS NOT NULL AND created_at != ''").fetchone()[0]
+        try:
+            days.append(date.fromisoformat(v))
+        except (TypeError, ValueError):
+            pass
+    start = min(days + [date.today()])
+    con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('system_start', ?)", (start.isoformat(),))
+    con.commit()
+
+
+def start_today():
+    set_setting("system_start", date.today().isoformat())
+
+
+def system_start():
+    """このシステムを使い始めた日。これより前の日の書きもれ・前の月の仕事は、今日のやること・実地指導チェックに出さない"""
+    v = (get_setting("system_start", "") or "").strip()
+    try:
+        return date.fromisoformat(v[:10])
+    except ValueError:
+        return None
 
 
 def _ensure_columns(con, table, cols):

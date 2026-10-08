@@ -178,10 +178,13 @@ def record_columns(active_only=True):
     return get_db().execute(sql).fetchall()
 
 
-def _auto_mark(col, code):
-    """手で直していないときに印がつくか"""
+def _auto_mark(col, code, away_night=False):
+    """手で直していないときに印がつくか。
+    夜間支援など（在居の日に自動）は、その夜に住居にいない日（出発した日の夜）にはつけない"""
     if col["builtin"]:
         return code == dict((k, c) for k, _, c in BUILTIN_COLUMNS).get(col["builtin"])
+    if (col["auto"] or "") == "stay" and away_night:
+        return False
     return code in AUTO_CODES.get(col["auto"] or "", ())
 
 
@@ -190,10 +193,14 @@ def marks_map(first, last):
     return {(m["resident_id"], m["date"], m["col_id"]): m["value"] for m in rows}
 
 
-def mark_of(col, code, stored):
+def mark_of(col, code, stored, away_night=False):
     if col["builtin"] or stored is None:
-        return _auto_mark(col, code)
+        return _auto_mark(col, code, away_night)
     return stored == "○"
+
+
+AWAY_CODES = ("外", "帰", "入")
+ABSENCE_PLACE = {"入院": "入院", "帰宅（帰省）": "外泊", "外泊": "外泊"}
 
 
 def _place(code):
@@ -204,38 +211,83 @@ def _place(code):
     return "home" if code in STAY_CODES else None
 
 
-def status_label(prev, code, home):
-    """サービス提供の状況（記載例：「〇〇ホーム→外泊」「外泊」「外泊戻り」。ふつうに支援した日は空欄）"""
-    cur, before = _place(code), _place(prev)
-    if cur is None:
-        return ""
-    if cur == "home":
-        return f"{before}戻り" if before in ("外泊", "入院") else ""
-    if before == cur:
-        return cur
-    return f"{before if before in ('外泊', '入院') else (home or '住居')}→{cur}"
+def absence_nights(first, last):
+    """入院・帰省・外泊の登録から、住居で寝ていない夜と戻った日。
+    nights[(入居者, 日)] = 外泊／入院（出発した日〜戻る前の日の夜）、back[(入居者, 戻った日)] = 外泊／入院"""
+    nights, back = {}, {}
+    rows = get_db().execute("SELECT resident_id, kind, start_date, end_date FROM absences WHERE start_date IS NOT NULL"
+                            " AND start_date != '' AND start_date <= ?", (last.isoformat(),)).fetchall()
+    for a in rows:
+        place = ABSENCE_PLACE.get(a["kind"])
+        s, e = parse_date(a["start_date"]), parse_date(a["end_date"])
+        if not place or s is None or (e is not None and e <= s):
+            continue
+        if e is not None and first <= e <= last + timedelta(days=1):
+            back[(a["resident_id"], e.isoformat())] = place
+        d = max(s, first)
+        stop = min(e - timedelta(days=1), last) if e else last
+        while d <= stop:
+            nights[(a["resident_id"], d.isoformat())] = place
+            d += timedelta(days=1)
+    return nights, back
+
+
+def resident_days(r, first, last, amap, nights, back):
+    """入居者の月の日ごと：実績の記号・在居期間か・その夜に住居にいないか・サービス提供の状況。
+    amap は前の月の末日〜次の月の1日まで入れておく（月をまたぐ外泊・入院のため）"""
+    out = []
+    home = r["hname"] or "住居"
+
+    def code_at(d):
+        return amap.get((r["id"], d.isoformat()), "") if in_residence(r, d) else ""
+
+    for d in month_days(first, last):
+        inres = in_residence(r, d)
+        code = code_at(d) if inres else ""
+        prev, nxt = code_at(d - timedelta(days=1)), code_at(d + timedelta(days=1))
+        key = (r["id"], d.isoformat())
+        label = ""
+        cur = _place(code)
+        if cur in ("外泊", "入院"):
+            before = _place(prev)
+            label = f"{before}→{cur}" if before in ("外泊", "入院") and before != cur else cur
+        elif inres and (cur == "home" or code == ""):
+            parts = []
+            came = _place(prev) if prev in AWAY_CODES else back.get(key)
+            if came:
+                parts.append(f"{came}戻り")
+            go = _place(nxt) if nxt in AWAY_CODES else nights.get(key)
+            if go:
+                parts.append(f"{home}→{go}")
+            label = "・".join(parts)
+        away_night = inres and (code in AWAY_CODES or nxt in AWAY_CODES or key in nights)
+        out.append({"d": d, "inres": inres, "code": code, "away_night": away_night, "label": label})
+    return out
+
+
+def month_context(first, last):
+    """記録票・印の表・給付費の概算で使う、前後1日を含めた実績と入院・外泊の夜"""
+    amap = attendance_map(first - timedelta(days=1), last + timedelta(days=1))
+    nights, back = absence_nights(first, last)
+    return amap, nights, back
 
 
 def record_sheet_data(first, last, rid=None):
     sync_open()
     residents = [r for r in residents_in_month(first, last) if rid is None or r["id"] == rid]
-    amap = attendance_map(first - timedelta(days=1), last)
+    amap, nights, back = month_context(first, last)
     mmap = marks_map(first, last)
     cols = record_columns()
     sheets = []
     for r in residents:
         rows = []
-        before = first - timedelta(days=1)
-        prev = amap.get((r["id"], before.isoformat()), "") if in_residence(r, before) else ""
-        for d in month_days(first, last):
+        for x in resident_days(r, first, last, amap, nights, back):
             # 入居前・退居後の日は、実績も印もつけない
-            inres = in_residence(r, d)
-            code = amap.get((r["id"], d.isoformat()), "") if inres else ""
-            marks = [mark_text(c) if inres and mark_of(c, code, mmap.get((r["id"], d.isoformat(), c["id"]))) else ""
+            d, code = x["d"], x["code"]
+            marks = [mark_text(c) if x["inres"] and mark_of(c, code, mmap.get((r["id"], d.isoformat(), c["id"]), None),
+                                                             x["away_night"]) else ""
                      for c in cols]
-            rows.append({"d": d, "w": WEEK[d.weekday()], "code": code, "label": status_label(prev, code, r["hname"]),
-                         "marks": marks})
-            prev = code
+            rows.append({"d": d, "w": WEEK[d.weekday()], "code": code, "label": x["label"], "marks": marks})
         count = Counter(x["code"] for x in rows)
         rec = str(r["recipient_no"] or "").strip()
         sheets.append({"r": r, "rows": rows, "stay": count["○"] + count["日"], "home": count["帰"], "hosp": count["入"],
@@ -331,13 +383,14 @@ def record_marks():
         return render_template("record_marks.html", col=None, cols=cols, ym=ym, first=first, homes=homes, home_id=home_id,
                                no_home=no_home_count())
     sync_open()
-    amap = attendance_map(first, last)
+    amap, nights, back = month_context(first, last)
+    info = {r["id"]: resident_days(r, first, last, amap, nights, back) for r in residents}
     if request.method == "POST":
         for r in residents:
-            for d in days:
-                code = amap.get((r["id"], d.isoformat()), "")
+            for x in info[r["id"]]:
+                d, code = x["d"], x["code"]
                 checked = bool(request.form.get(f"m{r['id']}_{d.day}"))
-                if not in_residence(r, d) or checked == _auto_mark(col, code):  # 自動と同じなら記録しない（実績を直したときに追いかける）
+                if not x["inres"] or checked == _auto_mark(col, code, x["away_night"]):  # 自動と同じなら記録しない（実績を直したときに追いかける）
                     db.execute("DELETE FROM record_marks WHERE resident_id=? AND date=? AND col_id=?", (r["id"], d.isoformat(), col["id"]))
                 else:
                     db.execute("INSERT OR REPLACE INTO record_marks (resident_id, date, col_id, value, updated_by, updated_at)"
@@ -350,11 +403,11 @@ def record_marks():
     rows = []
     for r in residents:
         cells = []
-        for d in days:
-            inres = in_residence(r, d)
-            code = amap.get((r["id"], d.isoformat()), "") if inres else ""
-            cells.append({"d": d, "code": code, "on": inres and mark_of(col, code, mmap.get((r["id"], d.isoformat(), col["id"]))),
-                          "stay": code in STAY_CODES, "inres": inres})
+        for x in info[r["id"]]:
+            d, code, inres = x["d"], x["code"], x["inres"]
+            cells.append({"d": d, "code": code, "on": inres and mark_of(col, code, mmap.get((r["id"], d.isoformat(), col["id"])),
+                                                                         x["away_night"]),
+                          "stay": code in STAY_CODES and not x["away_night"], "inres": inres})
         rows.append({"r": r, "cells": cells, "total": sum(1 for c in cells if c["on"])})
     return render_template("record_marks.html", col=col, cols=cols, ym=ym, first=first, homes=homes, home_id=home_id,
                            rows=rows, days=days, WEEK=WEEK, AUTO_KINDS=AUTO_KINDS, mark=mark_text(col), no_home=no_home_count())

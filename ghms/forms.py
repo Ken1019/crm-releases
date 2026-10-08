@@ -104,6 +104,7 @@ NUM_SETTINGS = {
     "pay_night_rate": (0, 200, False),
     "pay_break_default": (0, 600, True),
     "pay_max_shift_hours": (1, 48, False),
+    "pay_forgot_hours": (1, 48, False),
     "pay_fever": (34, 43, False),
     "pay_late_grace": (0, 600, True),
     "ins_health": (0, 100, False),

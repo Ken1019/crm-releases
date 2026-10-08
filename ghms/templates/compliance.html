@@ -17,7 +17,7 @@
   <input type="hidden" name="_csrf" value="{{ csrf_token }}">
   <fieldset class="wide"><legend>使うチェック</legend>
     {% for k, name, why, feat in CHECKS %}<label class="chip"><input type="checkbox" name="on::{{ k }}" value="1"{% if k not in off %} checked{% endif %}> {{ name }}</label>{% endfor %}</fieldset>
-  <label><span>書きもれを見る日数（今日をのぞく）</span><input type="number" name="comp_days" value="{{ days }}" min="1" max="60" class="w5"> 日</label>
+  <label><span>書きもれを見る日数（今日をのぞく。先月の1日〜きのうは、いつも見ます）</span><input type="number" name="comp_days" value="{{ days }}" min="1" max="60" class="w5"> 日</label>
   <label class="wide"><span>職員ごとに受けているか見る研修（1行に「名前=さがす言葉,言葉|日数」）</span>
     <textarea name="comp_trainings" rows="5">{{ trainings }}</textarea>
     <small class="muted">「研修受講記録」の研修名にさがす言葉が入っているか、「会議・委員会」のうち研修の回（種別か議題に「研修」が入っているもの。委員会だけの回は数えません）にさがす言葉が入っていて、出席者に名前があれば受講とみなします。出席者は「、」「,」「・」「/」や空白で区切って書き、名前は職員の情報と同じ書き方にしてください（「田中」と「田中太郎」は別の人です）。全員が出たときは「全員」と書きます。</small></label>

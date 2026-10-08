@@ -207,11 +207,20 @@ LOG_FIELDS = ["day_staff", "night_staff", "residents_count", "absent", "summary"
 REC_FIELDS = ["temperature", "meal", "medication", "mood", "content", "staff"]
 
 
-def _home_residents(home_id):
-    if home_id:
-        return get_db().execute(f"SELECT * FROM residents WHERE home_id=? AND ({ACTIVE_RES}) ORDER BY room, kana",
-                                (home_id,)).fetchall()
-    return get_db().execute(f"SELECT * FROM residents WHERE {ACTIVE_RES} ORDER BY room, kana").fetchall()
+def _home_residents(home_id, d=None):
+    """その日に住居で暮らしていた入居者（入居日〜退居日）。退居にした方も、その日が入居中の期間なら出す。
+    home_id=0 は住居が入っていない方"""
+    from .compliance import RES_FOR_JOURNAL, lived_there
+
+    d = d or date.today()
+    if home_id == 0:
+        where, args = "home_id IS NULL", ()
+    elif home_id:
+        where, args = "home_id=?", (home_id,)
+    else:
+        where, args = "1=1", ()
+    rows = get_db().execute(f"SELECT * FROM residents WHERE {where} AND ({RES_FOR_JOURNAL}) ORDER BY room, kana", args).fetchall()
+    return [r for r in rows if lived_there(r, d)]
 
 
 @bp.route("/journal", methods=["GET", "POST"])
@@ -225,10 +234,7 @@ def journal():
     # home_id=0 は「住居未設定」（住居が入っていない入居者）。業務日誌は住居なし（NULL）として保存する
     log_home = None if home_id == 0 else home_id
     slot = request.values.get("slot") if request.values.get("slot") in TIME_SLOT else "終日"
-    if home_id == 0:
-        residents = db.execute(f"SELECT * FROM residents WHERE home_id IS NULL AND ({ACTIVE_RES}) ORDER BY room, kana").fetchall()
-    else:
-        residents = _home_residents(home_id)
+    residents = _home_residents(home_id, d)
 
     if request.method == "POST":
         log = {f: (request.form.get(f, "").strip() or None) for f in LOG_FIELDS}
@@ -609,6 +615,13 @@ def settings():
                     bad.append(f"「{label}」は{err}")
                     continue
             set_setting(k, v[:500])
+        if "system_start" in request.form:
+            v = request.form.get("system_start", "").strip()
+            d = parse_date(v)
+            if d is None or d > date.today():
+                bad.append("「使い始めた日」は今日までの日付を入れてください")
+            else:
+                set_setting("system_start", d.isoformat())
         from .auth import log_event
 
         log_event("settings")
@@ -622,7 +635,7 @@ def settings():
     for k, label, *opts in SETTINGS:
         choices = [(o, o) if isinstance(o, str) else o for o in opts[0]] if opts else None
         items.append((k, label, get_setting(k, SETTING_DEFAULTS.get(k, "")), choices, NUM_SETTINGS.get(k)))
-    return render_template("settings.html", items=items)
+    return render_template("settings.html", items=items, system_start=get_setting("system_start", ""))
 
 
 @bp.route("/backup")
@@ -667,7 +680,7 @@ AUDIT_ACTIONS = {
     "create": "登録", "update": "更新", "delete": "削除", "password_change": "パスワード変更", "settings": "設定の変更",
     "user_add": "ユーザー追加", "user_password": "パスワード再設定", "user_role": "権限の変更", "user_disable": "ユーザー停止",
     "user_enable": "ユーザー再開", "user_unlock": "ロック解除", "reauth": "管理者画面の本人確認",
-    "pin_set": "PINの設定", "pin_clear": "PINを消した", "user_pin_clear": "PINを消した（管理者）",
+    "pin_set": "PINの設定", "pin_clear": "PINを消した", "user_pin_set": "PINの設定（管理者）", "user_pin_clear": "PINを消した（管理者）",
     "device_add": "PIN端末の登録", "device_remove": "PIN端末の解除",
     "update_check": "更新の確認", "update_install": "更新の開始", "update_failed": "更新の失敗",
 }

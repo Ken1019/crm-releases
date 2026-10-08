@@ -9,7 +9,7 @@
 <a class="b" href="{{ url_for('docs.record_sheets_export', ym=ym, rid=rid or '') }}">Excelで出す</a>
 <a class="b" href="{{ url_for('docs.record_marks', ym=ym) }}">✅ 夜間支援などを入れる</a>
 <a class="b" href="{{ url_for('docs.record_columns_settings') }}">➕ 項目を増やす・変える</a>
-<span class="note">実績は「請求・お金」→「実績を入れる」の内容です。様式18-1に合わせた形です。サービス提供の状況は実績から「住居→外泊」「外泊」「外泊戻り」のように自動で入り、ふつうに支援した日は空欄です。</span>
+<span class="note">実績は「請求・お金」→「実績を入れる」の内容です。様式18-1に合わせた形です。サービス提供の状況は実績から、出かけた日に「住居→外泊」、その間の日に「外泊」、戻った日に「外泊戻り」と自動で入り、ふつうに支援した日は空欄です。</span>
 {% endblock %}
 {% block pages %}
 <style>

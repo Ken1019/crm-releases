@@ -65,6 +65,7 @@ form.inline { display:inline; }
 .flash { padding:8px 14px; border-radius:12px; margin-bottom:10px; background:var(--sky-soft); font-weight:bold; font-size:1.05em; }
 .flash.ok { background:var(--green-soft); color:var(--green); } .flash.ok::before { content:"✔ "; }
 .flash.error { background:var(--ng-soft); color:var(--ng); } .flash.error::before { content:"！ "; }
+.flash.warn { background:var(--warn-soft); color:var(--warn); } .flash.warn::before { content:"！ "; }
 .guide { background:var(--sky-soft); border-radius:12px; padding:7px 14px; margin:0 0 10px; color:#1f5f8b; font-size:.9em; line-height:1.6; }
 .guide::before { content:"💡 "; }
 

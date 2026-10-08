@@ -10,6 +10,9 @@
     {% elif num %}<input name="{{ k }}" value="{{ v }}" type="number" min="{{ num[0] }}" max="{{ num[1] }}" step="{{ '1' if num[2] else 'any' }}" inputmode="decimal">
     {% else %}<input name="{{ k }}" value="{{ v }}">{% endif %}</label>
   {% endfor %}
+  <label><span>使い始めた日（このシステムで記録をつけはじめた日）</span>
+    <input type="date" name="system_start" value="{{ system_start }}">
+    <small class="muted">この日より前の日誌・支援記録の書きもれや、この日より前の月の請求・給与の仕事は、「今日のやること」と「実地指導チェック」に出しません（紙で記録していた期間のため）。前のデータもこのシステムに入れたときは、その最初の日に直してください。</small></label>
   <div class="actions wide"><button class="btn primary">💾 保存する</button></div>
 </form>
 {% endblock %}

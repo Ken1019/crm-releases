@@ -24,7 +24,14 @@
   <h1><span class="avatar">{{ p.s['name'][:1] }}</span> {{ p.s['name'] }} さん</h1>
   <form method="post" id="pinform" class="form">
     <input type="hidden" name="_k" value="{{ kcsrf }}"><input type="hidden" name="staff_id" value="{{ p.s['id'] }}">
-    {% if p.card %}
+    {% if p.card and p.stale %}
+    <p class="flash warn wide">{{ p.card['date'][5:].replace('-', '/') }} {{ p.card['clock_in'] }} からの出勤のままです。夜勤明けなら「退勤する」、前回の退勤を押し忘れて今から働くなら「出勤する」をえらんでください。</p>
+    <fieldset class="wide"><legend>どちらですか</legend>
+      <label class="chip"><input type="radio" name="action" value="out" checked> 🏠 退勤する（{{ p.card['clock_in'] }}からの勤務を終える）</label>
+      <label class="chip"><input type="radio" name="action" value="in"> ☀️ 出勤する（前回の退勤を押し忘れた）</label></fieldset>
+    <label><span>休憩した時間（分）※退勤のとき</span><input type="number" name="break_min" min="0" max="600" value="{{ default_break }}" class="w5"></label>
+    <label><span>体温 ※出勤のときは必須</span><input type="number" name="temp" step="0.1" min="34" max="42" inputmode="decimal" placeholder="36.5" class="w5"> ℃</label>
+    {% elif p.card %}
     <input type="hidden" name="action" value="out">
     <p class="pill ok big">{{ p.card['clock_in'] }} から勤務中 → 退勤します</p>
     <label><span>休憩した時間（分）</span><input type="number" name="break_min" min="0" max="600" value="{{ default_break }}" class="w5"></label>

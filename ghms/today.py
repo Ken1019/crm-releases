@@ -5,6 +5,7 @@
 このリストを上から片づければ、記録・請求・給与・研修・委員会などの運営の決まりを守れるようにする。
 """
 
+import json
 import re
 from collections import Counter
 from datetime import date, timedelta
@@ -112,7 +113,7 @@ def build(user_admin=True, staff_id=None, alerts=None):
     """{groups: [{level, label, items, left}], total, left, done}。項目＝{key, title, detail, url, done, manual, level}
     alerts：ホームのお知らせ（dashboard_alerts）。もう作ってあれば渡す（同じ計算を2回しない）"""
     from .billing import in_residence
-    from .compliance import RES_FOR_JOURNAL, lived_there
+    from .compliance import RES_FOR_JOURNAL, before_start, lived_there
 
     db = get_db()
     today = date.today()
@@ -124,6 +125,12 @@ def build(user_admin=True, staff_id=None, alerts=None):
 
     # ---------------- 毎日
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
+    all_homes = homes
+    if not user_admin and staff_id:
+        # 職員は、自分の「主な勤務住居」が入っていれば、その住居の日誌・支援記録だけ（入っていなければ全部）
+        me = db.execute("SELECT home_id FROM staff WHERE id=?", (staff_id,)).fetchone()
+        if me and me["home_id"]:
+            homes = [h for h in homes if h["id"] == me["home_id"]] or homes
     residents = db.execute(f"SELECT * FROM residents WHERE {RES_FOR_JOURNAL} ORDER BY kana").fetchall()
     codes = {r[0]: r[1] for r in db.execute("SELECT resident_id, code FROM attendance WHERE date=?", (ts,))}
     here = [r for r in residents if lived_there(r, today)]  # 今日、入居している人（入居日〜退居日）
@@ -204,19 +211,31 @@ def build(user_admin=True, staff_id=None, alerts=None):
         older = [_month_back(today, b) for b in (2, 3)]  # 2・3か月前（データがある月だけ見る）
         att_months = {r[0] for r in db.execute("SELECT DISTINCT substr(date,1,7) FROM attendance WHERE date BETWEEN ? AND ?",
                                                (older[-1][0].isoformat(), pl.isoformat()))}
+        prev_off = before_start(pl)  # 先月がまるごと使い始める前なら、先月の仕事は出さない
         if feature_on("billing"):
-            from .billing import month_days, residents_in_month
+            from .billing import NO_HOME, month_days, residents_in_month
 
-            have = {(r[0], r[1]) for r in db.execute("SELECT resident_id, date FROM attendance WHERE date BETWEEN ? AND ?",
-                                                     (pf.isoformat(), pl.isoformat()))}
-            miss = sum(1 for r in residents_in_month(pf, pl) for d in month_days(pf, pl)
-                       if in_residence(r, d) and (r["id"], d.isoformat()) not in have)
             lvl = "over" if today.day > 10 else ("today" if today.day >= 8 else "week")
-            add(lvl, f"{pf.month}月の実績を全員・全日入れる", f"あと {miss}日分" if miss else "入っています",
-                url_for("billing.attendance", ym=pym), done=not miss)
-            for f, _ in [(pf, pl)] + older:
+            if not prev_off:
+                have = {(r[0], r[1]) for r in db.execute("SELECT resident_id, date FROM attendance WHERE date BETWEEN ? AND ?",
+                                                         (pf.isoformat(), pl.isoformat()))}
+                miss = Counter()
+                in_month = residents_in_month(pf, pl)
+                for r in in_month:
+                    miss[r["home_id"] or NO_HOME] += sum(1 for d in month_days(pf, pl)
+                                                         if in_residence(r, d) and (r["id"], d.isoformat()) not in have)
+                # 住居ごと（入居者がいた住居だけ）。住居が入っていない方は「住居未設定」
+                hids = [h["id"] for h in all_homes if any(r["home_id"] == h["id"] for r in in_month)]
+                if any(not r["home_id"] for r in in_month):
+                    hids.append(NO_HOME)
+                hname = {h["id"]: h["name"] for h in all_homes}
+                for hid in hids:
+                    n = miss[hid]
+                    add(lvl, f"{pf.month}月の実績を全員・全日入れる（{hname.get(hid, '住居未設定')}）",
+                        f"あと {n}日分" if n else "入っています", url_for("billing.attendance", ym=pym, home_id=hid), done=not n)
+            for f, l in [(pf, pl)] + older:
                 ym = _month(f)
-                if f != pf and ym not in att_months:
+                if before_start(l) or (f != pf and ym not in att_months):
                     continue
                 for key in ("kokuho", "record_check"):
                     if f != pf and (key, ym) in marks:
@@ -229,14 +248,15 @@ def build(user_admin=True, staff_id=None, alerts=None):
 
             n_res = len(residents_in_month(pf, pl))
             n_inv = db.execute("SELECT COUNT(*) FROM invoices WHERE ym=?", (pym,)).fetchone()[0]
-            add("week" if today.day <= 15 else "over", f"{pf.month}月分の利用料の請求書を作る",
-                f"{n_inv}/{n_res}名" if n_res else "対象の入居者がいません",
-                url_for("billing.invoices", ym=pym), done=n_inv >= n_res)
+            if not prev_off:
+                add("week" if today.day <= 15 else "over", f"{pf.month}月分の利用料の請求書を作る",
+                    f"{n_inv}/{n_res}名" if n_res else "対象の入居者がいません",
+                    url_for("billing.invoices", ym=pym), done=n_inv >= n_res)
             inv_months = {r[0] for r in db.execute("SELECT DISTINCT ym FROM invoices WHERE ym BETWEEN ? AND ?",
                                                    (_month(older[-1][0]), pym))}
-            for f, _ in [(pf, pl)] + older:
+            for f, l in [(pf, pl)] + older:
                 ym = _month(f)
-                if f != pf and (ym not in att_months | inv_months or ("user_invoice", ym) in marks):
+                if before_start(l) or (f != pf and (ym not in att_months | inv_months or ("user_invoice", ym) in marks)):
                     continue
                 manual("month" if f == pf else "over", "user_invoice", ym, url_for("billing.invoices", ym=ym),
                        title=f"{f.month}月分：{MANUAL['user_invoice'][0]}")
@@ -253,8 +273,14 @@ def build(user_admin=True, staff_id=None, alerts=None):
                     add("over", f"{f.month}月分の給与を確定する", f"まだ確定していない職員が {n_left}人います",
                         url_for("payroll.index", ym=_month(f)))
             ym = _month(today)
-            manual("over" if today.day > 10 else ("today" if today.day >= 7 else "week"), "gensen", ym,
-                   url_for("payroll.index", ym=pym), title=f"{today.month}月10日まで：源泉所得税を納める")
+            if not prev_off:
+                # 納付書に書く額は、給与計算の画面のいちばん下（先月分の所得税の合計）
+                itax = sum(json.loads(r[0] or "{}").get("deductions", {}).get("itax", 0) or 0 for r in db.execute(
+                    "SELECT data FROM payslips WHERE ym=? AND status='確定'", (pym,)))
+                manual("over" if today.day > 10 else ("today" if today.day >= 7 else "week"), "gensen", ym,
+                       url_for("payroll.index", ym=pym) + "#nofu", title=f"{today.month}月10日まで：源泉所得税を納める")
+                if itax:
+                    items[-1]["detail"] = f"{pf.month}月分の給与の所得税 合計 {itax:,}円（確定した分）。" + items[-1]["detail"]
             if date(today.year, 6, 1) <= today <= date(today.year, 7, 10):
                 manual(_due_level(today, date(today.year, 7, 10)), "rodo_hoken", str(today.year), url_for("payroll.index"))
             if date(today.year, 6, 15) <= today <= date(today.year, 7, 10):

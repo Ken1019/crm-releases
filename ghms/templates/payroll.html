@@ -17,7 +17,8 @@
     <td class="nowrap"><a href="{{ url_for('payroll.edit', sid=r.s['id'], ym=ym) }}"><b>{{ r.s['name'] }}</b></a><br><small class="muted">{{ d.pay_type }}</small></td>
     <td>{% if not r.saved %}<span class="pill warn">自動計算</span>{% elif d.status == '確定' %}<span class="pill ok">確定</span>{% if d.shared %} <span class="pill ok">見せている</span>{% endif %}{% else %}<span class="pill">下書き</span>{% endif %}
       {% if d.missing %}<br><span class="pill ng">退勤なし {{ d.missing }}</span>{% endif %}
-      {% if d.warnings %}<br><span class="pill ng" title="{{ d.warnings|join('／') }}">最低賃金の確認 {{ d.warnings|length }}</span>{% endif %}</td>
+      {% if d.warnings %}<br><span class="pill ng" title="{{ d.warnings|join('／') }}">最低賃金の確認 {{ d.warnings|length }}</span>{% endif %}
+      {% for w in r.notes %}<br><a class="pill warn" href="{{ url_for('crud.edit', key='staff', rid=r.s['id']) }}" title="{{ w }}">標準報酬月額が未入力</a>{% endfor %}</td>
     <td>{{ d.work.days }}日</td><td>{{ hm(d.work.hours) }}</td><td>{{ hm(d.work.ot_h) }}</td><td>{{ d.work.yakin_n }}回</td>
     <td class="num">{{ '{:,}'.format(d.earnings.base) }}</td><td class="num">{{ '{:,}'.format(d.gross - d.earnings.base) }}</td>
     <td class="num"><b>{{ '{:,}'.format(d.gross) }}</b></td><td class="num">{{ '{:,}'.format(d.total_ded) }}</td>
@@ -28,9 +29,22 @@
   <tr class="total"><td colspan="8">合計（{{ rows|length }}人）</td><td class="num"><b>{{ '{:,}'.format(total.gross) }}</b></td><td class="num">{{ '{:,}'.format(total.total_ded) }}</td>
     <td class="num"><b>{{ '{:,}'.format(total.net) }}</b></td><td class="num">{{ '{:,}'.format(total.employer_total) }}</td><td></td></tr>
 </table></div>
+{% set notes = rows|map(attribute='notes')|sum(start=[]) %}
+{% if notes %}<p class="flash warn">社会保険に入っている人で、標準報酬月額が未入力です（{{ rows|selectattr('notes')|map(attribute='s')|map(attribute='name')|join('、') }}）。毎月の総支給から仮に決めています。資格取得のときの届出の額を入れてください。</p>{% endif %}
 <form method="post" class="actions"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="save_all"><input type="hidden" name="ym" value="{{ ym }}">
   <button class="btn primary">💾 自動計算の人を全員、下書きとして保存する</button>
   <a class="btn" href="{{ url_for('payroll.profit') }}">📊 事業所の収支を見る</a></form>
+{% if rows and left %}
+<form method="post" class="actions" onsubmit="return confirm('自動計算・下書きの人を、いまの金額で確定して、職員の画面に明細を出します。よろしいですか？');">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="confirm_share"><input type="hidden" name="ym" value="{{ ym }}">
+  <button class="btn">✅ 全員を確定して職員に見せる</button>
+  <small class="muted">退勤忘れや注意がある人はとばします（名前を押して直してから確定してください）。</small></form>
+{% endif %}
+<h2 id="nofu">🧾 納付書に書く額（{{ first.strftime('%Y年%m月') }}分の給与から引いた額の合計）</h2>
+<div class="tablewrap card"><table class="list">
+  {% for label, v in nofu %}<tr><th>{{ label }}</th><td class="num"><b>{{ '{:,}'.format(v) }}</b>円</td></tr>{% endfor %}
+</table>
+<p class="muted small">源泉所得税は、支給した月の翌月10日までに納付書で納めます（納期の特例を受けているときは年2回）。住民税は市町村の納入書で翌月10日まで。社会保険・雇用保険は、事業所の負担分とあわせて年金事務所・労働保険の手続きで納めます。確定していない人の分も、いまの計算で入っています。</p></div>
 <p class="muted small">人件費（総支給＋事業所負担）{{ '{:,}'.format(total.gross + total.employer_total) }}円。給与の締めは月末、時間外は1日8時間をこえた分として計算しています。
   <br>週40時間をこえた分の時間外と、変形労働時間制（1か月単位など）は自動では計算していません。当てはまる人は、名前を押して時間外手当を直してください。</p>
 {% endblock %}

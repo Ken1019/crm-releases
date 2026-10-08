@@ -34,7 +34,11 @@
     <td class="nowrap">{% if u['pin_hash'] %}<span class="pill ok">設定済み</span>
       <form method="post" class="inline" onsubmit="return confirm({{ (u['username'] ~ ' のPINを消しますか？')|tojson|forceescape }})"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
         <input type="hidden" name="action" value="clear_pin"><input type="hidden" name="id" value="{{ u['id'] }}"><button class="btn mini">消す</button></form>
-      {% else %}<span class="muted">—</span>{% endif %}</td>
+      {% else %}<span class="muted">—</span>{% endif %}
+      <form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <input type="hidden" name="action" value="set_pin"><input type="hidden" name="id" value="{{ u['id'] }}">
+        <input name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="4桁" required autocomplete="off" class="w5" aria-label="{{ u['username'] }} のPIN">
+        <button class="btn mini">{{ '入れ直す' if u['pin_hash'] else 'PINを入れる' }}</button></form></td>
     <td class="nowrap">{{ u['last_login'] or '—' }}</td>
     <td><form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <input type="hidden" name="action" value="password"><input type="hidden" name="id" value="{{ u['id'] }}">
@@ -55,7 +59,7 @@
 
 <section class="card">
   <h2>🔢 PINでログインできる端末</h2>
-  <p class="guide">ホームのPC・タブレットなど、事業所の中で使う端末を登録すると、その端末では名前を押して4桁のPINでログインできます（PINは本人が「パスワード変更」の画面で設定します）。
+  <p class="guide">ホームのPC・タブレットなど、事業所の中で使う端末を登録すると、その端末では名前を押して4桁のPINでログインできます（PINは本人が「パスワード変更」の画面で設定します。新しい職員には、管理者がはじめのPINを入れておくこともできます）。
     登録していない端末（家のPCなど）ではPINは使えず、ユーザー名とパスワードが必要です。PINで入った管理者は、管理者の画面を開くときにパスワードを聞かれます。</p>
   <table class="list">
     {% for d in devs %}<tr><td><b>{{ d['name'] }}</b>{% if this_device and this_device['id'] == d['id'] %} <span class="pill ok">この端末</span>{% endif %}</td>
@@ -84,6 +88,8 @@
     <label><span>仮のパスワード<span class="must">必須</span></span><input type="password" name="password" minlength="8" required autocomplete="new-password">
       <small class="muted">8文字以上・英字と数字の両方。本人に伝え、最初のログインで変えてもらいます。</small></label>
     <label><span>権限</span><select name="role"><option value="staff">職員</option><option value="admin">管理者</option></select></label>
+    <label><span>はじめのPIN（4桁の数字）</span><input name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" class="w5">
+      <small class="muted">入れておくと、事務所のPCの打刻の画面ですぐ使えます。本人に伝えてください（本人が「パスワード変更」の画面で変えられます）。「1234」「1111」のようなPINは使えません。</small></label>
     <label><span>職員の情報</span><select name="staff_id"><option value="">（あとで）</option>{% for s in staff %}<option value="{{ s['id'] }}">{{ s['name'] }}</option>{% endfor %}</select>
       <small class="muted">つなぐと、その人のタイムカード・体温・給与明細になります。</small></label>
     <div class="actions wide"><button class="btn primary">＋ 追加する</button></div>

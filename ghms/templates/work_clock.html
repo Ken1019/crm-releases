@@ -5,7 +5,7 @@
 {% if not staff %}
 <div class="card"><p>このログインは、まだ<b>職員の情報</b>とつながっていません。管理者に「設定 → ログインする人」で、あなたの職員の情報をえらんでもらってください。</p></div>
 {% else %}
-{% if forgotten %}<p class="flash error">退勤の打刻がない日があります（{% for c in forgotten %}{{ c['date'][5:].replace('-', '/') }} {{ c['clock_in'] }}〜{% if not loop.last %}、{% endif %}{% endfor %}）。出勤から{{ max_hours }}時間をすぎると退勤を押せないので、管理者に直してもらってください。</p>{% endif %}
+{% if forgotten %}<p class="flash error">退勤の打刻がない日があります（{% for c in forgotten %}{{ c['date'][5:].replace('-', '/') }} {{ c['clock_in'] }}〜{% if not loop.last %}、{% endif %}{% endfor %}）。あとから退勤は押せないので、管理者に直してもらってください。</p>{% endif %}
 <div class="clockbox card">
   <p class="clock-now"><span id="now">{{ now_time.strftime('%H:%M') }}</span><small>{{ now_time.strftime('%Y年%m月%d日') }}（{{ '月火水木金土日'[now_time.weekday()] }}）</small></p>
   <p class="muted">{{ staff['name'] }} さん</p>
@@ -17,6 +17,14 @@
       <small class="muted">6時間をこえる勤務のときの目安は {{ default_break }}分です。とれなかったら 0 にしてください。</small></label>
     <div class="actions wide"><button class="btn primary huge">🏠 退勤する</button></div>
   </form>
+  {% if stale %}
+  <p class="flash warn">出勤から長い時間がたっています。夜勤明けなら上の「退勤する」を、前回の退勤を押し忘れて今から働くなら下の「出勤する」を押してください（前回の打刻は管理者が直します）。</p>
+  <form method="post" class="form clockform">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="in">
+    <label><span>今朝の体温 <span class="must">必須</span></span><input type="number" name="temp" step="0.1" min="34" max="42" inputmode="decimal" placeholder="36.5" class="w5" required> ℃</label>
+    <div class="actions wide"><button class="btn huge">☀️ 出勤する（前回の退勤を押し忘れた）</button></div>
+  </form>
+  {% endif %}
   {% else %}
   <form method="post" class="form clockform">
     <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="in">

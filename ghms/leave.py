@@ -195,7 +195,9 @@ def leave_day_pay(s, first):
         # 1日の時間：直近3か月のタイムカードで、出勤した日の実働の平均。なければ週の勤務時間÷5、それもなければ8時間
         minutes, days = _worked_minutes(s["id"], add_months(first.replace(day=1), -3), first.replace(day=1))
         hours = (minutes / days / 60) if days else ((s["weekly_hours"] or 0) / 5 or 8)
-        return round((s["hourly_wage"] or 0) * hours)
+        from .payroll import yen_half_up
+
+        return yen_half_up((s["hourly_wage"] or 0) * hours)
     # 平均賃金：直近3か月の賃金の総額 ÷ 暦日数。最低保障は 総額 ÷ 労働日数 × 60%
     from .payroll import compute_pay, load_slip
     from .views import parse_ym
