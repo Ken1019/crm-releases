@@ -11,6 +11,7 @@
   <input type="hidden" name="_csrf" value="{{ csrf_token }}">
   <section class="card"><h2>勤怠</h2>
     <table class="list">{% for k, label, unit in WORK_ITEMS %}<tr><th>{{ label }}</th><td class="num">{% if k in ('hours', 'ot_h', 'night_h') %}{{ hm(d.work[k]) }}{% else %}{{ d.work[k] }}{{ unit }}{% endif %}</td></tr>{% endfor %}</table>
+    {% for w in d.warnings or [] %}<p class="flash error">{{ w }}</p>{% endfor %}
     {% if d.missing %}<p class="flash error">退勤の打刻がない日が {{ d.missing }}回あります。<a href="{{ url_for('work.timecards', ym=ym, staff_id=s['id']) }}">タイムカードを直す</a></p>{% endif %}
     <p><a href="{{ url_for('work.timecards', ym=ym, staff_id=s['id']) }}">📅 タイムカードを見る</a></p></section>
   <section class="card"><h2>支給</h2>

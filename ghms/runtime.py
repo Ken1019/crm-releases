@@ -61,6 +61,20 @@ def token_path():
     return os.path.join(data_dir(), "run.token")
 
 
+def load_product():
+    """販売・配布するときの名前と連絡先（config.ini の [product]）。事業所ごとに変えられる。
+    [product]
+    name = グループホーム業務管理
+    vendor = 販売元の会社名
+    support = サポートの連絡先（電話・メール）
+    update_url = 更新情報（latest.json）のURL（販売元ごとの配布先）
+    """
+    cp = _read_ini()
+    sec = cp["product"] if cp.has_section("product") else {}
+    return {"name": sec.get("name", "").strip() or "グループホーム業務管理", "vendor": sec.get("vendor", "").strip(),
+            "support": sec.get("support", "").strip(), "update_url": sec.get("update_url", "").strip()}
+
+
 def load_office():
     """インストーラーで入力した事業所名・事業所番号（config.ini の [office]）"""
     cp = _read_ini()

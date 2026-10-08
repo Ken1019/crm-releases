@@ -16,7 +16,8 @@
   <tr>
     <td class="nowrap"><a href="{{ url_for('payroll.edit', sid=r.s['id'], ym=ym) }}"><b>{{ r.s['name'] }}</b></a><br><small class="muted">{{ d.pay_type }}</small></td>
     <td>{% if not r.saved %}<span class="pill warn">自動計算</span>{% elif d.status == '確定' %}<span class="pill ok">確定</span>{% if d.shared %} <span class="pill ok">見せている</span>{% endif %}{% else %}<span class="pill">下書き</span>{% endif %}
-      {% if d.missing %}<br><span class="pill ng">退勤なし {{ d.missing }}</span>{% endif %}</td>
+      {% if d.missing %}<br><span class="pill ng">退勤なし {{ d.missing }}</span>{% endif %}
+      {% if d.warnings %}<br><span class="pill ng" title="{{ d.warnings|join('／') }}">最低賃金の確認 {{ d.warnings|length }}</span>{% endif %}</td>
     <td>{{ d.work.days }}日</td><td>{{ hm(d.work.hours) }}</td><td>{{ hm(d.work.ot_h) }}</td><td>{{ d.work.yakin_n }}回</td>
     <td class="num">{{ '{:,}'.format(d.earnings.base) }}</td><td class="num">{{ '{:,}'.format(d.gross - d.earnings.base) }}</td>
     <td class="num"><b>{{ '{:,}'.format(d.gross) }}</b></td><td class="num">{{ '{:,}'.format(d.total_ded) }}</td>

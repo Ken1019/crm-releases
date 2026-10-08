@@ -142,7 +142,9 @@ def month_cards(staff_id, first, last):
 
 
 def month_summary(staff_id, first, last):
-    s = {"days": set(), "total": 0, "over": 0, "night": 0, "yakin": 0, "missing": 0}
+    """月の合計。yk_〜 は夜勤の分だけ（夜勤を1回いくらで払うときは、時間の計算から外すため）"""
+    s = {"days": set(), "day_days": set(), "total": 0, "over": 0, "night": 0, "yakin": 0, "missing": 0,
+         "yk_total": 0, "yk_over": 0, "yk_night": 0, "yk_cards": []}
     for c in month_cards(staff_id, first, last):
         w = work_minutes(c)
         if w is None:
@@ -151,8 +153,14 @@ def month_summary(staff_id, first, last):
         s["days"].add(c["date"])
         for k in ("total", "over", "night"):
             s[k] += w[k]
-        s["yakin"] += 1 if w["yakin"] else 0
-    s["days"] = len(s["days"])
+        if w["yakin"]:
+            s["yakin"] += 1
+            for k in ("total", "over", "night"):
+                s["yk_" + k] += w[k]
+            s["yk_cards"].append((c, w))
+        else:
+            s["day_days"].add(c["date"])
+    s["days"], s["day_days"] = len(s["days"]), len(s["day_days"])
     return s
 
 

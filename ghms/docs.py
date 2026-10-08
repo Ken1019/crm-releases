@@ -176,7 +176,7 @@ def _place(code):
 
 
 def status_label(prev, code, home):
-    """サービス提供の状況（記載例：「らら→外泊」「外泊」「外泊戻り」。ふつうに支援した日は空欄）"""
+    """サービス提供の状況（記載例：「〇〇ホーム→外泊」「外泊」「外泊戻り」。ふつうに支援した日は空欄）"""
     cur, before = _place(code), _place(prev)
     if cur is None:
         return ""

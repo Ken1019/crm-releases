@@ -27,6 +27,9 @@ bp = Blueprint("payroll", __name__, url_prefix="/payroll")
 PAY_SETTINGS = [
     ("pay_monthly_hours", "月の所定労働時間（時間）", "160", "月給の人の残業代・深夜手当の時間単価に使います"),
     ("pay_ot_rate", "時間外の割増（%）", "25", "1日8時間をこえた分"),
+    ("pay_yakin_mode", "夜勤の払い方", "1回いくら", "「1回いくら」：夜勤は深夜手当もふくめて1回の金額だけ払う（時給・時間外・深夜の計算に入れない）／「時間で計算」：時給などで計算し、夜勤手当を上乗せ"),
+    ("pay_yakin_flat", "夜勤1回の金額（円）", "10000", "職員の情報の「夜勤手当（1回）」が空欄の人に使います"),
+    ("pay_min_wage", "最低賃金（時間額・円）", "1075", "北海道 令和7年10月からの例。夜勤1回の金額が最低賃金と割増を下回らないかの確認に使います。0にすると確認しません（宿直の許可を受けている場合など）"),
     ("pay_night_start", "深夜手当の時間帯（はじまり）", "22:00", "法律の深夜割増は22時〜翌5時。それより広くするのはかまいません"),
     ("pay_night_end", "深夜手当の時間帯（おわり）", "09:00", "例：09:00（翌朝9時まで）。就業規則・賃金規程と同じにしてください"),
     ("pay_night_rate", "深夜の割増（%）", "25", "上の時間帯に働いた分"),
@@ -124,6 +127,20 @@ def compute_pay(s, first, last, earnings=None):
     """1人1か月分。earnings を渡すと、その支給額から保険料・税を計算しなおす"""
     sm = month_summary(s["id"], first, last)
     hours, over_h, night_h = sm["total"] / 60, sm["over"] / 60, sm["night"] / 60
+    flat = (get_setting("pay_yakin_mode", pset("pay_yakin_mode")) or "").startswith("1回")
+    per_yakin = int(s["night_allowance"] or setting_num("pay_yakin_flat", pset("pay_yakin_flat"))) if flat else int(s["night_allowance"] or 0)
+    days_for_pay = sm["days"]
+    warnings = []
+    if flat:
+        # 夜勤は1回の金額だけ（深夜手当こみ）。時間・日数の計算から夜勤の分を外す
+        hours, over_h, night_h = (sm["total"] - sm["yk_total"]) / 60, (sm["over"] - sm["yk_over"]) / 60, (sm["night"] - sm["yk_night"]) / 60
+        days_for_pay = sm["day_days"]
+        mw = setting_num("pay_min_wage", pset("pay_min_wage"))
+        for c, w in sm["yk_cards"]:
+            need = mw * (w["total"] / 60) + mw * rate("pay_night_rate") * (w["night"] / 60) + mw * rate("pay_ot_rate") * (w["over"] / 60)
+            if mw and per_yakin < need:
+                warnings.append(f"{c['date'][5:].replace('-', '/')}の夜勤：実働 {w['total'] // 60}時間{w['total'] % 60:02d}分だと、"
+                                f"最低賃金と割増で {round(need):,}円 以上が必要です（1回 {per_yakin:,}円）")
     pt = s["pay_type"] or "月給"
     base_salary, hourly, daily = s["base_salary"] or 0, s["hourly_wage"] or 0, s["daily_wage"] or 0
     if pt == "時給":
@@ -133,12 +150,12 @@ def compute_pay(s, first, last, earnings=None):
     else:
         unit = (base_salary + (s["allowance_qual"] or 0)) / (setting_num("pay_monthly_hours", 160) or 160)
     if earnings is None:
-        base = round(hourly * hours) if pt == "時給" else round(daily * sm["days"]) if pt == "日給" else int(base_salary)
+        base = round(hourly * hours) if pt == "時給" else round(daily * days_for_pay) if pt == "日給" else int(base_salary)
         ot_factor = rate("pay_ot_rate") + (0 if pt == "時給" else 1)
         ctype = s["commute_type"] or "支給しない"
         commute = (s["commute"] or 0) if ctype == "毎月定額" else (s["commute"] or 0) * sm["days"] if ctype.startswith("1日") else 0
         earnings = {"base": base, "ot": round(unit * over_h * ot_factor), "night": round(unit * night_h * rate("pay_night_rate")),
-                    "yakin": int((s["night_allowance"] or 0) * sm["yakin"]), "qual": int(s["allowance_qual"] or 0),
+                    "yakin": per_yakin * sm["yakin"], "qual": int(s["allowance_qual"] or 0),
                     "shogu": shogu_monthly(s["id"], first), "other": int(s["allowance_other"] or 0), "commute": int(commute)}
     gross = sum(int(earnings.get(k) or 0) for k, _ in EARNINGS)
     commute = int(earnings.get("commute") or 0)
@@ -161,7 +178,7 @@ def compute_pay(s, first, last, earnings=None):
     total_ded = sum(ded.values())
     return {"earnings": {k: int(earnings.get(k) or 0) for k, _ in EARNINGS}, "deductions": ded,
             "work": {"days": sm["days"], "hours": sm["total"], "ot_h": sm["over"], "night_h": sm["night"], "yakin_n": sm["yakin"]},
-            "missing": sm["missing"], "gross": gross, "total_ded": total_ded, "net": gross - total_ded,
+            "missing": sm["missing"], "warnings": warnings, "gross": gross, "total_ded": total_ded, "net": gross - total_ded,
             "employer": er, "employer_total": sum(er.values()), "pay_type": pt, "unit": round(unit)}
 
 
@@ -184,7 +201,7 @@ def load_slip(staff_id, ym):
 def save_slip(staff_id, ym, data, status):
     _totals(data)
     keep = {k: data[k] for k in ("earnings", "deductions", "work", "gross", "total_ded", "net", "employer", "employer_total",
-                                 "pay_type", "unit", "shared", "memo") if k in data}
+                                 "pay_type", "unit", "shared", "memo", "warnings") if k in data}
     get_db().execute("INSERT OR REPLACE INTO payslips (staff_id, ym, data, gross, deductions, net, status, updated_by, updated_at)"
                      " VALUES (?,?,?,?,?,?,?,?,?)", (staff_id, ym, json.dumps(keep, ensure_ascii=False), data["gross"],
                                                      data["total_ded"], data["net"], status, g.user["username"], now()))

@@ -17,6 +17,12 @@ def _secret_key(instance_path):
         return f.read().strip()
 
 
+def _product():
+    from .runtime import load_product
+
+    return load_product()
+
+
 def create_app(test_config=None):
     from .runtime import data_dir as _data_dir
 
@@ -64,6 +70,7 @@ def create_app(test_config=None):
 
     @app.context_processor
     def inject():
-        return {"ENTITIES": ENTITIES, "GROUPS": GROUPS, "GROUP_ICONS": GROUP_ICONS, "VERSION": VERSION, "office_name": db.get_setting("office_name")}
+        return {"ENTITIES": ENTITIES, "GROUPS": GROUPS, "GROUP_ICONS": GROUP_ICONS, "VERSION": VERSION, "office_name": db.get_setting("office_name"),
+                "product": _product()}
 
     return app

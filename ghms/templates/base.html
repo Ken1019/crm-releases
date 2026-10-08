@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}{% endblock %}｜グループホーム業務管理</title>
+<title>{% block title %}{% endblock %}｜{{ product.name if product else 'グループホーム業務管理' }}</title>
 <script>try{if(localStorage.getItem('ghms-font')==='large')document.documentElement.classList.add('font-large')}catch(e){}</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -31,7 +31,7 @@
   {% for h in hubs %}
   <a href="{{ hub_url(h) }}" class="{{ 'on' if cur_hub and cur_hub.key == h.key }}"><span class="ic">{{ h.icon }}</span><span>{{ h.title }}<small>{{ h.desc }}</small></span></a>
   {% endfor %}
-  <div class="ver">v{{ VERSION }}</div>
+  <div class="ver">{{ product.name }} v{{ VERSION }}{% if product.vendor %}<br>{{ product.vendor }}{% endif %}{% if product.support %}<br>お問い合わせ：{{ product.support }}{% endif %}</div>
 </nav>
 <main>
 {% endif %}

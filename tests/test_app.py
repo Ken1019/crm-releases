@@ -865,13 +865,18 @@ def test_timecard_kiosk_and_payroll(client, app):
                                     "in_new_2": "09:00", "out_new_2": "18:30", "br_new_2": "60"})
     page = admin.get("/work/timecards?ym=2026-10&staff_id=1").get_data(as_text=True)
     assert "23:30" in page and "夜勤 1回" in page
-    # 時給1200円：基本 28,200＋時間外(7.5h×25%) 2,250＋深夜(22〜翌9時の11h×25%) 3,300＋夜勤 5,000＋交通費 600 ＝ 39,350、雇用保険 216
+    # 夜勤は「1回いくら（深夜手当こみ）」：日勤の分だけ時間で計算 → 基本 10,200（8.5h）＋時間外(0.5h×25%) 150
+    # ＋夜勤 5,000（1回）＋交通費 600 ＝ 15,950、雇用保険 88。1回5,000円は最低賃金を下回るので確認が出る
     page = admin.get("/payroll/?ym=2026-10").get_data(as_text=True)
-    assert "39,350" in page and "39,134" in page
+    assert "15,950" in page and "15,862" in page and "最低賃金の確認 1" in page
+    # 「時間で計算」：基本 28,200＋時間外(7.5h×25%) 2,250＋深夜(22〜翌9時の11h×25%) 3,300＋夜勤手当 5,000＋交通費 600 ＝ 39,350
+    post(admin, "/payroll/settings", {"pay_yakin_mode": "時間で計算"})
+    page = admin.get("/payroll/?ym=2026-10").get_data(as_text=True)
+    assert "39,350" in page and "39,134" in page and "最低賃金の確認" not in page
     # 深夜を法律どおり22〜翌5時にすると 7h → 2,100
-    post(admin, "/payroll/settings", {"pay_night_start": "22:00", "pay_night_end": "05:00"})
+    post(admin, "/payroll/settings", {"pay_yakin_mode": "時間で計算", "pay_night_start": "22:00", "pay_night_end": "05:00"})
     assert "38,150" in admin.get("/payroll/?ym=2026-10").get_data(as_text=True)
-    post(admin, "/payroll/settings", {"pay_night_start": "22:00", "pay_night_end": "09:00"})
+    post(admin, "/payroll/settings", {"pay_yakin_mode": "時間で計算"})
     post(admin, "/payroll/?ym=2026-10", {"action": "save_all", "ym": "2026-10"})
     form = {f"e_{k}": v for k, v in [("base", 28200), ("ot", 2250), ("night", 2100), ("yakin", 5000), ("qual", 0), ("shogu", 0),
                                      ("other", 3000), ("commute", 600)]}

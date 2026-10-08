@@ -43,7 +43,8 @@ def is_newer(latest, current=VERSION):
 
 
 def update_url():
-    return get_setting("update_url", DEFAULT_URL) or DEFAULT_URL
+    """更新情報の場所：設定 → config.ini の [product] update_url → 標準の配布先"""
+    return get_setting("update_url", "") or runtime.load_product()["update_url"] or DEFAULT_URL
 
 
 def fetch_manifest(url, opener=urllib.request.urlopen):
