@@ -185,3 +185,13 @@ table.mgrid tr.total td { background:#fff6ec; font-weight:bold; }
 .customrow { border-bottom:1px dashed var(--line); padding-bottom:10px; margin-bottom:10px; align-items:end; }
 tr.muted td { color:var(--muted); }
 .setup { max-width:1000px; margin:24px auto; padding:0 16px; }
+table.monthly input { min-height:34px; padding:2px 6px; }
+table.monthly { overflow:visible; font-size:.92em; }
+table.monthly th, table.monthly td { padding:5px 5px; }
+table.monthly input.amt { width:5.4em; text-align:right; font-variant-numeric:tabular-nums; }
+table.monthly input.w8 { width:6em; }
+table.monthly .acts a { font-size:.85em; margin-right:6px; white-space:nowrap; }
+table.monthly td.name, table.monthly th.name { position:sticky; left:0; background:#fff; z-index:1; }
+table.monthly th { position:sticky; top:0; z-index:2; }
+table.monthly th.name { z-index:3; background:var(--pri-soft); }
+table.monthly td.name { min-width:6.5em; }

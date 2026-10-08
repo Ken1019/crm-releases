@@ -280,6 +280,32 @@ def invoices():
     for x in results:
         fees, rdays = calc_fees(x["r"], first, last, x["billable"], x["burden"])
         preview.append({"x": x, "fees": fees, "rdays": rdays, "inv": existing.get(x["r"]["id"])})
+    if request.method == "POST" and request.form.get("action") == "save":
+        # 毎月の金額を表でまとめて入力 → 請求を作る・直す（入金済みは変えない）
+        made = updated = 0
+        for p in preview:
+            rid, inv = p["x"]["r"]["id"], p["inv"]
+            if inv and inv["status"] == "入金済":
+                continue
+            amounts = {}
+            for f in MONTHLY_FIELDS:
+                raw = request.form.get(f"r{rid}_{f}", "").replace(",", "").strip()
+                if f == "other_label":
+                    amounts[f] = raw or None
+                else:
+                    try:
+                        amounts[f] = int(float(raw)) if raw else 0
+                    except ValueError:
+                        amounts[f] = 0
+            if inv:
+                save("invoices", amounts, inv["id"])
+                updated += 1
+            else:
+                save("invoices", dict(amounts, ym=ym, resident_id=rid, status="未請求", issue_date=date.today().isoformat(),
+                                      due_date=due_date(first).isoformat(), pay_method=p["x"]["r"]["pay_method"]))
+                made += 1
+        flash(f"{first:%Y年%m月}分を保存しました（新しく作成 {made}件・更新 {updated}件）。", "ok")
+        return redirect(url_for("billing.invoices", ym=ym))
     if request.method == "POST":
         made = 0
         for p in preview:
@@ -295,8 +321,15 @@ def invoices():
     total = sum((p["inv"]["total"] if p["inv"] else p["fees"]["total"]) or 0 for p in preview)
     unpaid = db.execute("SELECT i.*, r.name AS rname FROM invoices i JOIN residents r ON r.id=i.resident_id "
                         "WHERE i.status != '入金済' AND i.ym < ? ORDER BY i.ym, r.kana", (ym,)).fetchall()
+    prev_first = (first - timedelta(days=1)).replace(day=1)
+    prev = {i["resident_id"]: dict(i) for i in db.execute("SELECT * FROM invoices WHERE ym=?", (prev_first.strftime("%Y-%m"),))}
     return render_template("billing_invoices.html", ym=ym, first=first, preview=preview, total=total, unpaid=unpaid,
-                           missing=sum(1 for p in preview if not p["inv"]))
+                           missing=sum(1 for p in preview if not p["inv"]), prev=prev, prev_first=prev_first,
+                           FIELDS=MONTHLY_FIELDS)
+
+
+# 毎月の表で入力する項目（家賃助成は差し引く）
+MONTHLY_FIELDS = ["rent", "rent_subsidy", "food", "utility", "daily_goods", "user_burden", "other_label", "other_amount"]
 
 
 INVOICE_LINES = [("rent", "家賃"), ("rent_subsidy", "家賃助成（差引）"), ("food", "食費"), ("utility", "光熱水費"),

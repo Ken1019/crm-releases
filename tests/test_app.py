@@ -179,7 +179,7 @@ def test_benefit_and_invoice(client):
     post(client, "/billing/invoices", {"ym": "2026-10"})
     html = client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
     # 家賃40,000 − 助成10,000 + 食費800×28 + 光熱水費10,000 + 日用品3,000 + 負担9,300 = 74,700
-    assert "74,700円" in html
+    assert '<b class="rowtotal">74,700</b>' in html
     # 2回押しても重複しない
     post(client, "/billing/invoices", {"ym": "2026-10"})
     assert client.get("/m/invoices/").get_data(as_text=True).count("✏️ 直す") == 1
@@ -200,7 +200,7 @@ def test_invoice_prorates_move_in(client):
                                       "food_type": "月額", "food_amount": "31000"})
     post(client, "/billing/invoices", {"ym": "2026-10"})
     # 17日〜31日の15日分：31,000 × 15/31 = 15,000（家賃・食費とも）
-    assert "30,000円" in client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
+    assert '<b class="rowtotal">30,000</b>' in client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
 
 
 def test_deposits_documents_and_dashboard(client):
@@ -666,3 +666,25 @@ def test_config_ini_written_by_installer_in_cp932(tmp_path, monkeypatch):
     assert runtime.load_config()["lan"] is True
     (tmp_path / "config.ini").write_text("[server]\nport = 8100\n", encoding="utf-8")
     assert runtime.load_config()["port"] == 8100
+
+
+def test_monthly_fee_entry(client):
+    _setup_billing(client)
+    # 10月：表で日用品費とその他を今月の金額に直して保存 → 請求ができる
+    page = client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
+    assert 'name="r1_daily_goods" value="3000"' in page
+    post(client, "/billing/invoices", {"ym": "2026-10", "action": "save", "r1_rent": "40000", "r1_rent_subsidy": "10000",
+                                       "r1_food": "22400", "r1_utility": "10000", "r1_daily_goods": "2,480",
+                                       "r1_user_burden": "9300", "r1_other_label": "行事費", "r1_other_amount": "1500"})
+    page = client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
+    # 40000 − 10000 + 22400 + 10000 + 2480 + 9300 + 1500 = 75,680
+    assert '<b class="rowtotal">75,680</b>' in page and 'value="行事費"' in page
+    # 11月：前の月の金額をコピーできるよう、10月の値が渡っている
+    page = client.get("/billing/invoices?ym=2026-11").get_data(as_text=True)
+    assert 'data-prev-daily_goods="2480"' in page and 'data-prev-other_label="行事費"' in page
+    # 入金済みは表から変えられない
+    post(client, "/m/invoices/1/edit", {"ym": "2026-10", "resident_id": "1", "status": "入金済", "rent": "40000",
+                                        "rent_subsidy": "10000", "food": "22400", "utility": "10000", "daily_goods": "2480",
+                                        "user_burden": "9300", "other_label": "行事費", "other_amount": "1500"})
+    post(client, "/billing/invoices", {"ym": "2026-10", "action": "save", "r1_daily_goods": "99999"})
+    assert '<b class="rowtotal">75,680</b>' in client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
