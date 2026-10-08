@@ -19,7 +19,7 @@ from openpyxl import Workbook
 
 from . import excel
 from .auth import admin_required, log_event
-from .billing import attendance_map, in_residence, month_days, residents_in_month, sync_open
+from .billing import attendance_map, in_residence, month_days, no_home_count, pick_home, residents_in_month, sync_open
 from .db import get_db, get_setting, now
 from .views import parse_date, parse_ym
 
@@ -196,10 +196,14 @@ def record_sheet_data(first, last, rid=None):
     sheets = []
     for r in residents:
         rows = []
-        prev = amap.get((r["id"], (first - timedelta(days=1)).isoformat()), "")
+        before = first - timedelta(days=1)
+        prev = amap.get((r["id"], before.isoformat()), "") if in_residence(r, before) else ""
         for d in month_days(first, last):
-            code = amap.get((r["id"], d.isoformat()), "")
-            marks = [mark_text(c) if mark_of(c, code, mmap.get((r["id"], d.isoformat(), c["id"]))) else "" for c in cols]
+            # 入居前・退居後の日は、実績も印もつけない
+            inres = in_residence(r, d)
+            code = amap.get((r["id"], d.isoformat()), "") if inres else ""
+            marks = [mark_text(c) if inres and mark_of(c, code, mmap.get((r["id"], d.isoformat(), c["id"]))) else ""
+                     for c in cols]
             rows.append({"d": d, "w": WEEK[d.weekday()], "code": code, "label": status_label(prev, code, r["hname"]),
                          "marks": marks})
             prev = code
@@ -289,13 +293,14 @@ def record_marks():
     first, last = parse_ym(request.values.get("ym"))
     ym = first.strftime("%Y-%m")
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
-    home_id = request.values.get("home_id", type=int) or (homes[0]["id"] if homes else None)
+    home_id = pick_home(homes)
     cols = [c for c in record_columns() if not c["builtin"]]
     col = next((c for c in cols if c["id"] == request.values.get("col", type=int)), cols[0] if cols else None)
     residents = residents_in_month(first, last, home_id)
     days = month_days(first, last)
     if col is None:
-        return render_template("record_marks.html", col=None, cols=cols, ym=ym, first=first, homes=homes, home_id=home_id)
+        return render_template("record_marks.html", col=None, cols=cols, ym=ym, first=first, homes=homes, home_id=home_id,
+                               no_home=no_home_count())
     sync_open()
     amap = attendance_map(first, last)
     if request.method == "POST":
@@ -303,7 +308,7 @@ def record_marks():
             for d in days:
                 code = amap.get((r["id"], d.isoformat()), "")
                 checked = bool(request.form.get(f"m{r['id']}_{d.day}"))
-                if checked == _auto_mark(col, code):  # 自動と同じなら記録しない（実績を直したときに追いかける）
+                if not in_residence(r, d) or checked == _auto_mark(col, code):  # 自動と同じなら記録しない（実績を直したときに追いかける）
                     db.execute("DELETE FROM record_marks WHERE resident_id=? AND date=? AND col_id=?", (r["id"], d.isoformat(), col["id"]))
                 else:
                     db.execute("INSERT OR REPLACE INTO record_marks (resident_id, date, col_id, value, updated_by, updated_at)"
@@ -317,12 +322,13 @@ def record_marks():
     for r in residents:
         cells = []
         for d in days:
-            code = amap.get((r["id"], d.isoformat()), "")
-            cells.append({"d": d, "code": code, "on": mark_of(col, code, mmap.get((r["id"], d.isoformat(), col["id"]))),
-                          "stay": code in STAY_CODES, "inres": in_residence(r, d)})
+            inres = in_residence(r, d)
+            code = amap.get((r["id"], d.isoformat()), "") if inres else ""
+            cells.append({"d": d, "code": code, "on": inres and mark_of(col, code, mmap.get((r["id"], d.isoformat(), col["id"]))),
+                          "stay": code in STAY_CODES, "inres": inres})
         rows.append({"r": r, "cells": cells, "total": sum(1 for c in cells if c["on"])})
     return render_template("record_marks.html", col=col, cols=cols, ym=ym, first=first, homes=homes, home_id=home_id,
-                           rows=rows, days=days, WEEK=WEEK, AUTO_KINDS=AUTO_KINDS, mark=mark_text(col))
+                           rows=rows, days=days, WEEK=WEEK, AUTO_KINDS=AUTO_KINDS, mark=mark_text(col), no_home=no_home_count())
 
 
 # ---------------------------------------------------------------- 指定更新の書類

@@ -6,6 +6,7 @@
 
 import calendar
 from datetime import date, timedelta
+from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal, InvalidOperation
 
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 from openpyxl import Workbook
@@ -21,6 +22,10 @@ def sync_open():
     from .absences import sync_open as _s
 
     _s()
+
+
+class InputError(Exception):
+    """保存の前に見つかった入力の誤り。画面に戻してメッセージを出す"""
 
 bp = Blueprint("billing", __name__, url_prefix="/billing")
 
@@ -39,16 +44,35 @@ def month_days(first, last):
     return [first + timedelta(days=i) for i in range((last - first).days + 1)]
 
 
+NO_HOME = 0  # 「住居未設定」をえらんだとき（住居が入っていない入居者）
+
+
 def residents_in_month(first, last, home_id=None):
-    """その月に1日でも入居していた入居者"""
+    """その月に1日でも入居していた入居者（home_id=0 なら住居が未設定の方だけ）"""
     sql = ("SELECT r.*, h.name AS hname, h.home_type FROM residents r LEFT JOIN homes h ON h.id=r.home_id "
            "WHERE (r.move_in IS NULL OR r.move_in <= ?) AND (r.move_out IS NULL OR r.move_out >= ?) "
            "AND (r.status IS NULL OR r.status != '退居' OR r.move_out >= ?)")
     params = [last.isoformat(), first.isoformat(), first.isoformat()]
-    if home_id:
+    if home_id == NO_HOME:
+        sql += " AND r.home_id IS NULL"
+    elif home_id:
         sql += " AND r.home_id = ?"
         params.append(home_id)
     return get_db().execute(sql + " ORDER BY h.name, r.room, r.kana", params).fetchall()
+
+
+def pick_home(homes):
+    """画面でえらんだ住居。何もえらんでいなければ最初の住居（住居がなければ「住居未設定」）"""
+    home_id = request.values.get("home_id", type=int)
+    if home_id is None:
+        home_id = homes[0]["id"] if homes else NO_HOME
+    return home_id
+
+
+def no_home_count():
+    """住居が入っていない入居中の方の人数（「住居未設定」をえらべるようにするため）"""
+    return get_db().execute("SELECT COUNT(*) FROM residents WHERE home_id IS NULL AND (status IS NULL OR status != '退居')"
+                            ).fetchone()[0]
 
 
 def in_residence(r, d):
@@ -66,10 +90,22 @@ def attendance_map(first, last, ids=None):
 
 
 def unit_price():
+    """1単位の単価。小数の誤差が出ないよう Decimal で扱う（10.45 など）"""
     try:
-        return float(get_setting("unit_price", "10") or 10)
-    except ValueError:
-        return 10.0
+        v = Decimal(str(get_setting("unit_price", "10") or "10").strip())
+        return v if v.is_finite() and v > 0 else Decimal("10")
+    except (InvalidOperation, ValueError):
+        return Decimal("10")
+
+
+def units_to_yen(units, price):
+    """単位数 × 単価。1円未満は切り捨て（180単位 × 10.45円 = 1,881円）"""
+    return int((Decimal(str(units)) * Decimal(str(price))).to_integral_value(rounding=ROUND_FLOOR))
+
+
+def shogu_units(subtotal, rate):
+    """処遇改善加算の単位数。1単位未満は四捨五入"""
+    return int((Decimal(str(subtotal)) * Decimal(str(rate or 0)) / 100).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def _num(v):
@@ -83,7 +119,7 @@ def attendance():
     first, last = parse_ym(request.values.get("ym"))
     ym = first.strftime("%Y-%m")
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
-    home_id = request.values.get("home_id", type=int) or (homes[0]["id"] if homes else None)
+    home_id = pick_home(homes)
     residents = residents_in_month(first, last, home_id)
     days = month_days(first, last)
     if request.method == "GET":
@@ -91,24 +127,32 @@ def attendance():
     valid = {c for c, _ in CODES}
     if request.method == "POST":
         for r in residents:
-            db.execute("DELETE FROM attendance WHERE resident_id=? AND date BETWEEN ? AND ?",
-                       (r["id"], first.isoformat(), last.isoformat()))
+            old = {a["date"]: a for a in db.execute("SELECT * FROM attendance WHERE resident_id=? AND date BETWEEN ? AND ?",
+                                                    (r["id"], first.isoformat(), last.isoformat()))}
             for d in days:
+                key = d.isoformat()
                 code = request.form.get(f"a{r['id']}_{d.day}", "")
-                if code in valid:
-                    db.execute("INSERT INTO attendance (resident_id, date, code, updated_by, updated_at) VALUES (?,?,?,?,?)",
-                               (r["id"], d.isoformat(), code, g.user["username"], now()))
+                if not in_residence(r, d) or code not in valid:
+                    # 入居前・退居後の日は実績を持たない。空欄にした日は消す
+                    if key in old:
+                        db.execute("DELETE FROM attendance WHERE resident_id=? AND date=?", (r["id"], key))
+                    continue
+                prev = old.get(key)
+                if prev is not None and prev["code"] == code:
+                    continue  # 変えていない日はそのまま（入院・外泊の登録から入った日は、その登録のものとして残す）
+                db.execute("INSERT OR REPLACE INTO attendance (resident_id, date, code, updated_by, updated_at) VALUES (?,?,?,?,?)",
+                           (r["id"], key, code, g.user["username"], now()))
         db.commit()
         flash(f"{first:%Y年%m月}の実績を保存しました。", "ok")
         return redirect(url_for("billing.attendance", ym=ym, home_id=home_id))
     amap = attendance_map(first, last)
     rows = []
     for r in residents:
-        cells = [(d, amap.get((r["id"], d.isoformat()), ""), in_residence(r, d)) for d in days]
+        cells = [(d, amap.get((r["id"], d.isoformat()), "") if in_residence(r, d) else "", in_residence(r, d)) for d in days]
         counts = {c: sum(1 for _, v, _ in cells if v == c) for c, _ in CODES}
         rows.append({"r": r, "cells": cells, "counts": counts})
     return render_template("billing_attendance.html", ym=ym, first=first, homes=homes, home_id=home_id, rows=rows,
-                           days=days, CODES=CODES, WEEK="月火水木金土日")
+                           days=days, CODES=CODES, WEEK="月火水木金土日", no_home=no_home_count())
 
 
 # ---------------------------------------------------------------- 給付費の概算
@@ -128,66 +172,102 @@ def _shogu_rate(first):
     return (row["rate"] or 0) if row else 0
 
 
-def _addon_days(name, codes, billable):
+def _present(c):
+    """在居として数える日（○・日、または実績が未入力の在居日）"""
+    return c in BILLABLE or c == ""
+
+
+def _addon_days(name, codes, on):
+    """加算の日数。codes は在居期間外が None、on はその日が加算の対象期間か"""
+    days = [c for c, ok in zip(codes, on) if ok and c is not None]
     if "日中支援" in name:
-        return sum(1 for c in codes if c == "日")
+        return sum(1 for c in days if c == "日")
     if "帰宅" in name:
-        return sum(1 for c in codes if c == "帰")
+        return sum(1 for c in days if c == "帰")
     if "入院" in name:
-        return sum(1 for c in codes if c == "入")
-    return billable
+        return sum(1 for c in days if c == "入")
+    return sum(1 for c in days if _present(c))
+
+
+def _in_range(d, start, end):
+    s, e = parse_date(start), parse_date(end)
+    return (s is None or s <= d) and (e is None or d <= e)
 
 
 def compute_benefit(first, last, home_id=None):
+    from .docs import mark_of, marks_map, record_columns
+
     db = get_db()
     sync_open()
     residents = residents_in_month(first, last, home_id)
+    days = month_days(first, last)
     amap = attendance_map(first, last)
     price, rate = unit_price(), _shogu_rate(first)
     addons = db.execute("SELECT * FROM addons WHERE active=1 AND name NOT LIKE '%処遇改善%'").fetchall()
+    # 回数で数える加算は、実績記録票の同じ名前の項目のチェックを数える
+    cols = {c["label"]: c for c in record_columns()}
+    mmap = marks_map(first, last)
     results = []
     for r in residents:
-        codes = [amap.get((r["id"], d.isoformat()), "") for d in month_days(first, last)]
-        entered = any(codes)
-        billable = sum(1 for c in codes if c in BILLABLE) if entered else residence_days(r, first, last)
+        # 在居期間外の日は None（実績が入っていても数えない）。在居中で未入力の日は ""
+        day_codes = [amap.get((r["id"], d.isoformat()), "") if in_residence(r, d) else None for d in days]
+        codes = [c or "" for c in day_codes]
+        missing = sum(1 for c in day_codes if c == "")
+        billable = sum(1 for c in day_codes if c is not None and _present(c))
+        entered = missing == 0
         lines, warnings = [], []
-        if not entered:
-            warnings.append("実績が未入力のため入居日数で計算")
+        if missing:
+            warnings.append(f"実績が未入力の日が{missing}日あります（在居として計算）")
         b = _basic_units(r)
         if b:
             lines.append((f"共同生活援助サービス費（{b['label'] or r['support_level']}）", b["units"], billable, "日"))
         else:
             warnings.append("基本報酬の単位数が未設定（区分：%s）" % (r["support_level"] or "未入力"))
-        mine = {ra["addon_id"] for ra in db.execute(
-            "SELECT addon_id FROM resident_addons WHERE resident_id=? AND (start_on IS NULL OR start_on <= ?)"
-            " AND (end_on IS NULL OR end_on >= ?)", (r["id"], last.isoformat(), first.isoformat()))}
+        mine = {}
+        for ra in db.execute("SELECT addon_id, start_on, end_on FROM resident_addons WHERE resident_id=?", (r["id"],)):
+            mine.setdefault(ra["addon_id"], []).append((ra["start_on"], ra["end_on"]))
         for a in addons:
             individual = (a["kind"] or "").startswith("個別")
             if individual and a["id"] not in mine:
                 continue
+            # 加算の対象になる日：加算の算定開始日以降、かつ（利用者ごとの加算なら）開始日〜終了日のあいだ
+            on = [_in_range(d, a["start_on"], None)
+                  and (not individual or any(_in_range(d, s, e) for s, e in mine[a["id"]])) for d in days]
+            if not any(on):
+                continue
             if not a["units"]:
                 warnings.append(f"「{a['name']}」の単位数が未入力")
                 continue
-            n = _addon_days(a["name"], codes, billable)
+            if a["unit_type"] == "回":
+                col = cols.get(a["name"])
+                if col is None:
+                    warnings.append(f"「{a['name']}」：回数の加算は自動で数えていません（実績記録票に同じ名前の項目を作ると数えます）")
+                    continue
+                n = sum(1 for d, c, ok in zip(days, day_codes, on)
+                        if ok and c is not None and mark_of(col, c, mmap.get((r["id"], d.isoformat(), col["id"]))))
+                if n:
+                    lines.append((a["name"], a["units"], n, "回"))
+                continue
+            n = _addon_days(a["name"], day_codes, on)
             if a["unit_type"] == "日" and n:
                 lines.append((a["name"], a["units"], n, "日"))
             elif a["unit_type"] == "月" and n:
                 lines.append((a["name"], a["units"], 1, "月"))
-        subtotal = sum(int(u * n) for _, u, n, _ in lines)
-        shogu = int(subtotal * rate / 100)
+        subtotal = sum(int(Decimal(str(u)) * n) for _, u, n, _ in lines)
+        shogu = shogu_units(subtotal, rate)
         if shogu:
             lines.append((f"福祉・介護職員等処遇改善加算（{rate}%）", None, None, "率"))
         total_units = subtotal + shogu
-        yen = int(total_units * price)
-        burden = int(yen * 0.1)
+        yen = units_to_yen(total_units, price)
+        burden = yen // 10
         if r["burden_cap"] is not None:
             burden = min(burden, int(r["burden_cap"]))
         elif r["income_class"] in ("生活保護", "低所得"):
             burden = 0
         else:
             warnings.append("利用者負担上限月額が未入力")
-        results.append({"r": r, "codes": codes, "billable": billable, "entered": entered, "lines": lines,
-                        "subtotal": subtotal, "shogu": shogu, "total_units": total_units, "yen": yen,
+        results.append({"r": r, "codes": codes, "billable": billable, "entered": entered, "missing": missing,
+                        "lines": lines, "subtotal": subtotal, "shogu": shogu, "total_units": total_units, "yen": yen,
                         "burden": burden, "warnings": warnings})
     return results, price, rate
 
@@ -237,7 +317,44 @@ def invoice_total(data):
                      + _num(data.get("daily_goods")) + _num(data.get("user_burden")) + _num(data.get("other_amount")))
 
 
-COMPUTE["invoices"] = invoice_total
+def normalize_ym(v):
+    """「2026-9」「2026/09」を「2026-09」にそろえる。月として読めなければ None"""
+    parts = str(v or "").strip().replace("/", "-").replace("年", "-").replace("月", "").split("-")
+    try:
+        y, m = (int(x) for x in parts if x != "")
+    except ValueError:
+        return None
+    if not (2000 <= y <= 2100 and 1 <= m <= 12):
+        return None
+    return f"{y:04d}-{m:02d}"
+
+
+def invoice_compute(data):
+    if "ym" in data:
+        ym = normalize_ym(data.get("ym"))
+        if ym is None:
+            raise InputError("「請求月」は 2026-09 のように「年-月」で入力してください。")
+        data["ym"] = ym
+    invoice_total(data)
+
+
+COMPUTE["invoices"] = invoice_compute
+
+
+@bp.app_errorhandler(InputError)
+def _input_error(e):
+    """保存前に誤りが見つかったら、入力した内容のままフォームに戻す"""
+    from . import crud
+
+    flash(str(e), "error")
+    args = request.view_args or {}
+    key = args.get("key")
+    if request.method == "POST" and request.endpoint in ("crud.new", "crud.edit") and key:
+        ent = crud.get_entity(key)
+        values, _ = crud.parse_form(ent, request.form)
+        return render_template("crud_form.html", key=key, ent=ent, values=values, refs=crud._form_context(ent),
+                               rid=args.get("rid"), next=request.form.get("_next", ""))
+    return redirect(request.referrer or url_for("views.dashboard"))
 
 
 def calc_fees(r, first, last, billable, burden):
@@ -403,12 +520,28 @@ def deposit_ledger(rid):
 REQUIRED_DOCS = ["利用契約書", "重要事項説明書", "個人情報使用同意書", "個別支援計画への同意", "受給者証の写し", "緊急連絡先届"]
 
 
+def required_docs():
+    """そろえる書類の一覧。「選択肢を変える」で決めた書類の種類（使うもの）にあわせる。
+    はじめから入っている種類のうち、全員に必要とは限らないもの（金銭管理の契約・その他など）は除く"""
+    from .customize import choice_rows
+    from .entities import DOC_TYPE
+
+    optional = set(DOC_TYPE) - set(REQUIRED_DOCS)
+    try:
+        rows = choice_rows("resident_documents.doc_type")
+    except Exception:  # 選択肢の表がまだないときは、はじめの一覧
+        rows = []
+    types = [r["value"] for r in rows if r["active"] and r["value"] not in optional]
+    return types or REQUIRED_DOCS
+
+
 @bp.route("/documents")
 def documents():
     db = get_db()
     residents = db.execute("SELECT * FROM residents WHERE status IS NULL OR status != '退居' ORDER BY kana").fetchall()
     docs = {}
-    for d in db.execute("SELECT * FROM resident_documents ORDER BY signed_on"):
+    # 同じ種類が何枚もあるときは、いちばん新しいもの（署名日、なければ登録日の順。同じなら後に登録したもの）
+    for d in db.execute("SELECT * FROM resident_documents ORDER BY COALESCE(signed_on, created_at), id"):
         docs[(d["resident_id"], d["doc_type"])] = d
     today = date.today().isoformat()
-    return render_template("billing_documents.html", residents=residents, docs=docs, types=REQUIRED_DOCS, today=today)
+    return render_template("billing_documents.html", residents=residents, docs=docs, types=required_docs(), today=today)

@@ -11,6 +11,7 @@
   <input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
   <select name="home_id" onchange="this.form.submit()" aria-label="住居">
     {% for h in homes %}<option value="{{ h['id'] }}"{% if h['id'] == home_id %} selected{% endif %}>{{ h['name'] }}</option>{% endfor %}
+    {% if no_home or home_id == 0 %}<option value="0"{% if home_id == 0 %} selected{% endif %}>住居未設定（{{ no_home }}名）</option>{% endif %}
   </select>
   <select name="col" onchange="this.form.submit()" aria-label="項目">
     {% for c in cols %}<option value="{{ c['id'] }}"{% if c['id'] == col['id'] %} selected{% endif %}>{{ c['label'] }}</option>{% endfor %}
@@ -19,7 +20,7 @@
 </form>
 <form method="post" data-guard>
 <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}">
-<input type="hidden" name="home_id" value="{{ home_id or '' }}"><input type="hidden" name="col" value="{{ col['id'] }}">
+<input type="hidden" name="home_id" value="{{ home_id if home_id is not none else '' }}"><input type="hidden" name="col" value="{{ col['id'] }}">
 <div class="gridwrap card">
 <table class="mgrid">
   <thead><tr><th class="name">氏名</th>
@@ -30,7 +31,7 @@
   <tr>
     <td class="name"><b>{{ row.r['name'] }}</b><br><button type="button" class="btn mini" data-fill="{{ row.r['id'] }}">在居の日を全部</button></td>
     {% for c in row.cells %}
-    <td class="{{ 'out' if not c.inres }}" title="実績：{{ c.code or '未入力' }}"><input type="checkbox" name="m{{ row.r['id'] }}_{{ c.d.day }}" value="1" data-r="{{ row.r['id'] }}" data-stay="{{ 1 if c.stay else 0 }}"{% if c.on %} checked{% endif %} aria-label="{{ row.r['name'] }} {{ c.d.day }}日"><br><small class="muted">{{ c.code }}</small></td>
+    <td class="{{ 'out' if not c.inres }}" title="実績：{{ c.code or '未入力' }}"><input type="checkbox" name="m{{ row.r['id'] }}_{{ c.d.day }}" value="1" data-r="{{ row.r['id'] }}" data-stay="{{ 1 if c.stay else 0 }}"{% if c.on %} checked{% endif %}{% if not c.inres %} disabled title="入居期間の外の日です"{% endif %} aria-label="{{ row.r['name'] }} {{ c.d.day }}日"><br><small class="muted">{{ c.code }}</small></td>
     {% endfor %}
     <td class="num">{{ row.total }}</td>
   </tr>

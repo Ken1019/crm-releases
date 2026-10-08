@@ -7,12 +7,13 @@
   <input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
   <select name="home_id" onchange="this.form.submit()" aria-label="住居">
     {% for h in homes %}<option value="{{ h['id'] }}"{% if h['id'] == home_id %} selected{% endif %}>{{ h['name'] }}</option>{% endfor %}
+    {% if no_home or home_id == 0 %}<option value="0"{% if home_id == 0 %} selected{% endif %}>住居未設定（{{ no_home }}名）</option>{% endif %}
   </select>
   <noscript><button class="btn">表示</button></noscript>
   <span class="legend">{% for c, label in CODES %}<span><b>{{ c }}</b> {{ label }}</span>{% endfor %}</span>
 </form>
 <form method="post" data-guard>
-<input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}"><input type="hidden" name="home_id" value="{{ home_id or '' }}">
+<input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}"><input type="hidden" name="home_id" value="{{ home_id if home_id is not none else '' }}">
 <div class="gridwrap card">
 <table class="mgrid">
   <thead><tr><th class="name">氏名</th>
@@ -23,7 +24,7 @@
   <tr>
     <td class="name"><b>{{ row.r['name'] }}</b><br><button type="button" class="btn mini" data-fill="{{ row.r['id'] }}">全部○</button></td>
     {% for d, v, inres in row.cells %}
-    <td class="{{ 'out' if not inres }}"><select name="a{{ row.r['id'] }}_{{ d.day }}" data-r="{{ row.r['id'] }}" data-in="{{ 1 if inres else 0 }}" aria-label="{{ row.r['name'] }} {{ d.day }}日">
+    <td class="{{ 'out' if not inres }}"><select name="a{{ row.r['id'] }}_{{ d.day }}" data-r="{{ row.r['id'] }}" data-in="{{ 1 if inres else 0 }}" aria-label="{{ row.r['name'] }} {{ d.day }}日"{% if not inres %} disabled title="入居期間の外の日です"{% endif %}>
       <option value=""></option>{% for c, label in CODES %}<option value="{{ c }}"{% if v == c %} selected{% endif %}>{{ c }}</option>{% endfor %}
     </select></td>
     {% endfor %}
@@ -36,7 +37,7 @@
   </tbody>
 </table>
 </div>
-<p class="muted small">灰色のマスは入居日より前・退居日より後の日です。日数の集計は保存すると更新されます。</p>
+<p class="muted small">灰色のマスは入居日より前・退居日より後の日で、入力できません（請求にも数えません）。空欄の日は「未入力」として、給付費の概算では在居（○）として計算し、注意を出します。日数の集計は保存すると更新されます。</p>
 <div class="actions sticky-save"><button class="btn primary big">💾 保存する</button>
   <a class="btn" href="{{ url_for('billing.benefit', ym=ym) }}">🧮 給付費の概算を見る</a>
   <a class="btn" href="{{ url_for('docs.record_marks', ym=ym, home_id=home_id) }}">✅ 夜間支援などを入れる</a>

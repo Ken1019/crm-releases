@@ -2,13 +2,14 @@
 {% block title %}日誌入力{% endblock %}
 {% block content %}
 <h1>📝 日誌を書く</h1>
-<p class="guide">① 日付と住居をえらぶ → ② 業務日誌を書く → ③ 入居者ごとに様子を書く → ④ いちばん下の「保存する」を押す。書いていない入居者の記録は作られません。</p>
+<p class="guide">① 日付と住居をえらぶ → ② 業務日誌を書く → ③ 入居者ごとに様子を書く → ④ いちばん下の「保存する」を押す。書いていない入居者の記録は作られません。書いてあった記録の欄を全部消して保存すると、その記録は削除されます。</p>
 <form method="get" class="filters card">
   <a class="btn" href="{{ url_for('views.journal', date=prev, home_id=home_id, slot=slot) }}">◀ 前の日</a>
   <input type="date" name="date" value="{{ d.isoformat() }}" onchange="this.form.submit()">
   <a class="btn" href="{{ url_for('views.journal', date=next, home_id=home_id, slot=slot) }}">次の日 ▶</a>
   <select name="home_id" onchange="this.form.submit()">
     {% for h in homes %}<option value="{{ h['id'] }}"{% if h['id'] == home_id %} selected{% endif %}>{{ h['name'] }}</option>{% endfor %}
+    {% if no_home or home_id == 0 %}<option value="0"{% if home_id == 0 %} selected{% endif %}>住居未設定（{{ no_home }}名）</option>{% endif %}
   </select>
   <select name="slot" onchange="this.form.submit()">
     {% for s in TIME_SLOT %}<option{% if s == slot %} selected{% endif %}>{{ s }}</option>{% endfor %}
@@ -24,8 +25,9 @@
 <form method="post" data-guard>
 <input type="hidden" name="_csrf" value="{{ csrf_token }}">
 <input type="hidden" name="date" value="{{ d.isoformat() }}">
-<input type="hidden" name="home_id" value="{{ home_id or '' }}">
+<input type="hidden" name="home_id" value="{{ home_id if home_id is not none else '' }}">
 <input type="hidden" name="slot" value="{{ slot }}">
+<input type="hidden" name="by_id" value="1">
 
 <section class="card form">
   <h2 class="wide">📔 業務日誌（{{ d.strftime('%m月%d日') }}）</h2>
@@ -46,7 +48,7 @@
     <thead><tr><th>居室</th><th>氏名</th><th>体温</th><th>食事</th><th>服薬</th><th>様子</th><th>記録内容</th><th>記録者</th></tr></thead>
     {% for r in residents %}{% set rec = recs.get(r['id']) %}{% set p = 'r' ~ r['id'] ~ '_' %}
     <tr>
-      <td>{{ r['room'] or '' }}</td>
+      <td>{{ r['room'] or '' }}{% if rec %}<input type="hidden" name="{{ p }}id" value="{{ rec['id'] }}">{% endif %}</td>
       <td class="nowrap"><a href="{{ url_for('crud.view', key='residents', rid=r['id']) }}">{{ r['name'] }}</a>
         {% if r['status'] == '入院中' %}<small class="ng">入院中</small>{% endif %}</td>
       <td><input type="number" step="0.1" name="{{ p }}temperature" class="w5" value="{{ rec['temperature'] if rec and rec['temperature'] is not none }}"></td>

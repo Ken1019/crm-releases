@@ -20,7 +20,7 @@
 {% for x in results %}
 <section class="card">
   <div class="head"><h2>{{ x.r['name'] }} <small class="muted">{{ x.r['support_level'] or '区分未入力' }}・{{ x.r['hname'] or '' }}</small></h2>
-    <a href="{{ url_for('billing.attendance', ym=ym, home_id=x.r['home_id']) }}">実績を直す</a></div>
+    <a href="{{ url_for('billing.attendance', ym=ym, home_id=x.r['home_id'] or 0) }}">実績を直す</a></div>
   {% for w in x.warnings %}<p class="pill warn">！ {{ w }}</p> {% endfor %}
   <table class="list">
     <thead><tr><th>内容</th><th>単位</th><th>回数・日数</th><th>小計（単位）</th></tr></thead>

@@ -1207,3 +1207,189 @@ def test_pin_admin_redirected_to_reauth_for_timecards(client, app):
         assert r.status_code == 302 and "/reauth" in r.headers["Location"], path
     r = client.post("/work/timecards", data={"_csrf": csrf(client, "/"), "staff_id": "1"})
     assert r.status_code == 302 and "/reauth" in r.headers["Location"]
+
+
+# ---------------------------------------------------------------- 請求・実績・日誌の不具合修正
+def _q(app, sql, args=()):
+    import sqlite3
+    con = sqlite3.connect(app.config["DATABASE"])
+    rows = con.execute(sql, args).fetchall()
+    con.commit()
+    con.close()
+    return rows
+
+
+def _benefit(app, first, last):
+    from ghms.billing import compute_benefit
+
+    with app.test_request_context():
+        results, _, _ = compute_benefit(first, last)
+    return results
+
+
+def _billing_resident(client, **extra):
+    post(client, "/m/homes/new", {"name": "ひまわり", "home_type": "介護サービス包括型"})
+    data = {"name": "山田太郎", "home_id": "1", "status": "入居中", "support_level": "区分3", "move_in": "2026-01-01",
+            "burden_cap": "9300"}
+    data.update(extra)
+    post(client, "/m/residents/new", data)
+    post(client, "/m/basic_units/new", {"home_type": "介護サービス包括型", "support_level": "区分3", "units": "400", "active": "1"})
+
+
+def test_absence_only_month_bills_present_days(client, app):
+    _billing_resident(client)
+    # 実績は外泊の登録から入った2日だけ（9/11・9/12）。ほかの日は未入力
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "外泊", "start_date": "2026-09-10",
+                                     "end_date": "2026-09-13", "auto_attendance": "1"})
+    x = _benefit(app, date(2026, 9, 1), date(2026, 9, 30))[0]
+    assert x["billable"] == 28 and x["subtotal"] == 400 * 28
+    assert "実績が未入力の日が28日あります（在居として計算）" in x["warnings"]
+    html = client.get("/billing/benefit?ym=2026-09").get_data(as_text=True)
+    assert "実績が未入力の日が28日あります" in html
+
+
+def test_move_out_mid_month_bills_only_residence_days(client, app):
+    _billing_resident(client, move_out="2026-09-15")
+    form = {f"a1_{d}": "○" for d in range(1, 31)}
+    form.update({"ym": "2026-09", "home_id": "1"})
+    post(client, "/billing/attendance", form)
+    # 退居日より後の日は保存しない
+    assert _q(app, "SELECT COUNT(*) FROM attendance WHERE resident_id=1")[0][0] == 15
+    # 退居後の日に実績が残っていても数えない
+    _q(app, "INSERT INTO attendance VALUES (1, '2026-09-20', '○', 'x', 'x')")
+    x = _benefit(app, date(2026, 9, 1), date(2026, 9, 30))[0]
+    assert x["billable"] == 15 and not any("未入力の日" in w for w in x["warnings"])
+
+
+def test_grid_keeps_absence_ownership_and_absence_edit_clears_days(client, app):
+    _billing_resident(client)
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "外泊", "start_date": "2026-09-10",
+                                     "end_date": "2026-09-15", "auto_attendance": "1"})
+    form = {f"a1_{d}": ("外" if 11 <= d <= 14 else "○") for d in range(1, 31)}
+    form.update({"ym": "2026-09", "home_id": "1"})
+    post(client, "/billing/attendance", form)
+    owners = dict(_q(app, "SELECT date, updated_by FROM attendance WHERE code='外'"))
+    assert set(owners.values()) == {"absence:1"} and len(owners) == 4
+    # 12日に戻った → 12〜14日の「外」は消える（○にはしない＝未入力）
+    post(client, "/m/absences/1/edit", {"resident_id": "1", "kind": "外泊", "start_date": "2026-09-10",
+                                        "end_date": "2026-09-12", "auto_attendance": "1"})
+    codes = dict(_q(app, "SELECT date, code FROM attendance WHERE resident_id=1"))
+    assert codes["2026-09-11"] == "外" and "2026-09-13" not in codes and codes["2026-09-16"] == "○"
+    # 手で入れた日は入院・外泊の登録で上書きしない
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "入院", "start_date": "2026-09-19",
+                                     "end_date": "2026-09-22", "auto_attendance": "1"})
+    codes = dict(_q(app, "SELECT date, code FROM attendance WHERE resident_id=1"))
+    assert codes["2026-09-20"] == "○"
+    # 戻った日が出発した日より前ならエラーで保存しない
+    r = post(client, "/m/absences/new", {"resident_id": "1", "kind": "外泊", "start_date": "2026-09-25",
+                                         "end_date": "2026-09-20", "auto_attendance": "1"})
+    assert r.status_code == 200 and "より前になっています" in r.get_data(as_text=True)
+    assert _q(app, "SELECT COUNT(*) FROM absences")[0][0] == 2
+
+
+def test_absence_overlap_delete_and_future_return(client, app):
+    from datetime import timedelta
+
+    _billing_resident(client)
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "外泊", "start_date": "2026-08-20",
+                                     "end_date": "2026-08-28", "auto_attendance": "1"})
+    r = post(client, "/m/absences/new", {"resident_id": "1", "kind": "入院", "start_date": "2026-08-22",
+                                         "end_date": "2026-08-25", "auto_attendance": "1"})
+    assert "期間が重なっています" in client.get(r.headers["Location"]).get_data(as_text=True)
+    assert dict(_q(app, "SELECT date, code FROM attendance WHERE resident_id=1"))["2026-08-23"] == "入"
+    post(client, "/m/absences/2/delete", {})
+    codes = dict(_q(app, "SELECT date, code FROM attendance WHERE resident_id=1"))
+    assert codes["2026-08-23"] == "外" and len(codes) == 7
+    # 入院中のまま削除 → 状態が入居中に戻る
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "入院", "start_date": date.today().isoformat(),
+                                     "auto_attendance": "1"})
+    assert _q(app, "SELECT status FROM residents WHERE id=1")[0][0] == "入院中"
+    aid = _q(app, "SELECT MAX(id) FROM absences")[0][0]
+    post(client, f"/m/absences/{aid}/delete", {})
+    assert _q(app, "SELECT status FROM residents WHERE id=1")[0][0] == "入居中"
+    # 戻った日に先の日付（予定）を入れても、その日までは不在中
+    back = date.today() + timedelta(days=5)
+    post(client, "/m/absences/new", {"resident_id": "1", "kind": "入院",
+                                     "start_date": (date.today() - timedelta(days=1)).isoformat(),
+                                     "end_date": back.isoformat(), "auto_attendance": "1"})
+    assert _q(app, "SELECT status FROM absences ORDER BY id DESC")[0][0] == "不在中"
+    assert _q(app, "SELECT status FROM residents WHERE id=1")[0][0] == "入院中"
+    codes = dict(_q(app, "SELECT date, code FROM attendance WHERE resident_id=1"))
+    assert codes[(back - timedelta(days=1)).isoformat()] == "入" and back.isoformat() not in codes
+
+
+def test_journal_edit_updates_right_record(client, app):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "status": "入居中"})
+    post(client, "/m/support_records/new", {"date": "2026-10-02", "resident_id": "1", "time_slot": "終日", "content": "first"})
+    post(client, "/m/support_records/new", {"date": "2026-10-02", "resident_id": "1", "time_slot": "終日", "content": "second"})
+    html = client.get("/journal?date=2026-10-02&home_id=1&slot=終日").get_data(as_text=True)
+    assert 'name="r1_id" value="2"' in html and ">second</textarea>" in html
+    base = {"date": "2026-10-02", "home_id": "1", "slot": "終日", "by_id": "1"}
+    post(client, "/journal", dict(base, r1_id="2", r1_content="second edited", r1_staff="A"))
+    assert _q(app, "SELECT id, content FROM support_records ORDER BY id") == [(1, "first"), (2, "second edited")]
+    # 画面を開いたときに記録がなかった行は、新しく作る（ほかの記録を上書きしない）
+    post(client, "/journal", dict(base, r1_content="third", r1_staff="A"))
+    assert _q(app, "SELECT id, content FROM support_records ORDER BY id")[-1] == (3, "third")
+    # 欄を全部消すと、その記録だけ削除
+    post(client, "/journal", dict(base, r1_id="3", r1_content="", r1_staff="A"))
+    assert [r[0] for r in _q(app, "SELECT id FROM support_records ORDER BY id")] == [1, 2]
+    # 業務日誌を全部消して保存すると、消した内容で上書き
+    post(client, "/journal", dict(base, summary="誤記"))
+    post(client, "/journal", dict(base, summary=""))
+    assert _q(app, "SELECT summary FROM daily_logs") == [(None,)]
+
+
+def test_no_home_residents_can_be_chosen(client, app):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "住居なし花子", "status": "入居中", "move_in": "2026-01-01"})
+    html = client.get("/billing/attendance?ym=2026-09").get_data(as_text=True)
+    assert "住居未設定（1名）" in html and "住居なし花子" not in html
+    assert "住居なし花子" in client.get("/billing/attendance?ym=2026-09&home_id=0").get_data(as_text=True)
+    page = client.get("/journal?home_id=0").get_data(as_text=True)
+    assert "住居なし花子" in page and "住居未設定" in page
+    post(client, "/journal", {"date": "2026-10-02", "home_id": "0", "slot": "終日", "by_id": "1", "r1_content": "元気"})
+    assert _q(app, "SELECT content FROM support_records") == [("元気",)]
+
+
+def test_addon_mid_month_start_counts_only_days_after(client, app):
+    _billing_resident(client)
+    aid = _q(app, "SELECT id FROM addons WHERE name='重度障害者支援加算'")[0][0]
+    _q(app, "UPDATE addons SET active=1, units=180 WHERE id=?", (aid,))
+    post(client, "/m/resident_addons/new", {"resident_id": "1", "addon_id": str(aid), "start_on": "2026-09-25"})
+    lines = {name: n for name, _, n, _ in _benefit(app, date(2026, 9, 1), date(2026, 9, 30))[0]["lines"]}
+    assert lines["重度障害者支援加算"] == 6  # 25日〜30日
+    # 加算そのものの算定開始日もあわせて見る
+    _q(app, "UPDATE addons SET start_on='2026-09-28' WHERE id=?", (aid,))
+    lines = {name: n for name, _, n, _ in _benefit(app, date(2026, 9, 1), date(2026, 9, 30))[0]["lines"]}
+    assert lines["重度障害者支援加算"] == 3
+    # 回数の加算：実績記録票に同じ名前の項目がなければ注意を出す
+    _q(app, "UPDATE addons SET unit_type='回' WHERE id=?", (aid,))
+    x = _benefit(app, date(2026, 9, 1), date(2026, 9, 30))[0]
+    assert any("回数の加算は自動で数えていません" in w for w in x["warnings"])
+
+
+def test_benefit_rounding_and_invoice_month(client, app):
+    from ghms.billing import shogu_units, units_to_yen
+
+    assert units_to_yen(180, "10.45") == 1881  # 小数の誤差で 1,880 にならない
+    assert units_to_yen(1, "10.45") == 10
+    assert shogu_units(15, 10) == 2 and shogu_units(14, 10) == 1  # 1.5 → 2（四捨五入）
+    post(client, "/m/residents/new", {"name": "山田太郎", "status": "入居中"})
+    post(client, "/m/invoices/new", {"ym": "2026-9", "resident_id": "1", "rent": "1000"})
+    assert _q(app, "SELECT ym FROM invoices") == [("2026-09",)]
+    r = post(client, "/m/invoices/new", {"ym": "10月", "resident_id": "1"})
+    assert r.status_code == 200 and "年-月" in r.get_data(as_text=True)
+    assert _q(app, "SELECT COUNT(*) FROM invoices")[0][0] == 1
+
+
+def test_documents_newest_and_choices(client, app):
+    post(client, "/m/residents/new", {"name": "山田太郎", "status": "入居中"})
+    post(client, "/m/resident_documents/new", {"resident_id": "1", "doc_type": "利用契約書", "signed_on": "2025-04-01",
+                                               "expires_on": "2020-01-01"})
+    post(client, "/m/resident_documents/new", {"resident_id": "1", "doc_type": "利用契約書", "expires_on": "2099-01-01"})
+    html = client.get("/billing/documents").get_data(as_text=True)
+    assert "期限切れ" not in html  # 署名日のない新しい登録がいちばん新しい
+    # 事業所で増やした書類の種類も確認の対象になる
+    post(client, "/settings/choices", {"field": "resident_documents.doc_type", "new": "見学同意書"})
+    assert "見学同意書" in client.get("/billing/documents").get_data(as_text=True)
