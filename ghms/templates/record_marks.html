@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}実績記録票の○を入れる{% endblock %}
+{% block content %}
+<h1>✅ 夜間支援などの○を入れる（{{ first.strftime('%Y年%m月') }}）</h1>
+{% if not col %}
+<div class="card"><p>実績記録票に増やした項目がまだありません。</p>
+  {% if is_admin %}<p><a class="btn primary" href="{{ url_for('docs.record_columns_settings') }}">➕ 項目を増やす（夜間支援・送迎など）</a></p>{% endif %}</div>
+{% else %}
+<p class="guide">○をつけた日が、実績記録票の「{{ col['label'] }}」の欄に出ます。{% if col['auto'] == 'stay' %}在居の日（実績が○・日）には最初から○がついています。支援しなかった日だけ外してください。{% else %}支援した日にチェックしてください。{% endif %}</p>
+<form method="get" class="filters card">
+  <input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
+  <select name="home_id" onchange="this.form.submit()" aria-label="住居">
+    {% for h in homes %}<option value="{{ h['id'] }}"{% if h['id'] == home_id %} selected{% endif %}>{{ h['name'] }}</option>{% endfor %}
+  </select>
+  <select name="col" onchange="this.form.submit()" aria-label="項目">
+    {% for c in cols %}<option value="{{ c['id'] }}"{% if c['id'] == col['id'] %} selected{% endif %}>{{ c['label'] }}</option>{% endfor %}
+  </select>
+  <noscript><button class="btn">表示</button></noscript>
+</form>
+<form method="post" data-guard>
+<input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="ym" value="{{ ym }}">
+<input type="hidden" name="home_id" value="{{ home_id or '' }}"><input type="hidden" name="col" value="{{ col['id'] }}">
+<div class="gridwrap card">
+<table class="mgrid">
+  <thead><tr><th class="name">氏名</th>
+    {% for d in days %}<th class="{{ 'sat' if d.weekday() == 5 else 'sun' if d.weekday() == 6 }}">{{ d.day }}<br><small>{{ WEEK[d.weekday()] }}</small></th>{% endfor %}
+    <th>日数</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr>
+    <td class="name"><b>{{ row.r['name'] }}</b><br><button type="button" class="btn mini" data-fill="{{ row.r['id'] }}">在居の日に○</button></td>
+    {% for c in row.cells %}
+    <td class="{{ 'out' if not c.inres }}" title="実績：{{ c.code or '未入力' }}"><input type="checkbox" name="m{{ row.r['id'] }}_{{ c.d.day }}" value="1" data-r="{{ row.r['id'] }}" data-stay="{{ 1 if c.stay else 0 }}"{% if c.on %} checked{% endif %} aria-label="{{ row.r['name'] }} {{ c.d.day }}日"><br><small class="muted">{{ c.code }}</small></td>
+    {% endfor %}
+    <td class="num">{{ row.total }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="{{ days|length + 2 }}" class="empty">この月に入居している方がいません。</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted small">各マスの下の小さな記号は「実績を入れる」で入れた内容です（○在居・日 日中支援・外 外泊・帰 帰宅・入 入院）。</p>
+<div class="actions sticky-save"><button class="btn primary big">💾 保存する</button>
+  {% if is_admin %}<a class="btn" href="{{ url_for('docs.record_sheets', ym=ym) }}">📄 実績記録票を見る</a>
+  <a class="btn" href="{{ url_for('docs.record_columns_settings') }}">➕ 項目を増やす・変える</a>{% endif %}</div>
+</form>
+<script>
+document.querySelectorAll('[data-fill]').forEach(function(b){b.addEventListener('click',function(){
+  document.querySelectorAll('input[data-r="'+b.dataset.fill+'"]').forEach(function(s){if(s.dataset.stay==='1'){s.checked=true;}});
+  b.closest('form').dispatchEvent(new Event('input'));});});
+</script>
+{% endif %}
+{% endblock %}

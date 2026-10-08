@@ -7,6 +7,8 @@
   <select name="rid" onchange="this.form.submit()"><option value="">全員分</option>{% for r in residents %}<option value="{{ r['id'] }}"{% if r['id'] == rid %} selected{% endif %}>{{ r['name'] }}</option>{% endfor %}</select>
 </form>
 <a class="b" href="{{ url_for('docs.record_sheets_export', ym=ym, rid=rid or '') }}">Excelで出す</a>
+<a class="b" href="{{ url_for('docs.record_marks', ym=ym) }}">✅ 夜間支援などの○を入れる</a>
+<a class="b" href="{{ url_for('docs.record_columns_settings') }}">➕ 項目を増やす・変える</a>
 <span class="note">実績は「請求・お金」→「実績を入れる」の内容です。自治体の様式がある場合は、この内容をもとに確認してください。</span>
 {% endblock %}
 {% block pages %}
@@ -20,13 +22,14 @@
     <tr><th>住居</th><td>{{ r['hname'] or '' }}</td><th>入居日／退居日</th><td>{{ r['move_in'] or '' }}{% if r['move_out'] %}／{{ r['move_out'] }}{% endif %}</td></tr>
   </table>
   <table>
-    <thead><tr><th class="c" style="width:7%">日</th><th class="c" style="width:7%">曜日</th><th>サービス提供の状況</th><th class="c" style="width:11%">日中支援</th>
-      <th class="c" style="width:11%">帰宅時支援</th><th class="c" style="width:11%">入院時支援</th><th class="c" style="width:13%">利用者確認</th></tr></thead>
+    {% set w = [11, 54 // (cols|length or 1)]|min %}
+    <thead><tr><th class="c" style="width:6%">日</th><th class="c" style="width:6%">曜日</th><th style="min-width:22%">サービス提供の状況</th>
+      {% for c in cols %}<th class="c" style="width:{{ w }}%">{{ c['label'] }}</th>{% endfor %}<th class="c" style="width:12%">利用者確認</th></tr></thead>
     {% for x in sh.rows %}<tr class="{{ 'sat' if x.d.weekday() == 5 else 'sun' if x.d.weekday() == 6 }}">
       <td class="c">{{ x.d.day }}</td><td class="c">{{ x.w }}</td><td>{{ x.label or ('（未入力）' if not x.code else '') }}</td>
-      <td class="c">{{ '○' if x.day_support }}</td><td class="c">{{ '○' if x.home }}</td><td class="c">{{ '○' if x.hosp }}</td><td></td></tr>{% endfor %}
+      {% for m in x.marks %}<td class="c">{{ '○' if m }}</td>{% endfor %}<td></td></tr>{% endfor %}
     <tr><th colspan="3">合計：在居 {{ sh.stay }}日・外泊 {{ sh.out }}日・帰宅 {{ sh.home }}日・入院 {{ sh.hosp }}日{% if sh.empty %}・<span style="color:#c00">未入力 {{ sh.empty }}日</span>{% endif %}</th>
-      <td class="c">{{ sh.day_support }}</td><td class="c">{{ sh.home }}</td><td class="c">{{ sh.hosp }}</td><td></td></tr>
+      {% for t in sh.totals %}<td class="c">{{ t }}</td>{% endfor %}<td></td></tr>
   </table>
   <div class="meta" style="margin-top:14px"><span>上記の内容を確認しました。　利用者氏名（署名）＿＿＿＿＿＿＿＿＿＿　印</span><span>事業所確認＿＿＿＿＿＿　印</span></div>
 </div>

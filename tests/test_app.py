@@ -716,6 +716,51 @@ def test_record_sheets(client):
     assert client.get("/docs/record-sheets.xlsx?ym=2026-10").data[:2] == b"PK"
 
 
+def test_record_sheet_columns(client, app):
+    _setup_billing(client)
+    from datetime import date
+
+    from ghms.docs import record_sheet_data
+
+    def totals():
+        with app.test_request_context():
+            sheets, cols = record_sheet_data(date(2026, 10, 1), date(2026, 10, 31))
+            return dict(zip([c["label"] for c in cols], sheets[0]["totals"]))
+
+    # 最初から「夜間支援」があり、在居の日（○・日）に自動で○
+    assert totals() == {"日中支援": 1, "帰宅時支援": 0, "入院時支援": 0, "夜間支援": 28}
+    page = client.get("/docs/record-marks?ym=2026-10&home_id=1").get_data(as_text=True)
+    assert "夜間支援" in page and 'name="m1_1" value="1" data-r="1" data-stay="1" checked' in page
+    # 1日だけ外す
+    form = {f"m1_{d}": "1" for d in range(1, 32) if d not in (1, 5, 6, 7)}
+    post(client, "/docs/record-marks", dict(form, ym="2026-10", home_id="1", col="4"))
+    assert totals()["夜間支援"] == 27
+    # 実績を入院に直すと、夜間支援の○も自動で外れる
+    form = {f"a1_{d}": "○" for d in range(1, 32)}
+    form.update({"a1_5": "外", "a1_6": "外", "a1_7": "外", "a1_10": "日", "a1_2": "入", "ym": "2026-10", "home_id": "1"})
+    post(client, "/billing/attendance", form)
+    assert totals() == {"日中支援": 1, "帰宅時支援": 0, "入院時支援": 1, "夜間支援": 26}
+    # 項目を増やす（手で○）・名前を変える・使わない
+    post(client, "/docs/record-columns", {"active::1": "1", "label::1": "日中支援", "sort::1": "10",
+                                          "label::2": "帰宅時支援", "sort::2": "20",
+                                          "active::3": "1", "label::3": "入院時支援", "sort::3": "30",
+                                          "active::4": "1", "label::4": "夜間支援体制", "sort::4": "40", "auto::4": "stay",
+                                          "new": "送迎", "new_auto": ""})
+    post(client, "/docs/record-marks", {"m1_3": "1", "ym": "2026-10", "home_id": "1", "col": "5"})
+    assert totals() == {"日中支援": 1, "入院時支援": 1, "夜間支援体制": 26, "送迎": 1}
+    page = client.get("/docs/record-sheets?ym=2026-10").get_data(as_text=True)
+    assert "送迎" in page and "夜間支援体制" in page and "帰宅時支援" not in page
+    assert client.get("/docs/record-sheets.xlsx?ym=2026-10").data[:2] == b"PK"
+    # 消す
+    post(client, "/docs/record-columns", {"active::1": "1", "label::1": "日中支援", "active::4": "1", "label::4": "夜間支援体制",
+                                          "auto::4": "stay", "active::5": "1", "label::5": "送迎", "delete::5": "1"})
+    assert "送迎" not in totals()
+    # 職員は○を入れられるが、項目の変更は管理者だけ
+    staff = staff_client(client, app)
+    assert staff.get("/docs/record-marks").status_code == 200
+    assert staff.get("/docs/record-columns").status_code == 403
+
+
 def test_renewal_documents(client):
     post(client, "/settings", {"office_name": "ひだまり", "corp_name": "社会福祉法人テスト会", "service_area": "札幌市中央区",
                                "complaint_manager": "管理者 佐藤", "session_timeout_min": "30", "staff_can_export": "0"})

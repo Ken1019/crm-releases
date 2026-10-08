@@ -27,7 +27,7 @@ FEATURES = [
     ("shift", "勤務表・常勤換算", "", ["/shift", "/m/shift_types"]),
     ("addons", "加算の管理・毎月の要件チェック", "", ["/addons", "/m/addons", "/m/resident_addons"]),
     ("shogu", "処遇改善加算", "加算額の見込みと職員への配分", ["/shogu", "/m/shogu_"]),
-    ("billing", "実績と給付費の概算", "国保連に請求する前の確認", ["/billing/attendance", "/billing/benefit", "/m/basic_units"]),
+    ("billing", "実績と給付費の概算", "国保連に請求する前の確認", ["/billing/attendance", "/billing/benefit", "/m/basic_units", "/docs/record-marks"]),
     ("invoices", "利用料の請求書・入金管理", "家賃・食費などの請求書と領収書", ["/billing/invoice", "/m/invoices"]),
     ("deposits", "預り金の管理", "お小遣いなどの出し入れと出納帳", ["/billing/deposits", "/m/deposits"]),
     ("menus", "献立表", "1週間の献立を入力・印刷", ["/docs/menus"]),

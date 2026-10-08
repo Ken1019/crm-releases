@@ -68,6 +68,11 @@ def init_db(path):
                 " updated_at TEXT, PRIMARY KEY (home_id, date, meal))")
     con.execute("CREATE TABLE IF NOT EXISTS renewal_items (id INTEGER PRIMARY KEY, sort INTEGER, name TEXT, endpoint TEXT,"
                 " done INTEGER DEFAULT 0, note TEXT)")
+    # 実績記録票の項目（日中支援・夜間支援など）と、日ごとの○
+    con.execute("CREATE TABLE IF NOT EXISTS record_columns (id INTEGER PRIMARY KEY, label TEXT, sort INTEGER,"
+                " active INTEGER DEFAULT 1, auto TEXT, builtin TEXT)")
+    con.execute("CREATE TABLE IF NOT EXISTS record_marks (resident_id INTEGER, date TEXT, col_id INTEGER, value TEXT,"
+                " updated_by TEXT, updated_at TEXT, PRIMARY KEY (resident_id, date, col_id))")
     # 事業所ごとのカスタマイズ（選択肢・独自の項目）
     con.execute("CREATE TABLE IF NOT EXISTS choice_options (field TEXT, value TEXT, sort INTEGER, active INTEGER DEFAULT 1,"
                 " track_days INTEGER, PRIMARY KEY (field, value))")
@@ -90,6 +95,9 @@ def init_db(path):
     seed(con)
     seed_choices(con)
     apply_custom_fields(con)
+    from .docs import seed_record_columns
+
+    seed_record_columns(con)
     con.close()
 
 

@@ -81,6 +81,7 @@ HUBS = [
                       "billing.invoice_print", "billing.invoices_export", "billing.deposits", "billing.deposit_ledger"],
         "tasks": [
             ("今月の実績（在居・外泊・入院）を入れる", "請求のもとになります。月末にまとめて入れてもOK", lambda: url_for("billing.attendance"), False),
+            ("夜間支援などの○を入れる", "実績記録票に増やした項目を日ごとに", lambda: url_for("docs.record_marks"), False),
             ("給付費の概算と実績記録を見る", "国保連に請求する前の確認（加算の漏れ・入れ忘れ）", lambda: url_for("billing.benefit"), False),
             ("利用料の請求書を作る・印刷する", "家賃・食費・光熱水費・利用者負担をまとめて", lambda: url_for("billing.invoices"), True),
             ("入金を記録する・未入金を見る", "請求の一覧から入金済にします", lambda: url_for("crud.index", key="invoices", status="請求済"), True),
@@ -93,10 +94,11 @@ HUBS = [
     {
         "key": "docs", "icon": "🖨️", "title": "書類を作る", "desc": "提出・保管する書類・献立表・Excel",
         "entities": [], "endpoints": ["views.reports", "views.journal_export", "views.career_export", "docs.renewal",
-                                      "docs.menus"],
+                                      "docs.menus", "docs.record_marks", "docs.record_columns_settings"],
         "tasks": [
             ("指定更新の書類をそろえる", "チェックリストと、データから作る書類（経歴書・運営規程など）", lambda: url_for("docs.renewal"), True),
             ("サービス提供実績記録票を印刷する", "入居者ごと・月ごと。全員分をまとめて", lambda: url_for("docs.record_sheets"), True),
+            ("実績記録票の項目を増やす・変える", "夜間支援・送迎など、○をつける欄を追加", lambda: url_for("docs.record_columns_settings"), True),
             ("献立表を作る・印刷する", "1週間分を入力して印刷", lambda: url_for("docs.menus"), False),
             ("従業者の一覧（常勤換算）を出す", "職種・資格・勤務時間", lambda: url_for("docs.staff_list"), True),
             ("管理者・サービス管理責任者の経歴書を出す", "職員の情報の職歴・研修から作成", lambda: url_for("docs.resumes"), True),

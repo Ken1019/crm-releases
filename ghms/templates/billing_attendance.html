@@ -39,6 +39,7 @@
 <p class="muted small">灰色のマスは入居日より前・退居日より後の日です。日数の集計は保存すると更新されます。</p>
 <div class="actions sticky-save"><button class="btn primary big">💾 保存する</button>
   <a class="btn" href="{{ url_for('billing.benefit', ym=ym) }}">🧮 給付費の概算を見る</a>
+  <a class="btn" href="{{ url_for('docs.record_marks', ym=ym, home_id=home_id) }}">✅ 夜間支援などの○</a>
   {% if is_admin %}<a class="btn" href="{{ url_for('docs.record_sheets', ym=ym) }}">📄 実績記録票を印刷</a>{% endif %}</div>
 </form>
 <script>

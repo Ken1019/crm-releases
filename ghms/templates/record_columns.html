@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}実績記録票の項目{% endblock %}
+{% block content %}
+<h1>➕ 実績記録票の項目を増やす・変える</h1>
+<p class="guide">サービス提供実績記録票に出す列（○をつける欄）を、事業所に合わせて増やせます。たとえば「夜間支援」「送迎」「通院の付き添い」など。使わない列はチェックを外すと記録票に出なくなります（つけた○は残ります）。並び順は小さい数字が左です。</p>
+<form method="post" class="card">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <div class="tablewrap"><table class="list">
+    <thead><tr><th>使う</th><th>項目の名前</th><th>○のつけ方</th><th>並び順</th><th>手で直した日</th><th>消す</th></tr></thead>
+    {% for c in cols %}
+    <tr class="{{ 'muted' if not c['active'] }}">
+      <td><input type="checkbox" name="active::{{ c['id'] }}" value="1"{% if c['active'] %} checked{% endif %} aria-label="{{ c['label'] }}を使う"></td>
+      <td><input name="label::{{ c['id'] }}" value="{{ c['label'] }}" maxlength="20" aria-label="項目の名前"></td>
+      <td>{% if c['builtin'] %}<span class="muted">実績の「{{ BUILTIN[c['builtin']] }}」の日に自動で○</span>
+        {% else %}<select name="auto::{{ c['id'] }}" aria-label="○のつけ方">{% for k, label in AUTO_KINDS.items() %}<option value="{{ k }}"{% if (c['auto'] or '') == k %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>{% endif %}</td>
+      <td><input type="number" name="sort::{{ c['id'] }}" value="{{ c['sort'] }}" class="w5" aria-label="並び順"></td>
+      <td class="num">{% if c['builtin'] %}—{% else %}{{ used.get(c['id'], 0) }}件{% endif %}</td>
+      <td>{% if not c['builtin'] %}<input type="checkbox" name="delete::{{ c['id'] }}" value="1" aria-label="{{ c['label'] }}を消す">{% endif %}</td>
+    </tr>
+    {% endfor %}
+    <tr class="total"><td>＋</td><td><input name="new" placeholder="新しい項目（例：送迎）" maxlength="20"></td>
+      <td><select name="new_auto" aria-label="○のつけ方">{% for k, label in AUTO_KINDS.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select></td><td colspan="3"></td></tr>
+  </table></div>
+  <p class="muted small">「在居の日は自動で○」にすると、実績で在居（○・日）の日に自動で○がつきます。夜間支援のように毎晩ある支援に向いています。入院などで実績を直すと○も自動で外れます。</p>
+  <div class="actions"><button class="btn primary">💾 保存する</button>
+    <a class="btn" href="{{ url_for('docs.record_marks') }}">✅ 日ごとの○を入れる</a>
+    <a class="btn" href="{{ url_for('docs.record_sheets') }}">📄 実績記録票を見る</a></div>
+</form>
+{% endblock %}
