@@ -71,6 +71,7 @@ def init_db(path):
     # 実績記録票の項目（日中支援・夜間支援など）と、日ごとの○
     con.execute("CREATE TABLE IF NOT EXISTS record_columns (id INTEGER PRIMARY KEY, label TEXT, sort INTEGER,"
                 " active INTEGER DEFAULT 1, auto TEXT, builtin TEXT)")
+    _ensure_columns(con, "record_columns", {"mark": "TEXT"})  # 記録票に出す記号（1・○など）
     con.execute("CREATE TABLE IF NOT EXISTS record_marks (resident_id INTEGER, date TEXT, col_id INTEGER, value TEXT,"
                 " updated_by TEXT, updated_at TEXT, PRIMARY KEY (resident_id, date, col_id))")
     # 事業所ごとのカスタマイズ（選択肢・独自の項目）

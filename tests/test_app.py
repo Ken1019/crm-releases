@@ -750,6 +750,10 @@ def test_record_sheet_columns(client, app):
     assert totals() == {"日中支援": 1, "入院時支援": 1, "夜間支援体制": 26, "送迎": 1}
     page = client.get("/docs/record-sheets?ym=2026-10").get_data(as_text=True)
     assert "送迎" in page and "夜間支援体制" in page and "帰宅時支援" not in page
+    assert '<td class="c">1</td>' in page and '<td class="c">○</td>' not in page   # 記号はふつう「1」
+    with app.test_request_context():
+        sheets, cols = record_sheet_data(date(2026, 10, 1), date(2026, 10, 31))
+        assert sheets[0]["rows"][2]["marks"][-1] == "1"
     assert client.get("/docs/record-sheets.xlsx?ym=2026-10").data[:2] == b"PK"
     # 消す
     post(client, "/docs/record-columns", {"active::1": "1", "label::1": "日中支援", "active::4": "1", "label::4": "夜間支援体制",

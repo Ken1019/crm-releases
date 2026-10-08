@@ -7,7 +7,7 @@
   <select name="rid" onchange="this.form.submit()"><option value="">全員分</option>{% for r in residents %}<option value="{{ r['id'] }}"{% if r['id'] == rid %} selected{% endif %}>{{ r['name'] }}</option>{% endfor %}</select>
 </form>
 <a class="b" href="{{ url_for('docs.record_sheets_export', ym=ym, rid=rid or '') }}">Excelで出す</a>
-<a class="b" href="{{ url_for('docs.record_marks', ym=ym) }}">✅ 夜間支援などの○を入れる</a>
+<a class="b" href="{{ url_for('docs.record_marks', ym=ym) }}">✅ 夜間支援などを入れる</a>
 <a class="b" href="{{ url_for('docs.record_columns_settings') }}">➕ 項目を増やす・変える</a>
 <span class="note">実績は「請求・お金」→「実績を入れる」の内容です。自治体の様式がある場合は、この内容をもとに確認してください。</span>
 {% endblock %}
@@ -27,7 +27,7 @@
       {% for c in cols %}<th class="c" style="width:{{ w }}%">{{ c['label'] }}</th>{% endfor %}<th class="c" style="width:12%">利用者確認</th></tr></thead>
     {% for x in sh.rows %}<tr class="{{ 'sat' if x.d.weekday() == 5 else 'sun' if x.d.weekday() == 6 }}">
       <td class="c">{{ x.d.day }}</td><td class="c">{{ x.w }}</td><td>{{ x.label or ('（未入力）' if not x.code else '') }}</td>
-      {% for m in x.marks %}<td class="c">{{ '○' if m }}</td>{% endfor %}<td></td></tr>{% endfor %}
+      {% for m in x.marks %}<td class="c">{{ m }}</td>{% endfor %}<td></td></tr>{% endfor %}
     <tr><th colspan="3">合計：在居 {{ sh.stay }}日・外泊 {{ sh.out }}日・帰宅 {{ sh.home }}日・入院 {{ sh.hosp }}日{% if sh.empty %}・<span style="color:#c00">未入力 {{ sh.empty }}日</span>{% endif %}</th>
       {% for t in sh.totals %}<td class="c">{{ t }}</td>{% endfor %}<td></td></tr>
   </table>

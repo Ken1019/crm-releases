@@ -98,11 +98,17 @@ def menus_export():
 # ---------------------------------------------------------------- サービス提供実績記録票
 # 列（日中支援・夜間支援など）は事業所で増やせる。
 #   builtin … 実績の記号から自動（日＝日中支援、帰＝帰宅時支援、入＝入院時支援）
-#   auto="stay" … 在居の日は自動で○（夜間支援など）。日ごとに外せる
-#   auto=""     … 日ごとに手で○をつける（送迎など）
+#   auto="stay" … 在居の日は自動でつく（夜間支援など）。日ごとに外せる
+#   auto=""     … 日ごとに手でつける（送迎など）
+# 記録票に出す記号は列ごとに決める（ふつうは国保連の様式に合わせて「1」）
 BUILTIN_COLUMNS = [("day", "日中支援", "日"), ("home", "帰宅時支援", "帰"), ("hosp", "入院時支援", "入")]
 DEFAULT_EXTRA_COLUMNS = [("夜間支援", "stay")]
-AUTO_KINDS = {"": "日ごとに手で○をつける", "stay": "在居の日は自動で○（日ごとに外せる）"}
+AUTO_KINDS = {"": "日ごとに手でつける", "stay": "在居の日は自動でつく（日ごとに外せる）"}
+DEFAULT_MARK = "1"
+
+
+def mark_text(col):
+    return (col["mark"] or "").strip() or DEFAULT_MARK
 STAY_CODES = ("○", "日")
 
 
@@ -110,10 +116,11 @@ def seed_record_columns(con):
     if con.execute("SELECT COUNT(*) FROM record_columns").fetchone()[0]:
         return
     for i, (key, label, _) in enumerate(BUILTIN_COLUMNS):
-        con.execute("INSERT INTO record_columns (label, sort, active, auto, builtin) VALUES (?,?,1,'',?)", (label, (i + 1) * 10, key))
+        con.execute("INSERT INTO record_columns (label, sort, active, auto, builtin, mark) VALUES (?,?,1,'',?,?)",
+                    (label, (i + 1) * 10, key, DEFAULT_MARK))
     for i, (label, auto) in enumerate(DEFAULT_EXTRA_COLUMNS):
-        con.execute("INSERT INTO record_columns (label, sort, active, auto, builtin) VALUES (?,?,1,?,NULL)",
-                    (label, (len(BUILTIN_COLUMNS) + i + 1) * 10, auto))
+        con.execute("INSERT INTO record_columns (label, sort, active, auto, builtin, mark) VALUES (?,?,1,?,NULL,?)",
+                    (label, (len(BUILTIN_COLUMNS) + i + 1) * 10, auto, DEFAULT_MARK))
     con.commit()
 
 
@@ -123,7 +130,7 @@ def record_columns(active_only=True):
 
 
 def _auto_mark(col, code):
-    """手で直していないときの○"""
+    """手で直していないときに印がつくか"""
     if col["builtin"]:
         return code == dict((k, c) for k, _, c in BUILTIN_COLUMNS).get(col["builtin"])
     if col["auto"] == "stay":
@@ -154,7 +161,7 @@ def record_sheet_data(first, last, rid=None):
         rows = []
         for d in month_days(first, last):
             code = amap.get((r["id"], d.isoformat()), "")
-            marks = [mark_of(c, code, mmap.get((r["id"], d.isoformat(), c["id"]))) for c in cols]
+            marks = [mark_text(c) if mark_of(c, code, mmap.get((r["id"], d.isoformat(), c["id"]))) else "" for c in cols]
             rows.append({"d": d, "w": WEEK[d.weekday()], "code": code, "label": labels.get(code, ""), "marks": marks})
         count = Counter(x["code"] for x in rows)
         sheets.append({"r": r, "rows": rows, "stay": count["○"] + count["日"], "home": count["帰"], "hosp": count["入"],
@@ -186,7 +193,7 @@ def record_sheets_export():
     for sh in sheets:
         r = sh["r"]
         ws = wb.create_sheet(excel.safe_sheet_title(r["name"]))
-        rows = [[f"{x['d'].day}", x["w"], x["label"]] + ["○" if m else "" for m in x["marks"]] + [""] for x in sh["rows"]]
+        rows = [[f"{x['d'].day}", x["w"], x["label"]] + x["marks"] + [""] for x in sh["rows"]]
         rows.append(["合計", "", f"在居 {sh['stay']}日・外泊 {sh['out']}日・帰宅 {sh['home']}日・入院 {sh['hosp']}日"]
                     + sh["totals"] + [""])
         excel.add_table(ws, f"サービス提供実績記録票（共同生活援助）　{first:%Y年%m月}分",
@@ -213,26 +220,28 @@ def record_columns_settings():
                 continue
             label = (request.form.get(f"label::{cid}") or "").strip()[:20] or c["label"]
             auto = c["auto"] if c["builtin"] else (request.form.get(f"auto::{cid}") or "")
-            db.execute("UPDATE record_columns SET label=?, sort=?, active=?, auto=? WHERE id=?",
+            mark = (request.form.get(f"mark::{cid}") or "").strip()[:3] or DEFAULT_MARK
+            db.execute("UPDATE record_columns SET label=?, sort=?, active=?, auto=?, mark=? WHERE id=?",
                        (label, request.form.get(f"sort::{cid}", type=int) or 0, 1 if request.form.get(f"active::{cid}") else 0,
-                        auto if auto in AUTO_KINDS else "", cid))
+                        auto if auto in AUTO_KINDS else "", mark, cid))
         new = (request.form.get("new") or "").strip()[:20]
         if new:
             mx = db.execute("SELECT COALESCE(MAX(sort),0) FROM record_columns").fetchone()[0]
             auto = request.form.get("new_auto") or ""
-            db.execute("INSERT INTO record_columns (label, sort, active, auto, builtin) VALUES (?,?,1,?,NULL)",
-                       (new, mx + 10, auto if auto in AUTO_KINDS else ""))
+            db.execute("INSERT INTO record_columns (label, sort, active, auto, builtin, mark) VALUES (?,?,1,?,NULL,?)",
+                       (new, mx + 10, auto if auto in AUTO_KINDS else "", (request.form.get("new_mark") or "").strip()[:3] or DEFAULT_MARK))
         db.commit()
         flash("実績記録票の項目を保存しました。", "ok")
         return redirect(url_for("docs.record_columns_settings"))
     used = {r[0]: r[1] for r in db.execute("SELECT col_id, COUNT(*) FROM record_marks GROUP BY col_id")}
     return render_template("record_columns.html", cols=record_columns(active_only=False), used=used, AUTO_KINDS=AUTO_KINDS,
+                           DEFAULT_MARK=DEFAULT_MARK,
                            BUILTIN={k: c for k, _, c in BUILTIN_COLUMNS})
 
 
 @bp.route("/record-marks", methods=["GET", "POST"])
 def record_marks():
-    """夜間支援など、増やした項目の○を月の表で入れる（職員も入力できる）"""
+    """夜間支援など、増やした項目を月の表でチェックする（職員も入力できる）"""
     db = get_db()
     first, last = parse_ym(request.values.get("ym"))
     ym = first.strftime("%Y-%m")
@@ -270,7 +279,7 @@ def record_marks():
                           "stay": code in STAY_CODES, "inres": in_residence(r, d)})
         rows.append({"r": r, "cells": cells, "total": sum(1 for c in cells if c["on"])})
     return render_template("record_marks.html", col=col, cols=cols, ym=ym, first=first, homes=homes, home_id=home_id,
-                           rows=rows, days=days, WEEK=WEEK, AUTO_KINDS=AUTO_KINDS)
+                           rows=rows, days=days, WEEK=WEEK, AUTO_KINDS=AUTO_KINDS, mark=mark_text(col))
 
 
 # ---------------------------------------------------------------- 指定更新の書類
