@@ -121,7 +121,22 @@ def _ensure_columns(con, table, cols):
             con.execute(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {decl}')
 
 
+def _settings_cache():
+    """1回の画面表示のあいだだけ設定を覚えておく（同じ設定を何百回も読まないように）"""
+    from flask import g, has_app_context
+
+    if not has_app_context():
+        return None
+    if "_settings" not in g:
+        g._settings = {r["key"]: r["value"] for r in get_db().execute("SELECT key, value FROM settings")}
+    return g._settings
+
+
 def get_setting(key, default=""):
+    cache = _settings_cache()
+    if cache is not None:
+        v = cache.get(key)
+        return v if v is not None else default
     row = get_db().execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return row["value"] if row and row["value"] is not None else default
 
@@ -130,3 +145,6 @@ def set_setting(key, value):
     db = get_db()
     db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
     db.commit()
+    cache = _settings_cache()
+    if cache is not None:
+        cache[key] = value

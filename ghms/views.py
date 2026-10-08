@@ -70,10 +70,22 @@ def _alerts_and_away():
                         "WHERE (r.status IS NULL OR r.status != '退居') AND (p.status IS NULL OR p.status != '終了') "
                         "AND p.period_end IS NOT NULL AND p.period_end <= ? ORDER BY p.period_end", (plan_limit,)):
         alerts.append(("個別支援計画の期間終了", p["rname"], p["period_end"], url_for("crud.view", key="support_plans", rid=p["id"])))
-    for p in db.execute("SELECT p.*, r.name AS rname FROM support_plans p JOIN residents r ON r.id=p.resident_id "
-                        "WHERE (p.status IS NULL OR p.status != '終了') AND p.next_monitoring IS NOT NULL "
-                        "AND p.next_monitoring <= ? ORDER BY p.next_monitoring", (plan_limit,)):
+    plans = db.execute("SELECT p.*, r.name AS rname FROM support_plans p JOIN residents r ON r.id=p.resident_id "
+                       "WHERE (r.status IS NULL OR r.status != '退居') AND (p.status IS NULL OR p.status != '終了')").fetchall()
+    for p in sorted((p for p in plans if p["next_monitoring"] and p["next_monitoring"] <= plan_limit),
+                    key=lambda p: p["next_monitoring"]):
         alerts.append(("モニタリング予定", p["rname"], p["next_monitoring"], url_for("crud.view", key="support_plans", rid=p["id"])))
+    # 個別支援計画は少なくとも6か月に1回見直す（モニタリング）。作成日・同意日・モニタリング済にした日のうち新しいものから数える
+    for p in plans:
+        if p["status"] == "作成中":
+            continue
+        base = [d for d in (parse_date(p["created_on"]), parse_date(p["consent_date"]),
+                            parse_date((p["updated_at"] or "")[:10]) if p["status"] == "モニタリング済" else None) if d]
+        if not base:
+            continue
+        due = (max(base) + timedelta(days=183)).isoformat()
+        if due <= plan_limit and not (p["next_monitoring"] and p["next_monitoring"] <= plan_limit):
+            alerts.append(("個別支援計画の見直し（6か月）", p["rname"], due, url_for("crud.view", key="support_plans", rid=p["id"])))
     # 入居中なのに有効な個別支援計画がない
     for r in db.execute(f"SELECT * FROM residents WHERE ({ACTIVE_RES}) AND id NOT IN "
                         "(SELECT resident_id FROM support_plans WHERE status IS NULL OR status != '終了')"):
@@ -109,17 +121,16 @@ def dashboard():
     alerts, away = _alerts_and_away()
 
     meetings = []
-    for kind, limit in (tracked_meetings() if feature_on("meetings") else []):
-        row = db.execute("SELECT MAX(date) FROM meetings WHERE kind=?", (kind,)).fetchone()
-        last = row[0]
-        meetings.append((kind, last, (not last) or parse_date(last, today) < today - timedelta(days=limit)))
+    if feature_on("meetings"):
+        lasts = dict(db.execute("SELECT kind, MAX(date) FROM meetings GROUP BY kind").fetchall())
+        for kind, limit in tracked_meetings():
+            last = lasts.get(kind)
+            meetings.append((kind, last, (not last) or parse_date(last, today) < today - timedelta(days=limit)))
 
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
     logged = {r[0] for r in db.execute("SELECT home_id FROM daily_logs WHERE date=?", (today.isoformat(),))}
-    home_stats = []
-    for h in homes:
-        n = db.execute(f"SELECT COUNT(*) FROM residents WHERE home_id=? AND ({ACTIVE_RES})", (h["id"],)).fetchone()[0]
-        home_stats.append((h, n, h["id"] in logged))
+    counts = dict(db.execute(f"SELECT home_id, COUNT(*) FROM residents WHERE {ACTIVE_RES} GROUP BY home_id").fetchall())
+    home_stats = [(h, counts.get(h["id"], 0), h["id"] in logged) for h in homes]
 
     stats = {
         "residents": db.execute(f"SELECT COUNT(*) FROM residents WHERE {ACTIVE_RES}").fetchone()[0],
@@ -144,22 +155,20 @@ def dashboard():
             birthdays.append({"id": r["id"], "name": r["name"], "day": b.day, "age": today.year - b.year, "today": b.day == today.day})
     birthdays.sort(key=lambda x: x["day"])
     all_tasks = [dict(t, hub=h) for h in visible_hubs() for t in visible_tasks(h)]
-    from .compliance import grouped, run_checks
+    from .today import build
 
-    if g.user["role"] != "admin":
-        # 職員の画面：打刻・今日の記録・自分に関係するお知らせだけ
-        from .work import my_staff_id, open_card
+    from flask import session
+
+    pin_admin = g.user["role"] == "admin" and session.get("via") == "pin"
+    if g.user["role"] != "admin" or pin_admin:
+        # 職員の画面：打刻・今日の記録・自分に関係するお知らせだけ。
+        # PINで入った管理者も、お金や職員の体調はパスワードで本人確認してから（下の「管理者の画面」から）
+        from .work import my_staff_id, my_upcoming_shifts, open_card
 
         sid = my_staff_id()
-        comp = run_checks(staff_id=sid or -1)
-        from .work import my_upcoming_shifts
-
-        from .today import build
-
-        return render_template("dashboard_staff.html", todo=build(user_admin=False, staff_id=sid), birthdays=birthdays, all_tasks=all_tasks, away=away, home_stats=home_stats,
-                               today=today, comp=comp, card=open_card(sid) if sid and feature_on("timecard") else None, sid=sid,
+        return render_template("dashboard_staff.html", todo=build(user_admin=False, staff_id=sid), pin_admin=pin_admin, birthdays=birthdays, all_tasks=all_tasks, away=away, home_stats=home_stats,
+                               today=today, card=open_card(sid) if sid and feature_on("timecard") else None, sid=sid,
                                shifts=my_upcoming_shifts(sid) if sid and feature_on("shift") else [])
-    comp = run_checks()
     work_today = profit_now = None
     if feature_on("timecard"):
         from .work import today_status
@@ -170,9 +179,7 @@ def dashboard():
 
         first = today.replace(day=1)
         profit_now = month_profit(first, (first + timedelta(days=32)).replace(day=1) - timedelta(days=1))
-    from .today import build
-
-    return render_template("dashboard.html", todo=build(user_admin=True), comp=comp, comp_groups=grouped(comp), work_today=work_today, profit_now=profit_now, birthdays=birthdays, update_available=update_available, all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
+    return render_template("dashboard.html", todo=build(user_admin=True, alerts=alerts), work_today=work_today, profit_now=profit_now, birthdays=birthdays, update_available=update_available, all_tasks=all_tasks, away=away, alerts=alerts, meetings=meetings, home_stats=home_stats, stats=stats,
                            recent=recent, today=today)
 
 

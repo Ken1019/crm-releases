@@ -4,6 +4,7 @@
 <h1>{{ g.user['display_name'] }} さん、おつかれさまです 🌼</h1>
 <p class="hello muted">今日は {{ today.strftime('%Y年%m月%d日') }}（{{ '月火水木金土日'[today.weekday()] }}）です。</p>
 
+{% if pin_admin %}<p class="flash ok">🔐 PINで入っています。事業所の収支・職員の体調・給与などの管理者の画面は、<a href="{{ url_for('auth.reauth', next='/') }}">パスワードで本人確認して開く</a>。</p>{% endif %}
 {% include '_today.html' %}
 
 <div class="bigmenu">

@@ -20,7 +20,7 @@ from openpyxl import Workbook
 from . import excel
 from .auth import admin_required, log_event
 from .billing import attendance_map, in_residence, month_days, no_home_count, pick_home, residents_in_month, sync_open
-from .db import get_db, get_setting, now
+from .db import get_db, get_setting, now, set_setting
 from .views import parse_date, parse_ym
 
 bp = Blueprint("docs", __name__, url_prefix="/docs")
@@ -374,7 +374,7 @@ def renewal():
         if new:
             mx = db.execute("SELECT COALESCE(MAX(sort), 0) FROM renewal_items").fetchone()[0]
             db.execute("INSERT INTO renewal_items (sort, name, endpoint, done, note) VALUES (?,?,NULL,0,'')", (mx + 10, new[:80]))
-        db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('renewal_due', ?)", (request.form.get("due", "").strip(),))
+        set_setting("renewal_due", request.form.get("due", "").strip())
         log_event("settings", detail="指定更新の書類チェックリスト")
         db.commit()
         flash("保存しました。", "ok")

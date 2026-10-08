@@ -20,7 +20,7 @@
   <label><span>書きもれを見る日数（今日をのぞく）</span><input type="number" name="comp_days" value="{{ days }}" min="1" max="60" class="w5"> 日</label>
   <label class="wide"><span>職員ごとに受けているか見る研修（1行に「名前=さがす言葉,言葉|日数」）</span>
     <textarea name="comp_trainings" rows="5">{{ trainings }}</textarea>
-    <small class="muted">「研修受講記録」の研修名、または「会議・委員会」の種別・議題にさがす言葉が入っていて、出席者に名前（または「全員」）があれば受講とみなします。</small></label>
+    <small class="muted">「研修受講記録」の研修名にさがす言葉が入っているか、「会議・委員会」のうち研修の回（種別か議題に「研修」が入っているもの。委員会だけの回は数えません）にさがす言葉が入っていて、出席者に名前があれば受講とみなします。出席者は「、」「,」「・」「/」や空白で区切って書き、名前は職員の情報と同じ書き方にしてください（「田中」と「田中太郎」は別の人です）。全員が出たときは「全員」と書きます。</small></label>
   <p class="muted small wide">委員会・訓練の間隔は「設定 → 選択肢を変える → 会議の種類」の日数で決まります。</p>
   <div class="actions wide"><button class="btn primary">💾 保存する</button></div>
 </form>

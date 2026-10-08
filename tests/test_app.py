@@ -910,6 +910,10 @@ def test_compliance_warnings_on_home(client, app):
     post(client, "/m/homes/new", {"name": "ひまわり"})
     post(client, "/m/staff/new", {"name": "佐藤 一郎", "status": "在籍"})
     post(client, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "status": "入居中", "move_in": "2026-01-01"})
+    with app.app_context():  # 住居を前から使っていたことにする（登録前の日は日誌のもれに数えないため）
+        from ghms.db import get_db
+        get_db().execute("UPDATE homes SET created_at='2026-01-01 00:00:00'")
+        get_db().commit()
     page = client.get("/").get_data(as_text=True)
     assert "実地指導チェック" in page and "虐待防止委員会" in page
     full = client.get("/compliance/").get_data(as_text=True)
@@ -1393,3 +1397,165 @@ def test_documents_newest_and_choices(client, app):
     # 事業所で増やした書類の種類も確認の対象になる
     post(client, "/settings/choices", {"field": "resident_documents.doc_type", "new": "見学同意書"})
     assert "見学同意書" in client.get("/billing/documents").get_data(as_text=True)
+
+
+# ---------------------------------------------------------------- 今日のやること（上から片づければ決まりが守れる）
+def _sql(app, q, args=()):
+    with app.app_context():
+        from ghms.db import get_db
+        db = get_db()
+        cur = db.execute(q, args)
+        db.commit()
+        return cur.lastrowid
+
+
+def _todo(app, admin=True, staff_id=None, username="admin"):
+    with app.test_request_context("/"):
+        from flask import g
+
+        from ghms.db import get_db
+        from ghms.today import build
+        g.user = get_db().execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        return build(user_admin=admin, staff_id=staff_id)
+
+
+def _checks(app, **kw):
+    with app.test_request_context("/"):
+        from flask import g
+
+        from ghms.compliance import run_checks
+        from ghms.db import get_db
+        g.user = get_db().execute("SELECT * FROM users WHERE username='admin'").fetchone()
+        return run_checks(**kw)
+
+
+def _titles(t):
+    return [(gp["level"], x["title"], x["detail"], x["done"]) for gp in t["groups"] for x in gp["items"]]
+
+
+def test_training_exact_name_and_committee_not_training(client, app):
+    from ghms.compliance import attendee_names, is_training_meeting
+
+    assert attendee_names("田中太郎、佐藤　一郎,鈴木さん／山田・ｱｲ") >= {"田中太郎", "佐藤一郎", "鈴木", "山田", "アイ"}
+    assert "全員" not in attendee_names("管理者のみ（全員には後日回覧）")
+    assert not is_training_meeting("虐待防止委員会", "定例") and is_training_meeting("職員会議", "ＢＣＰの研修")
+    t = date.today().isoformat()
+    for name in ("田中", "田中太郎", "佐藤 一郎"):
+        _sql(app, "INSERT INTO staff (name, status) VALUES (?, '在籍')", (name,))
+    # 委員会は研修に数えない
+    _sql(app, "INSERT INTO meetings (date, kind, title, attendees) VALUES (?,?,?,?)", (t, "虐待防止委員会", "定例", "田中太郎、田中"))
+    # 研修の回：名前がぴったり同じ人だけ（「田中」は「田中太郎」の出席にならない）
+    _sql(app, "INSERT INTO meetings (date, kind, title, attendees) VALUES (?,?,?,?)", (t, "虐待防止研修", "", "田中太郎、佐藤　一郎"))
+    # 全角の「ＢＣＰ」も見つける。「全員」は1つの名前として書いたときだけ
+    _sql(app, "INSERT INTO meetings (date, kind, title, attendees) VALUES (?,?,?,?)", (t, "職員会議", "ＢＣＰ研修", "全員"))
+    _sql(app, "INSERT INTO meetings (date, kind, title, attendees) VALUES (?,?,?,?)", (t, "感染症研修", "", "管理者のみ（全員には後日回覧）"))
+    miss = {(x["who"], x["msg"].split("」")[0][1:]) for x in _checks(app) if x["check"] == "staff_training"}
+    assert ("田中", "虐待防止研修") in miss
+    assert ("田中太郎", "虐待防止研修") not in miss and ("佐藤 一郎", "虐待防止研修") not in miss
+    assert not any(topic.startswith("業務継続計画") for _, topic in miss)
+    assert {("田中", "感染症の研修"), ("田中太郎", "感染症の研修")} <= miss
+    # 身体拘束は委員会しかないので全員まだ
+    assert {("田中", "身体拘束適正化の研修"), ("田中太郎", "身体拘束適正化の研修")} <= miss
+
+
+def test_today_skips_empty_home_and_not_yet_moved_in(client, app):
+    from datetime import timedelta
+
+    today = date.today()
+    future = (today + timedelta(days=10)).isoformat()
+    for name in ("あおば", "からっぽ", "みどり"):
+        _sql(app, "INSERT INTO homes (name, created_at) VALUES (?, '2020-01-01 00:00:00')", (name,))
+    _sql(app, "INSERT INTO residents (name, kana, home_id, move_in, status) VALUES ('これから', 'こ', 1, ?, '入居中')", (future,))
+    _sql(app, "INSERT INTO residents (name, kana, home_id, move_in, status) VALUES ('いまの人', 'い', 3, '2020-01-01', '入居中')")
+    _sql(app, "INSERT INTO residents (name, kana, home_id, move_in, status) VALUES ('外泊中', 'が', 3, '2020-01-01', '入居中')")
+    _sql(app, "INSERT INTO attendance (resident_id, date, code) VALUES (3, ?, '外')", (today.isoformat(),))
+    titles = [t for _, t, _, _ in _titles(_todo(app))]
+    assert "みどりの業務日誌を書く" in titles
+    assert "あおばの業務日誌を書く" not in titles and "からっぽの業務日誌を書く" not in titles
+    assert "みどりの入居者の支援記録を書く（1名）" in titles  # 外泊中の人はのぞく
+    assert not any("あおば" in t for t in titles)
+    found = _checks(app)
+    assert not any(x["check"] == "journal" and x["who"] in ("あおば", "からっぽ") for x in found)
+    assert not any(x["check"] == "records" and x["who"] == "これから" for x in found)
+    assert any(x["check"] == "journal" and x["who"] == "みどり" for x in found)
+    # 住居を登録した日より前は、日誌のもれに数えない
+    _sql(app, "UPDATE homes SET created_at=? WHERE id=3", (today.isoformat() + " 08:00:00",))
+    assert not any(x["check"] == "journal" for x in _checks(app))
+
+
+def test_staff_items_for_admin_grouped_separately(client, app):
+    from datetime import timedelta
+
+    sid = _sql(app, "INSERT INTO staff (name, status, hire_date) VALUES ('職員一', '在籍', '2020-01-01')")
+    old = (date.today() - timedelta(days=3)).isoformat()
+    _sql(app, "INSERT INTO timecards (staff_id, date, clock_in) VALUES (?, ?, '09:00')", (sid, old))  # 退勤忘れ
+    staff = staff_client(client, app)
+    _sql(app, "UPDATE users SET staff_id=? WHERE username='worker'", (sid,))
+    t = _todo(app, admin=False, staff_id=sid, username="worker")
+    levels = [gp["level"] for gp in t["groups"]]
+    assert levels[-1] == "tell"
+    tell = t["groups"][-1]
+    assert not tell["counted"]
+    assert any(x["title"].startswith("タイムカードの退勤忘れ") for x in tell["items"])
+    assert all(x["detail"].startswith("管理者に連絡") for x in tell["items"])
+    counted = [x for gp in t["groups"] if gp["counted"] for x in gp["items"]]
+    assert t["total"] == len(counted) and t["left"] == sum(1 for x in counted if not x["done"])
+    page = staff.get("/").get_data(as_text=True)
+    assert "管理者に伝えること" in page and "管理者に連絡" in page
+    # 管理者のリストには「管理者に伝えること」は出ない
+    assert "tell" not in [gp["level"] for gp in _todo(app)["groups"]]
+
+
+def test_manual_yearly_item_key(client, app):
+    today = date.today()
+    half = f"{today.year}-H{1 if today.month <= 6 else 2}"
+    fy = today.year if today.month >= 4 else today.year - 1
+    home = client.get("/").get_data(as_text=True)
+    assert f'value="shobo:{half}"' in home and f'value="kyoryoku:{fy}"' in home
+    assert post(client, "/today/done", {"key": f"shobo:{half}"}).status_code == 302
+    assert post(client, "/today/done", {"key": f"kyoryoku:{fy}"}).status_code == 302
+    items = {x["key"]: x for gp in _todo(app)["groups"] for x in gp["items"] if x["key"]}
+    assert items[f"shobo:{half}"]["done"] and items[f"kyoryoku:{fy}"]["done"]
+    # 変な期間・知らないキーは受けつけない
+    assert post(client, "/today/done", {"key": "shobo:abc"}).status_code == 400
+    assert post(client, "/today/done", {"key": "nothing:2026"}).status_code == 400
+    # 職員は押せない
+    staff = staff_client(client, app)
+    assert staff.post("/today/done", data={"key": f"shobo:{half}", "_csrf": csrf(staff)}).status_code == 403
+
+
+def test_meeting_track_defaults_migration(app):
+    _sql(app, "UPDATE choice_options SET track_days=NULL WHERE field='meetings.kind' AND value IN ('地域連携推進会議', '感染症研修')")
+    _sql(app, "DELETE FROM settings WHERE key='track_defaults_v2'")
+    from ghms.db import init_db
+
+    init_db(app.config["DATABASE"])
+    with app.app_context():
+        from ghms.db import get_db
+        rows = dict(get_db().execute("SELECT value, track_days FROM choice_options WHERE field='meetings.kind'").fetchall())
+    assert rows["地域連携推進会議"] == 365 and rows["感染症研修"] == 183 and rows["虐待防止研修"] == 365
+
+
+def test_pin_admin_home_hides_money_until_password(client, app):
+    post(client, "/m/staff/new", {"name": "佐藤 一郎", "status": "在籍"})
+    post(client, "/my-pin", {"current": "password123", "pin": "4826", "pin2": "4826"})
+    _register_device(client)
+    _logout(client)
+    client.post("/pin/1", data={"pin": "4826"})
+    home = client.get("/").get_data(as_text=True)
+    assert "パスワードで本人確認して開く" in home and "今月の収支" not in home
+    # 連絡記録をオフにすると、入院・帰省の画面からも連絡を記録できない
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "password": "password123"})
+    post(c, "/m/homes/new", {"name": "ひまわり"})
+    post(c, "/m/residents/new", {"name": "山田太郎", "home_id": "1", "status": "入居中"})
+    post(c, "/m/absences/new", {"resident_id": "1", "kind": "入院", "start_date": "2026-09-01"})
+    from ghms.customize import FEATURES
+
+    post(c, "/settings/features", {"on": [k for k, *_ in FEATURES if k != "contact_logs"]})
+    assert "入院中" in c.get("/absences/1").get_data(as_text=True) or c.get("/absences/1").status_code == 200
+    r = c.post("/absences/1", data={"_csrf": csrf(c), "date": "2026-09-02", "content": "電話"})
+    assert r.status_code in (302, 403)
+    with app.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT COUNT(*) FROM contact_logs").fetchone()[0] == 0

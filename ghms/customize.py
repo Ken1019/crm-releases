@@ -39,7 +39,18 @@ FEATURE_BY_KEY = {k: (k, n, d, p) for k, n, d, p in FEATURES}
 
 
 def features_off():
-    return {k for k in (get_setting("features_off", "") or "").split(",") if k in FEATURE_BY_KEY}
+    """使わない機能。1回の画面表示のあいだは覚えておく（何百回もDBを読まないように）"""
+    cache = g.get("_features_off") if g else None
+    if cache is None:
+        cache = frozenset(k for k in (get_setting("features_off", "") or "").split(",") if k in FEATURE_BY_KEY)
+        if g:
+            g._features_off = cache
+    return cache
+
+
+def forget_features_cache():
+    if g:
+        g.pop("_features_off", None)
 
 
 def feature_on(key):
@@ -70,8 +81,10 @@ CHOICE_FIELDS = {
     "residents.disability_type": "障害種別",
 }
 # ホームに「最終実施日」を出す会議と、注意を出すまでの日数（はじめの値）
-DEFAULT_TRACK = {"虐待防止委員会": 365, "身体拘束適正化委員会": 365, "感染症対策委員会": 365,
-                 "業務継続計画(BCP)": 365, "避難訓練": 183}
+# 回数は目安（委員会・研修は年1〜2回、感染症は半年に1回など）。自治体の指導で確認して「設定 → 選択肢を変える」で直せる
+DEFAULT_TRACK = {"虐待防止委員会": 365, "身体拘束適正化委員会": 365, "感染症対策委員会": 183,
+                 "業務継続計画(BCP)": 183, "避難訓練": 183, "感染症研修": 183, "虐待防止研修": 365,
+                 "身体拘束適正化研修": 365, "地域連携推進会議": 365}
 
 
 def _field(fkey):
@@ -88,6 +101,18 @@ def seed_choices(con):
             track = DEFAULT_TRACK.get(v) if fkey == "meetings.kind" else None
             con.execute("INSERT OR IGNORE INTO choice_options (field, value, sort, active, track_days) VALUES (?,?,?,1,?)",
                         (fkey, v, (i + 1) * 10, track))
+    _migrate_track_v2(con)
+
+
+def _migrate_track_v2(con):
+    """前からあるDBにも1回だけ：日数が空の会議（研修・地域連携推進会議など）に目安の日数を入れる（入っているものはそのまま）"""
+    if con.execute("SELECT 1 FROM settings WHERE key='track_defaults_v2'").fetchone():
+        return
+    for v, days in DEFAULT_TRACK.items():
+        con.execute("UPDATE choice_options SET track_days=? WHERE field='meetings.kind' AND value=? AND track_days IS NULL",
+                    (days, v))
+    con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('track_defaults_v2', '1')")
+    con.commit()
 
 
 def choice_rows(fkey):
@@ -171,6 +196,7 @@ def features():
         on = set(request.form.getlist("on"))
         off = [k for k, *_ in FEATURES if k not in on]
         set_setting("features_off", ",".join(off))
+        forget_features_cache()
         log_event("settings", detail="使う機能: " + "、".join(FEATURE_BY_KEY[k][1] for k in on) if on else "使う機能: なし")
         get_db().commit()
         flash("使う機能を保存しました。メニューとホームに反映しました。", "ok")

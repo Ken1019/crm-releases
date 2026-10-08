@@ -179,6 +179,10 @@ def detail(aid):
     if a is None:
         abort(404)
     ent = crud.get_entity("contact_logs")
+    from .customize import entity_on
+
+    if request.method == "POST" and not entity_on("contact_logs"):
+        abort(403)
     if request.method == "POST":
         form = request.form.to_dict()
         form.update(resident_id=str(a["resident_id"]), absence_id=str(aid))

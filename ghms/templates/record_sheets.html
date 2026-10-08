@@ -43,7 +43,7 @@
       <tr><th rowspan="2" class="c">日付</th><th rowspan="2" class="c">曜日</th>
         <th colspan="{{ cols|length + 1 }}" class="c">支援実績</th>
         <th rowspan="2" class="c">利用者<br>確認欄</th><th rowspan="2" class="c">備考</th></tr>
-      <tr><th class="c">サービス提供の<br>状況</th>{% for c in cols %}<th class="c">{{ c['label']|replace('加算', '<br>加算')|safe if c['label']|length > 6 else c['label'] }}</th>{% endfor %}</tr>
+      <tr><th class="c">サービス提供の<br>状況</th>{% for c in cols %}<th class="c">{% if c['label']|length > 6 and '加算' in c['label'] %}{{ c['label'].replace('加算', '') }}<br>加算{% else %}{{ c['label'] }}{% endif %}</th>{% endfor %}</tr>
     </thead>
     {% for x in sh.rows %}<tr>
       <td class="c">{{ x.d.day }}</td><td class="c">{{ x.w }}</td><td class="st">{{ x.label }}</td>
