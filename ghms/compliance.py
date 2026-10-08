@@ -4,11 +4,13 @@
 回数・日数は運営基準や自治体の指導で変わるので、画面で直せるようにしてある（初期値は目安）。
 """
 
+import re
+import unicodedata
 from datetime import date, timedelta
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
-from .auth import admin_required, is_admin, log_event
+from .auth import admin_required, log_event
 from .customize import feature_on, tracked_meetings
 from .db import get_db, get_setting, set_setting
 from .views import parse_date
@@ -18,11 +20,12 @@ bp = Blueprint("compliance", __name__, url_prefix="/compliance")
 ACTIVE_RES = "status IS NULL OR status != '退居'"
 ACTIVE_STAFF = "status IS NULL OR status = '在籍'"
 
-# (キー, 名前, 実地指導で見られること, 使う機能)
+# (キー, 名前, 実地指導で見られること, 使う機能（タプルはどれか1つが「使う」ならチェックする）)
 CHECKS = [
     ("meetings", "委員会・研修・訓練の開催", "虐待防止・身体拘束適正化・感染症対策の委員会、研修、BCP、避難訓練を決められた間隔で開いているか", "meetings"),
-    ("staff_training", "職員ごとの研修の受講", "全職員が虐待防止・身体拘束・感染症・BCPの研修を受けているか（受講記録・会議の出席者）", None),
-    ("journal", "業務日誌の書きもれ", "毎日の業務日誌があるか", None),
+    ("staff_training", "職員ごとの研修の受講", "全職員が虐待防止・身体拘束・感染症・BCPの研修を受けているか（研修受講記録・研修の出席者）",
+     ("career", "meetings")),
+    ("journal", "業務日誌の書きもれ", "入居者がいた日の業務日誌があるか", None),
     ("records", "支援記録の書きもれ", "在居していた日の入居者ごとの支援記録（サービス提供の記録）があるか", None),
     ("plans", "個別支援計画の同意", "計画を本人に説明して同意を得て、交付しているか（同意日の記録）", None),
     ("incidents", "ヒヤリハット・事故の書きもれ", "原因・再発防止策・家族や市町村への報告が書かれているか", "incidents"),
@@ -31,12 +34,16 @@ CHECKS = [
     ("staff_info", "職員の情報（勤務体制の書類）", "職種・雇用形態・週の勤務時間がそろっているか（勤務形態一覧表・常勤換算）", None),
     ("timecard", "タイムカードの退勤忘れ", "勤務の実績（出勤簿）に抜けがないか", "timecard"),
     ("shift_match", "勤務表とタイムカードのちがい", "勤務表（勤務形態一覧表）と実際の勤務（出勤簿）が合っているか。人員配置・夜間支援の体制の根拠", "timecard"),
-    ("leave5", "有給の年5日の取得", "10日以上付与した職員が、付与から1年以内に5日取っているか（労働基準法39条7項）", "timecard"),
+    ("leave5", "有給の年5日の取得", "10日以上付与した職員が、付与から1年以内に5日取っているか（労働基準法39条7項）。有給は勤務表の「有」で記録します", "shift"),
     ("health", "職員の体調", "37.5℃以上・体調不良で出勤した職員がいないか（感染症対策）", "timecard"),
-    ("payroll", "給与の確定", "先月の給与が確定しているか", "payroll"),
+    ("payroll", "給与の確定", "最近3か月の給与が確定しているか", "payroll"),
 ]
 CHECK_NAMES = {k: n for k, n, _, _ in CHECKS}
+CHECK_FEATURE = {k: f for k, _, _, f in CHECKS}
 DEFAULT_TRAININGS = "虐待防止研修=虐待|365\n身体拘束適正化の研修=身体拘束|365\n感染症の研修=感染症|365\n業務継続計画（BCP）の研修=BCP,業務継続|365"
+# 職員が自分では直せないもの（職員の画面では「管理者に伝えること」にまとめる）
+STAFF_CANT_FIX = {"timecard", "shift_match", "leave5", "staff_training"}
+LEAVE5_EXPIRED = "期限が過ぎています（次の付与で守れるようにしましょう）"
 
 
 def checks_off():
@@ -63,12 +70,47 @@ def training_topics():
     return out
 
 
+def _nfkc(s):
+    """全角の英数字・記号を半角にそろえる（ＢＣＰ → BCP）"""
+    return unicodedata.normalize("NFKC", s or "")
+
+
 def _norm(s):
-    return (s or "").replace(" ", "").replace("　", "")
+    return re.sub(r"\s+", "", _nfkc(s))
 
 
-def _item(level, check, who, msg, url):
-    return {"level": level, "check": check, "name": CHECK_NAMES[check], "who": who, "msg": msg, "url": url}
+_SEP = re.compile(r"[、,，/／・;；\n]+")
+_HONORIFIC = re.compile(r"(さん|様|さま|氏)$")
+EVERYONE = {"全員", "全職員", "職員全員"}
+
+
+def attendee_names(text):
+    """出席者の欄を名前に分ける。「、 , ， / ・」と改行で区切り、空白で区切った形も入れる。
+    空白をのぞいた名前が職員の名前とぴったり同じときだけ出席とみなす（「田中」と「田中太郎」は別の人）"""
+    out = set()
+    for part in _SEP.split(_nfkc(text)):
+        part = part.strip()
+        if not part:
+            continue
+        for x in [part] + part.split():
+            x = _HONORIFIC.sub("", _norm(x))
+            if x:
+                out.add(x)
+    return out
+
+
+def is_training_meeting(kind, title):
+    """研修として数える会議：種別か議題に「研修」が入っているもの（委員会だけの回は研修に数えない）"""
+    return "研修" in _nfkc(kind) or "研修" in _nfkc(title)
+
+
+def _topic_hit(kws, *texts):
+    t = "".join(_nfkc(x) for x in texts).upper()
+    return any(_nfkc(k).upper() in t for k in kws)
+
+
+def _item(level, check, who, msg, url, done=False):
+    return {"level": level, "check": check, "name": CHECK_NAMES[check], "who": who, "msg": msg, "url": url, "done": done}
 
 
 def _days_back(n):
@@ -81,24 +123,66 @@ def _fmt_days(days):
     return s + (f" ほか{len(days) - 6}日" if len(days) > 6 else "")
 
 
-def run_checks(staff_id=None):
-    """規定を満たしていないものの一覧。staff_id を渡すと、その職員に関係するものだけ"""
+def _month_first(d, back):
+    """d の月から back か月前の1日"""
+    y, m = divmod(d.year * 12 + d.month - 1 - back, 12)
+    return date(y, m + 1, 1)
+
+
+def unconfirmed_payroll(months=3):
+    """最近 months か月で、打刻があるのに給与が確定していない月。[(1日, 月末, 確定していない人数, 打刻した人数)]"""
+    db = get_db()
+    today = date.today()
+    out = []
+    for back in range(1, months + 1):
+        first = _month_first(today, back)
+        last = _month_first(today, back - 1) - timedelta(days=1)
+        ym = first.strftime("%Y-%m")
+        worked = {r[0] for r in db.execute("SELECT DISTINCT staff_id FROM timecards WHERE date BETWEEN ? AND ?",
+                                           (first.isoformat(), last.isoformat()))}
+        if not worked:
+            continue
+        done = {r[0] for r in db.execute("SELECT staff_id FROM payslips WHERE ym=? AND status='確定'", (ym,))}
+        out.append((first, last, len(worked - done), len(worked)))
+    return out
+
+
+RES_FOR_JOURNAL = "status IS NULL OR status != '退居' OR move_out IS NOT NULL"
+
+
+def lived_there(r, day):
+    """その日に住居で暮らしていたか（入居日〜退居日。退居にしたのに退居日がない人は数えない）"""
+    from .billing import in_residence
+
+    if r["status"] == "退居" and not r["move_out"]:
+        return False
+    return in_residence(r, day)
+
+
+def run_checks(staff_id=None, include_done=False):
+    """規定を満たしていないものの一覧。staff_id を渡すと、その職員に関係するものだけ。
+    include_done=True のときは、もう対応が済んだもの（体調不良の人が退勤した など）も done=True で返す"""
     db = get_db()
     today = date.today()
     off = checks_off()
     items = []
 
     def on(key):
-        feat = next(f for k, _, _, f in CHECKS if k == key)
-        return key not in off and (feat is None or feature_on(feat))
+        feat = CHECK_FEATURE[key]
+        if key in off:
+            return False
+        if feat is None:
+            return True
+        return any(feature_on(f) for f in (feat if isinstance(feat, tuple) else (feat,)))
 
     staff_rows = db.execute(f"SELECT * FROM staff WHERE {ACTIVE_STAFF} ORDER BY kana, name").fetchall()
     if staff_id:
         staff_rows = [s for s in staff_rows if s["id"] == staff_id]
 
     if on("meetings") and not staff_id:
+        lasts = dict(db.execute("SELECT kind, MAX(date) FROM meetings GROUP BY kind").fetchall())
         for kind, limit in tracked_meetings():
-            last = db.execute("SELECT MAX(date) FROM meetings WHERE kind=?", (kind,)).fetchone()[0]
+            last = lasts.get(kind)
             if not last:
                 items.append(_item("ng", "meetings", kind, f"まだ記録がありません（{limit}日に1回が目安）",
                                    url_for("crud.new", key="meetings", kind=kind)))
@@ -106,42 +190,61 @@ def run_checks(staff_id=None):
                 items.append(_item("ng", "meetings", kind, f"最後は {last}。{limit}日以上あいています",
                                    url_for("crud.new", key="meetings", kind=kind)))
 
-    if on("staff_training"):
-        for topic, kws, days in training_topics():
+    if on("staff_training") and staff_rows:
+        topics = training_topics()
+        oldest = (today - timedelta(days=max([d for _, _, d in topics] or [365]))).isoformat()
+        # 研修受講記録（研修名で見る）と、研修の会議（種別か議題に「研修」）の出席者
+        trs = db.execute("SELECT staff_id, date, title FROM trainings WHERE date >= ?", (oldest,)).fetchall()
+        mts = [(m["date"], m["kind"], m["title"], attendee_names(m["attendees"]))
+               for m in db.execute("SELECT date, kind, title, attendees FROM meetings WHERE date >= ?", (oldest,))
+               if is_training_meeting(m["kind"], m["title"])]
+        career, meetings_on = feature_on("career"), feature_on("meetings")
+        for topic, kws, days in topics:
             since = (today - timedelta(days=days)).isoformat()
-            like = " OR ".join("title LIKE ?" for _ in kws)
-            args = [f"%{k}%" for k in kws]
-            trained = {r[0] for r in db.execute(f"SELECT staff_id FROM trainings WHERE date >= ? AND ({like})", [since] + args)}
-            m_like = " OR ".join("kind LIKE ? OR title LIKE ?" for _ in kws)
-            m_args = [a for k in kws for a in (f"%{k}%", f"%{k}%")]
-            attendees = [_norm(r[0]) for r in db.execute(f"SELECT attendees FROM meetings WHERE date >= ? AND ({m_like})",
-                                                         [since] + m_args)]
-            everyone = any(a and ("全員" in a or "全職員" in a) for a in attendees)
+            trained = {t["staff_id"] for t in trs if t["date"] >= since and _topic_hit(kws, t["title"])}
+            names = set()
+            for d, kind, title, who in mts:
+                if d >= since and _topic_hit(kws, kind, title):
+                    names |= who
+            everyone = bool(names & EVERYONE)
             for s in staff_rows:
-                if s["id"] in trained or everyone or (_norm(s["name"]) and any(_norm(s["name"]) in a for a in attendees)):
+                if s["id"] in trained or everyone or _HONORIFIC.sub("", _norm(s["name"])) in names:
                     continue
-                items.append(_item("warn", "staff_training", s["name"], f"「{topic}」の受講が{days}日以内に確認できません",
-                                   url_for("crud.new", key="trainings", staff_id=s["id"], title=topic) if not staff_id
-                                   else url_for("crud.index", key="meetings")))
+                if staff_id:
+                    url = url_for("crud.index", key="meetings") if meetings_on else url_for("views.dashboard") + "#today"
+                elif career:
+                    url = url_for("crud.new", key="trainings", staff_id=s["id"], title=topic)
+                else:
+                    url = url_for("crud.new", key="meetings", title=topic)
+                items.append(_item("warn", "staff_training", s["name"], f"「{topic}」の受講が{days}日以内に確認できません", url))
 
     # 日誌・支援記録は職員みんなで書くので、職員の画面にも出す
     n = look_days()
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
+    days = _days_back(n)
+    if on("journal") or on("records"):
+        res_rows = db.execute(f"SELECT * FROM residents WHERE {RES_FOR_JOURNAL} ORDER BY kana").fetchall()
     if on("journal"):
+        since = days[0].isoformat()
+        done = {(r[0], r[1]) for r in db.execute("SELECT home_id, date FROM daily_logs WHERE date >= ?", (since,))}
         for h in homes:
-            done = {r[0] for r in db.execute("SELECT date FROM daily_logs WHERE home_id=? AND date >= ?",
-                                             (h["id"], (today - timedelta(days=n)).isoformat()))}
-            miss = [d for d in _days_back(n) if d.isoformat() not in done]
+            start = parse_date((h["created_at"] or "")[:10])
+            hres = [r for r in res_rows if r["home_id"] == h["id"]]
+            # 住居を登録する前の日・入居者がいなかった日は書かなくてよい
+            miss = [d for d in days if (start is None or d >= start) and any(lived_there(r, d) for r in hres)
+                    and (h["id"], d.isoformat()) not in done]
             if miss:
                 items.append(_item("warn", "journal", h["name"], f"業務日誌がない日：{_fmt_days(miss)}",
                                    url_for("views.journal", home_id=h["id"], date=miss[0].isoformat())))
     if on("records"):
-        since = (today - timedelta(days=n)).isoformat()
+        since = days[0].isoformat()
         have = {(r[0], r[1]) for r in db.execute("SELECT resident_id, date FROM support_records WHERE date >= ?", (since,))}
         codes = {(r[0], r[1]): r[2] for r in db.execute("SELECT resident_id, date, code FROM attendance WHERE date >= ?", (since,))}
-        for r in db.execute(f"SELECT * FROM residents WHERE {ACTIVE_RES} ORDER BY kana"):
+        for r in res_rows:
+            if r["status"] == "退居":
+                continue
             mi, mo = parse_date(r["move_in"]), parse_date(r["move_out"])
-            miss = [d for d in _days_back(n) if (mi is None or mi <= d) and (mo is None or d <= mo)
+            miss = [d for d in days if (mi is None or mi <= d) and (mo is None or d <= mo)
                     and codes.get((r["id"], d.isoformat()), "○") in ("○", "日") and (r["id"], d.isoformat()) not in have]
             if miss:
                 items.append(_item("warn", "records", r["name"], f"支援記録がない日：{_fmt_days(miss)}",
@@ -183,7 +286,8 @@ def run_checks(staff_id=None):
             for r in residents_in_month(first, last):
                 miss = [d for d in month_days(first, last) if in_residence(r, d) and (r["id"], d.isoformat()) not in codes]
                 if miss:
-                    items.append(_item("ng" if today.day <= 10 else "warn", "attendance", r["name"],
+                    # 請求は毎月10日まで。10日を過ぎたら急ぎ
+                    items.append(_item("ng" if today.day > 10 else "warn", "attendance", r["name"],
                                        f"{first:%Y年%m月}の実績が {len(miss)}日 入っていません（請求は毎月10日まで）",
                                        url_for("billing.attendance", ym=first.strftime("%Y-%m"), home_id=r["home_id"])))
         if on("staff_info"):
@@ -194,18 +298,26 @@ def run_checks(staff_id=None):
                     items.append(_item("warn", "staff_info", s["name"], "未入力：" + "・".join(lack),
                                        url_for("crud.edit", key="staff", rid=s["id"])))
 
+    names = None
     if on("timecard"):
         from .work import forgotten_cards
 
         names = {s["id"]: s["name"] for s in db.execute("SELECT id, name FROM staff")}
         for c in forgotten_cards(staff_id):
             items.append(_item("warn", "timecard", names.get(c["staff_id"], "?"), f"{c['date']} {c['clock_in']}〜 の退勤の打刻がありません",
-                               url_for("work.timecards", ym=c["date"][:7], staff_id=c["staff_id"])))
+                               url_for("work.timecards", ym=c["date"][:7], staff_id=c["staff_id"]) if not staff_id
+                               else url_for("work.clock")))
     if on("shift_match") and feature_on("shift"):
         from .work import shift_differences
 
         first = (today.replace(day=1) - timedelta(days=1)).replace(day=1) if today.day <= 7 else today.replace(day=1)
+        # 勤務表か打刻がある人だけ見る（両方ない人はちがいが出ない）
+        active = {r[0] for r in db.execute("SELECT staff_id FROM shifts WHERE date BETWEEN ? AND ? UNION "
+                                           "SELECT staff_id FROM timecards WHERE date BETWEEN ? AND ?",
+                                           (first.isoformat(), today.isoformat()) * 2)}
         for s in staff_rows:
+            if s["id"] not in active:
+                continue
             found = {}
             m = first
             while m <= today:
@@ -219,34 +331,61 @@ def run_checks(staff_id=None):
                 latest = max(d for v in found.values() for d in v)
                 items.append(_item("warn", "shift_match", s["name"], msg,
                                    url_for("work.timecards", ym=latest.strftime("%Y-%m"), staff_id=s["id"]) if not staff_id
-                                   else url_for("work.timecards", ym=latest.strftime("%Y-%m"))))
+                                   else url_for("work.my_shift", ym=latest.strftime("%Y-%m"))))
     if on("leave5"):
-        from .leave import my_balance
+        from .leave import LEAVE_CODE, add_months, ensure_grants
 
+        # 付与（まだ作っていない付与があれば作る）と、勤務表の「有」の日を、全員分まとめて読む
+        made = 0
         for s in staff_rows:
-            b = my_balance(s["id"])
-            for f in (b or {}).get("five", []):
-                left = (f["deadline"] - today).days
-                if f["took"] < 5 and f["grant"] <= today and -60 <= left <= 120:  # 何年も前の付与は出さない
-                    items.append(_item("ng" if left < 0 else "warn", "leave5", s["name"],
-                                       f"{f['grant']}付与の有給：{f['deadline']}までに5日のうち {f['took']}日" + ("（期限切れ）" if left < 0 else f"（あと{left}日）"),
-                                       url_for("leave.staff", sid=s["id"]) if not staff_id else url_for("work.my_shift")))
+            if s["hire_date"] and parse_date(s["hire_date"], today) <= today - timedelta(days=180):  # 入職から6か月までは付与がない
+                made += ensure_grants(s)
+        if made:
+            db.commit()
+        grants, taken = {}, {}
+        for r in db.execute("SELECT staff_id, grant_date FROM leave_grants WHERE days >= 10 AND grant_date >= ? ORDER BY grant_date",
+                            ((today - timedelta(days=500)).isoformat(),)):
+            grants.setdefault(r[0], []).append(parse_date(r[1]))
+        for r in db.execute("SELECT staff_id, date FROM shifts WHERE code=? AND date >= ?",
+                            (LEAVE_CODE, (today - timedelta(days=500)).isoformat())):
+            taken.setdefault(r[0], []).append(r[1])
+        for s in staff_rows:
+            for gd in grants.get(s["id"], []):
+                if not gd or gd > today:
+                    continue
+                end = add_months(gd, 12)
+                left = (end - today).days
+                took = sum(1 for d in taken.get(s["id"], []) if gd.isoformat() <= d < end.isoformat())
+                if took >= 5 or not -60 <= left <= 120:  # 何年も前の付与は出さない
+                    continue
+                url = url_for("leave.staff", sid=s["id"]) if not staff_id else url_for("work.my_shift")
+                base = f"{gd}付与の有給：{end}までに5日のうち {took}日"
+                if left < 0:
+                    # 過ぎてしまったものは直せない。60日だけ「今月」に出して、次の付与で守れるように
+                    items.append(_item("warn", "leave5", s["name"], f"{base}。{LEAVE5_EXPIRED}", url))
+                else:
+                    items.append(_item("ng" if left <= 30 else "warn", "leave5", s["name"], f"{base}（あと{left}日）", url))
     if on("health") and not staff_id:
         from .work import is_unwell
 
-        names = {s["id"]: s["name"] for s in db.execute("SELECT id, name FROM staff")}
+        names = names or {s["id"]: s["name"] for s in db.execute("SELECT id, name FROM staff")}
+        cards = {}
+        for c in db.execute("SELECT staff_id, clock_out FROM timecards WHERE date=?", (today.isoformat(),)):
+            cards.setdefault(c["staff_id"], []).append(c["clock_out"])
         for h in db.execute("SELECT * FROM health_checks WHERE date=? ORDER BY time", (today.isoformat(),)):
             if is_unwell(h):
+                outs = cards.get(h["staff_id"], [])
+                left_work = bool(outs) and all(outs)  # 退勤した（今日はもう対応しなくてよい）
+                if left_work and not include_done:
+                    continue
                 items.append(_item("ng", "health", names.get(h["staff_id"], "?"),
-                                   f"{h['time']} {h['temp'] or ''}℃ {h['symptoms'] or ''}".strip(), url_for("work.health")))
-    if on("payroll") and not staff_id and today.day >= 5:
-        last = today.replace(day=1) - timedelta(days=1)
-        ym = last.strftime("%Y-%m")
-        worked = {r[0] for r in db.execute("SELECT DISTINCT staff_id FROM timecards WHERE substr(date,1,7)=?", (ym,))}
-        done = {r[0] for r in db.execute("SELECT staff_id FROM payslips WHERE ym=? AND status='確定'", (ym,))}
-        if worked - done:
-            items.append(_item("warn", "payroll", f"{last:%Y年%m月}分", f"給与が確定していない職員が {len(worked - done)}人います",
-                               url_for("payroll.index", ym=ym)))
+                                   f"{h['time']} {h['temp'] or ''}℃ {h['symptoms'] or ''}".strip() + ("（退勤しました）" if left_work else ""),
+                                   url_for("work.health"), done=left_work))
+    if on("payroll") and not staff_id:
+        for first, last, n_left, n in unconfirmed_payroll():
+            if n_left and (first < _month_first(today, 1) or today.day >= 5):
+                items.append(_item("warn" if first == _month_first(today, 1) else "ng", "payroll", f"{first:%Y年%m月}分",
+                                   f"給与が確定していない職員が {n_left}人います", url_for("payroll.index", ym=first.strftime("%Y-%m"))))
     order = {k: i for i, (k, _, _, _) in enumerate(CHECKS)}
     items.sort(key=lambda x: (x["level"] != "ng", order[x["check"]]))
     return items
