@@ -571,3 +571,58 @@ def test_shutdown_needs_token(client, app, tmp_path, monkeypatch):
     assert c.post("/__shutdown", headers={"X-GHMS-Token": "secret-token"},
                   environ_base={"REMOTE_ADDR": "192.168.1.20"}).status_code == 403
     assert c.get("/__ping").get_json()["ok"] is True
+
+
+# ---------------------------------------------------------------- 事業所ごとのカスタマイズ
+def test_features_can_be_turned_off(client, app):
+    post(client, "/settings/features", {"on": ["absences", "incidents", "meetings", "billing"]})
+    r = client.get("/shift/")
+    assert r.status_code == 302  # 使わない機能は開けない
+    assert "使わない」設定" in client.get(r.headers["Location"]).get_data(as_text=True)
+    staff_hub = client.get("/do/staff").get_data(as_text=True)
+    assert "勤務表を作る" not in staff_hub and "キャリアパスの全体を見る" not in staff_hub
+    home = client.get("/").get_data(as_text=True)
+    assert "処遇改善" not in home and "最近のヒヤリハット" in home
+    post(client, "/settings/features", {"on": ["shift"]})
+    home = client.get("/").get_data(as_text=True)
+    assert "最近のヒヤリハット" not in home and "委員会の最終実施日" not in home
+    assert client.get("/shift/").status_code == 200
+
+
+def test_choices_add_hide_and_track(client):
+    post(client, "/settings/choices", {"field": "meetings.kind", "new": "苦情解決委員会", "new_track": "90"})
+    form = client.get("/m/meetings/new").get_data(as_text=True)
+    assert "苦情解決委員会" in form
+    assert "苦情解決委員会" in client.get("/").get_data(as_text=True)  # ホームに最終実施日
+    post(client, "/m/meetings/new", {"date": "2026-10-01", "kind": "避難訓練", "title": "夜間想定"})
+    # 避難訓練を使わない設定に（並び順などはそのまま送る）
+    page = client.get("/settings/choices?field=meetings.kind").get_data(as_text=True)
+    values = re.findall(r'name="active::([^"]+)"', page)
+    data = {"field": "meetings.kind"}
+    for v in values:
+        if v != "避難訓練":
+            data[f"active::{v}"] = "1"
+    post(client, "/settings/choices", data)
+    assert "避難訓練</option>" not in client.get("/m/meetings/new").get_data(as_text=True)
+    assert ">避難訓練</option>" in client.get("/m/meetings/1/edit").get_data(as_text=True)  # 前の記録は残る
+    # 選択肢にない値は受け付けない
+    r = post(client, "/m/meetings/new", {"date": "2026-10-02", "kind": "ありえない会議"})
+    assert "値が不正" in r.get_data(as_text=True)
+
+
+def test_custom_fields(client):
+    post(client, "/settings/fields", {"entity": "residents", "action": "add", "label": "好きな食べ物", "type": "text",
+                                      "list_show": "1"})
+    post(client, "/settings/fields", {"entity": "residents", "action": "add", "label": "血液型", "type": "select",
+                                      "options": "A\nB\nO\nAB"})
+    form = client.get("/m/residents/new").get_data(as_text=True)
+    assert "独自の項目" in form and "好きな食べ物" in form and "<option>AB</option>" in form
+    post(client, "/m/residents/new", {"name": "山田太郎", "cf_1": "カレー", "cf_2": "O"})
+    assert "カレー" in client.get("/m/residents/").get_data(as_text=True)
+    assert "O" in client.get("/m/residents/1").get_data(as_text=True)
+    r = post(client, "/m/residents/new", {"name": "鈴木", "cf_2": "Z"})
+    assert "値が不正" in r.get_data(as_text=True)
+    assert client.get("/m/residents/export.xlsx").status_code == 200
+    # 使わないにすると隠れる（データは残る）
+    post(client, "/settings/fields", {"entity": "residents", "action": "update", "id": "1", "label": "好きな食べ物"})
+    assert "好きな食べ物" not in client.get("/m/residents/new").get_data(as_text=True)

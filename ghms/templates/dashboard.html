@@ -63,6 +63,7 @@
   {% endfor %}
   </ul>
 
+  {% if feature_on('absences') %}
   <h2 style="margin-top:20px">🏥 入院中・帰省中の方</h2>
   <ul class="todo">
   {% for x in away %}{% set a = x.a %}
@@ -75,6 +76,8 @@
   {% endfor %}
   </ul>
 
+  {% endif %}
+  {% if feature_on('meetings') %}
   <h2 style="margin-top:20px">🗣️ 委員会の最終実施日</h2>
   <table class="list">
   {% for kind, last, warn in meetings %}
@@ -82,16 +85,19 @@
   {% endfor %}
   </table>
   <p class="muted small">目安の期間（委員会は1年・避難訓練は半年）より前のもの・記録がないものは赤で表示します。必要な回数は運営基準・自治体の指導で確認してください。</p>
+  <p class="muted small">ホームに出す会議と日数は「設定」→「選択肢を変える」で変えられます。</p>
+  {% endif %}
 </section>
 </div>
 
 <div class="tiles">
   <a class="tile" href="{{ url_for('crud.index', key='residents') }}"><b>{{ stats.residents }}名</b><span>入居者</span></a>
   {% if is_admin %}<a class="tile" href="{{ url_for('crud.index', key='staff') }}"><b>{{ stats.staff }}名</b><span>職員</span></a>{% endif %}
-  <a class="tile" href="{{ url_for('crud.index', key='incidents') }}"><b>{{ stats.incidents }}件</b><span>ヒヤリ・事故（最近30日）</span></a>
-  <a class="tile" href="{{ url_for('views.addon_check') }}"><b>{{ stats.addons }}件</b><span>算定中の加算</span></a>
+  {% if feature_on('incidents') %}<a class="tile" href="{{ url_for('crud.index', key='incidents') }}"><b>{{ stats.incidents }}件</b><span>ヒヤリ・事故（最近30日）</span></a>{% endif %}
+  {% if feature_on('addons') %}<a class="tile" href="{{ url_for('views.addon_check') }}"><b>{{ stats.addons }}件</b><span>算定中の加算</span></a>{% endif %}
 </div>
 
+{% if feature_on('incidents') %}
 <section class="card">
   <h2>⚠️ 最近のヒヤリハット・事故</h2>
   <table class="list"><tbody>
@@ -101,4 +107,5 @@
   {% else %}<tr><td class="empty">記録はありません</td></tr>{% endfor %}
   </tbody></table>
 </section>
+{% endif %}
 {% endblock %}

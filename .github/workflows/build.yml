@@ -15,6 +15,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
     defaults:
       run:
         shell: pwsh
@@ -61,7 +62,7 @@ jobs:
           if (-not $ok) { Get-ChildItem -Recurse $env:GHMS_HOME | Out-String | Write-Host; throw "GHMS.exe が起動しませんでした" }
           if ($r.version -ne "${{ steps.ver.outputs.version }}") { throw "版が違います: $($r.version)" }
           (Invoke-WebRequest http://127.0.0.1:8000/setup -UseBasicParsing).StatusCode
-          Start-Process -FilePath "dist\GHMS\GHMS.exe" -ArgumentList "--stop" -Wait
+          (Start-Process -FilePath "dist\GHMS\GHMS.exe" -ArgumentList "--stop" -PassThru).WaitForExit(60000) | Out-Null
           Start-Sleep -Seconds 2
           try { Invoke-RestMethod http://127.0.0.1:8000/__ping -TimeoutSec 2; throw "止まっていません" } catch { if ($_.Exception.Message -eq "止まっていません") { throw } }
           Write-Host "GHMS.exe OK"
@@ -76,7 +77,10 @@ jobs:
       - name: インストーラーの動作確認（入れる → 起動 → 止める → アンインストール）
         run: |
           $v = "${{ steps.ver.outputs.version }}"
-          Start-Process -FilePath "dist\GHMS-Setup-$v.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/MERGETASKS=!desktopicon,!startup" -Wait
+          # -Wait はインストーラーが起動したGHMSの終了まで待ってしまうため、インストーラー本体だけを待つ
+          $p = Start-Process -FilePath "dist\GHMS-Setup-$v.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/MERGETASKS=!desktopicon,!startup" -PassThru
+          if (-not $p.WaitForExit(300000)) { throw "インストーラーが終わりません" }
+          if ($p.ExitCode -ne 0) { throw "インストーラーがエラーで終わりました: $($p.ExitCode)" }
           $exe = Join-Path $env:ProgramFiles "GHMS\GHMS.exe"
           if (-not (Test-Path $exe)) { throw "インストールされていません" }
           $ok = $false
@@ -87,8 +91,9 @@ jobs:
           if (-not $ok) { Start-Process -FilePath $exe -ArgumentList "--no-browser"; Start-Sleep -Seconds 10; $r = Invoke-RestMethod http://127.0.0.1:8000/__ping }
           Write-Host "installed version: $($r.version)"
           if (-not (Test-Path (Join-Path $env:ProgramData "GHMS\data\ghms.sqlite3"))) { throw "データが ProgramData に作られていません" }
-          Start-Process -FilePath $exe -ArgumentList "--stop" -Wait
-          Start-Process -FilePath (Join-Path $env:ProgramFiles "GHMS\unins000.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait
+          (Start-Process -FilePath $exe -ArgumentList "--stop" -PassThru).WaitForExit(60000) | Out-Null
+          $u = Start-Process -FilePath (Join-Path $env:ProgramFiles "GHMS\unins000.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -PassThru
+          if (-not $u.WaitForExit(300000)) { throw "アンインストールが終わりません" }
           Start-Sleep -Seconds 3
           if (Test-Path $exe) { throw "アンインストールできていません" }
           if (-not (Test-Path (Join-Path $env:ProgramData "GHMS\data\ghms.sqlite3"))) { throw "アンインストールでデータが消えています" }

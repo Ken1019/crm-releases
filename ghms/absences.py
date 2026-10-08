@@ -11,7 +11,6 @@ from flask import Blueprint, abort, flash, g, redirect, render_template, request
 
 from . import crud
 from .db import get_db, now
-from .entities import CONTACT_DIRECTION, CONTACT_METHOD, COUNTERPART
 from .views import parse_date
 
 bp = Blueprint("absences", __name__, url_prefix="/absences")
@@ -130,6 +129,7 @@ def detail(aid):
     logs = db.execute("SELECT * FROM contact_logs WHERE absence_id=? ORDER BY date DESC, time DESC, id DESC", (aid,)).fetchall()
     month = date.today().strftime("%Y-%m")
     visits = sum(1 for c in logs if c["method"] == "面会・訪問" and (c["date"] or "").startswith(month))
-    return render_template("absence_detail.html", a=a, logs=logs, visits=visits, COUNTERPART=COUNTERPART,
-                           CONTACT_METHOD=CONTACT_METHOD, CONTACT_DIRECTION=CONTACT_DIRECTION,
+    fields = {f["name"]: f for f in ent["fields"]}
+    return render_template("absence_detail.html", a=a, logs=logs, visits=visits, COUNTERPART=fields["counterpart"],
+                           CONTACT_METHOD=fields["method"], CONTACT_DIRECTION=fields["direction"],
                            today=date.today().isoformat(), me=g.user["display_name"])

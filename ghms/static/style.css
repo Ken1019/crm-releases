@@ -177,3 +177,10 @@ table.mgrid tr.total td { background:#fff6ec; font-weight:bold; }
 .pwform label { display:flex; flex-direction:column; gap:4px; font-weight:bold; }
 .notes { background:var(--pri-soft); border-radius:12px; padding:10px 14px; margin-bottom:12px; }
 .steps-mini { margin:0 0 12px; padding-left:1.4em; display:grid; gap:4px; }
+/* カスタマイズ */
+.featgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:10px; margin-bottom:12px; }
+.feat { display:flex; gap:12px; align-items:flex-start; padding:12px 14px; border:2px solid var(--line); border-radius:14px; cursor:pointer; background:#fff; }
+.feat:has(input:checked) { border-color:var(--pri); background:var(--pri-soft); }
+.feat input { margin-top:4px; }
+.customrow { border-bottom:1px dashed var(--line); padding-bottom:10px; margin-bottom:10px; align-items:end; }
+tr.muted td { color:var(--muted); }

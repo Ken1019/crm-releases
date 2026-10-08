@@ -27,29 +27,31 @@
   </form>
 </section>
 
+{% if feature_on('billing') or feature_on('invoices') or feature_on('shift') or feature_on('deposits') %}
 <section class="card">
   <h2>🧾 請求・お金</h2>
-  <form method="get" action="{{ url_for('billing.benefit_export') }}" class="filters">
+  {% if feature_on('billing') %}  <form method="get" action="{{ url_for('billing.benefit_export') }}" class="filters">
     <span>給付費の概算・サービス提供実績記録</span><input type="month" name="ym" value="{{ ym }}"><button class="btn primary">🖨️ Excelで出す</button>
-  </form>
+  </form>{% endif %}
   {% if is_admin %}
-  <form method="get" action="{{ url_for('billing.invoices_export') }}" class="filters">
+  {% if feature_on('invoices') %}  <form method="get" action="{{ url_for('billing.invoices_export') }}" class="filters">
     <span>利用料の請求一覧</span><input type="month" name="ym" value="{{ ym }}"><button class="btn primary">🖨️ Excelで出す</button>
-  </form>
-  <form method="get" action="{{ url_for('shift.export') }}" class="filters">
+  </form>{% endif %}
+  {% if feature_on('shift') %}  <form method="get" action="{{ url_for('shift.export') }}" class="filters">
     <span>勤務形態一覧表（勤務表）</span><input type="month" name="ym" value="{{ ym }}">
     <select name="home_id"><option value="">全住居</option>{% for h in homes %}<option value="{{ h['id'] }}">{{ h['name'] }}</option>{% endfor %}</select>
     <button class="btn primary">🖨️ Excelで出す</button>
-  </form>
-  <p><a href="{{ url_for('billing.invoices') }}">請求書・領収書の印刷はこちら</a></p>
+  </form>{% endif %}
+  {% if feature_on('invoices') %}<p><a href="{{ url_for('billing.invoices') }}">請求書・領収書の印刷はこちら</a></p>{% endif %}
   {% endif %}
-  <p><a href="{{ url_for('billing.deposits') }}">預り金の出納帳はこちら</a></p>
+  {% if feature_on('deposits') %}<p><a href="{{ url_for('billing.deposits') }}">預り金の出納帳はこちら</a></p>{% endif %}
 </section>
+{% endif %}
 
 <section class="card">
   <h2>一覧表</h2>
   <ul class="related">
-    {% for key, e in ENTITIES.items() if is_admin or not e.admin_only %}
+    {% for key, e in ENTITIES.items() if (is_admin or not e.admin_only) and entity_on(key) %}
       <li><a href="{{ url_for('crud.export', key=key) }}">{{ e.title }} 一覧（Excel）</a></li>
     {% endfor %}
   </ul>

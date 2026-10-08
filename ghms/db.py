@@ -63,6 +63,11 @@ def init_db(path):
         "CREATE TABLE IF NOT EXISTS shifts (staff_id INTEGER, date TEXT, code TEXT,"
         " updated_by TEXT, updated_at TEXT, PRIMARY KEY (staff_id, date))"
     )
+    # 事業所ごとのカスタマイズ（選択肢・独自の項目）
+    con.execute("CREATE TABLE IF NOT EXISTS choice_options (field TEXT, value TEXT, sort INTEGER, active INTEGER DEFAULT 1,"
+                " track_days INTEGER, PRIMARY KEY (field, value))")
+    con.execute("CREATE TABLE IF NOT EXISTS custom_fields (id INTEGER PRIMARY KEY, entity TEXT, label TEXT, type TEXT,"
+                " options TEXT, list_show INTEGER DEFAULT 0, sort INTEGER, active INTEGER DEFAULT 1, created_at TEXT)")
     for key, ent in ENTITIES.items():
         cols = ", ".join(f'"{f["name"]}" {SQL_TYPE.get(f["type"], "TEXT")}' for f in ent["fields"])
         con.execute(
@@ -74,9 +79,12 @@ def init_db(path):
             if f["name"] not in existing:
                 con.execute(f'ALTER TABLE "{key}" ADD COLUMN "{f["name"]}" {SQL_TYPE.get(f["type"], "TEXT")}')
     con.commit()
+    from .customize import apply_custom_fields, seed_choices
     from .seed import seed
 
     seed(con)
+    seed_choices(con)
+    apply_custom_fields(con)
     con.close()
 
 

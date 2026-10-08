@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}選択肢を変える{% endblock %}
+{% block content %}
+<h1>📝 選択肢を変える</h1>
+<p class="guide">入力画面の「えらぶ」欄に出す選択肢を、事業所に合わせて変えられます。使わないものはチェックを外すと選べなくなります（前に入力した記録はそのまま残ります）。並び順は小さい数字が上です。</p>
+<form method="get" class="filters card">
+  <select name="field" onchange="this.form.submit()" aria-label="変える項目">
+    {% for k, label in fields.items() %}<option value="{{ k }}"{% if k == fkey %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <noscript><button class="btn">表示</button></noscript>
+</form>
+<form method="post" class="card">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="field" value="{{ fkey }}">
+  <h2>{{ fields[fkey] }}</h2>
+  <div class="tablewrap"><table class="list">
+    <thead><tr><th>使う</th><th>選択肢</th><th>並び順</th>{% if fkey == 'meetings.kind' %}<th>ホームに最終実施日を出す（何日あいたら注意）</th>{% endif %}<th>使われている数</th></tr></thead>
+    {% for r in rows %}
+    <tr class="{{ 'muted' if not r['active'] }}">
+      <td><input type="checkbox" name="active::{{ r['value'] }}" value="1"{% if r['active'] %} checked{% endif %} aria-label="{{ r['value'] }}を使う"></td>
+      <td><b>{{ r['value'] }}</b></td>
+      <td><input type="number" name="sort::{{ r['value'] }}" value="{{ r['sort'] }}" class="w5" aria-label="並び順"></td>
+      {% if fkey == 'meetings.kind' %}<td><input type="number" name="track::{{ r['value'] }}" value="{{ r['track_days'] or '' }}" min="1" class="w5" placeholder="出さない" aria-label="日数"> 日</td>{% endif %}
+      <td class="num">{{ counts.get(r['value'], 0) }}件</td>
+    </tr>
+    {% endfor %}
+    <tr class="total"><td>＋</td><td colspan="2"><input name="new" placeholder="新しい選択肢を追加（例：苦情解決委員会）" maxlength="40" style="width:100%"></td>
+      {% if fkey == 'meetings.kind' %}<td><input type="number" name="new_track" min="1" class="w5" placeholder="出さない"> 日</td>{% endif %}<td></td></tr>
+  </table></div>
+  {% if fkey == 'meetings.kind' %}<p class="muted small">例：委員会は「365」日（年1回）、避難訓練は「183」日（半年に1回）。必要な回数は運営基準・自治体の指導で確認してください。空欄にするとホームに出しません。</p>{% endif %}
+  <div class="actions"><button class="btn primary">💾 保存する</button></div>
+</form>
+{% endblock %}

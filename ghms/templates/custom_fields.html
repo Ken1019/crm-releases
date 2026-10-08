@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}独自の項目{% endblock %}
+{% block content %}
+<h1>➕ 独自の項目を追加する</h1>
+<p class="guide">事業所で記録したい項目を足せます。足した項目は入力画面のいちばん下の「独自の項目」に出て、一覧・Excel出力にも自動で入ります。いらなくなった項目は「使う」を外すと隠れます（入力済みのデータは残ります）。</p>
+<form method="get" class="filters card">
+  <select name="entity" onchange="this.form.submit()" aria-label="どこに足すか">
+    {% for k in entities %}<option value="{{ k }}"{% if k == ent_key %} selected{% endif %}>{{ ENTITIES[k].icon }} {{ ENTITIES[k].title }}</option>{% endfor %}
+  </select>
+  <noscript><button class="btn">表示</button></noscript>
+  <a href="{{ url_for('crud.new', key=ent_key) }}">入力画面で見てみる</a>
+</form>
+
+<section class="card">
+  <h2>{{ ENTITIES[ent_key].title }}の独自の項目</h2>
+  {% for r in rows %}
+  <form method="post" class="form customrow">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="entity" value="{{ ent_key }}">
+    <input type="hidden" name="action" value="update"><input type="hidden" name="id" value="{{ r['id'] }}">
+    <label><span>項目の名前</span><input name="label" value="{{ r['label'] }}" maxlength="40"></label>
+    <label><span>種類</span><input value="{{ types[r['type']] }}" disabled></label>
+    {% if r['type'] == 'select' %}<label class="wide"><span>選択肢（1行に1つ）</span><textarea name="options" rows="3">{{ r['options'] or '' }}</textarea></label>{% endif %}
+    <label class="check"><input type="checkbox" name="list_show" value="1"{% if r['list_show'] %} checked{% endif %}> 一覧にも出す</label>
+    <label class="check"><input type="checkbox" name="active" value="1"{% if r['active'] %} checked{% endif %}> 使う</label>
+    <div class="actions"><button class="btn mini">保存</button></div>
+  </form>
+  {% else %}<p class="muted">まだ独自の項目はありません。</p>{% endfor %}
+</section>
+
+<section class="card">
+  <h2>＋ 項目を追加</h2>
+  <form method="post" class="form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="entity" value="{{ ent_key }}"><input type="hidden" name="action" value="add">
+    <label><span>項目の名前<span class="must">必須</span></span><input name="label" required maxlength="40" placeholder="例：好きな食べ物"></label>
+    <label><span>種類</span><select name="type" id="ftype">{% for k, v in types.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+    <label class="wide" id="optbox"><span>選択肢（「えらぶ」のとき・1行に1つ）</span><textarea name="options" rows="3" placeholder="例：&#10;A&#10;B&#10;C"></textarea></label>
+    <label class="check"><input type="checkbox" name="list_show" value="1"> 一覧にも出す</label>
+    <div class="actions wide"><button class="btn primary">＋ 追加する</button></div>
+  </form>
+</section>
+<script>
+(function(){var t=document.getElementById('ftype'),b=document.getElementById('optbox');
+  function f(){b.hidden=t.value!=='select';} t.addEventListener('change',f); f();})();
+</script>
+{% endblock %}

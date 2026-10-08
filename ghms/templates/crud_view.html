@@ -18,9 +18,9 @@
 {% if summary %}
 <section class="card noprint">
   <div class="head"><h2>🌱 最近のようす</h2>
-    <a class="btn mini" href="{{ url_for('crud.new', key='contact_logs', resident_id=row['id'], next=request.path) }}">📞 連絡を記録</a>
-    <a class="btn mini" href="{{ url_for('crud.new', key='absences', resident_id=row['id']) }}">🏥 入院・帰省を登録</a></div>
-  {% if summary.away %}<p class="away">🏥 いま<b>{{ summary.away['kind'] }}</b>中です（{{ summary.away['start_date'] }}から{{ '・' ~ summary.away['place'] if summary.away['place'] }}）。
+    {% if feature_on('contact_logs') %}<a class="btn mini" href="{{ url_for('crud.new', key='contact_logs', resident_id=row['id'], next=request.path) }}">📞 連絡を記録</a>{% endif %}
+    {% if feature_on('absences') %}<a class="btn mini" href="{{ url_for('crud.new', key='absences', resident_id=row['id']) }}">🏥 入院・帰省を登録</a>{% endif %}</div>
+  {% if summary.away and feature_on('absences') %}<p class="away">🏥 いま<b>{{ summary.away['kind'] }}</b>中です（{{ summary.away['start_date'] }}から{{ '・' ~ summary.away['place'] if summary.away['place'] }}）。
     <a href="{{ url_for('absences.detail', aid=summary.away['id']) }}">連絡のやりとりを見る</a></p>{% endif %}
   {% if summary.plan %}<p>📋 個別支援計画：{{ summary.plan['period_start'] or '' }}〜{{ summary.plan['period_end'] or '' }}
     {% if summary.plan['next_monitoring'] %}（次のモニタリング {{ summary.plan['next_monitoring'] }}）{% endif %}
@@ -30,10 +30,10 @@
       {% for r in summary.records %}<li><a href="{{ url_for('crud.view', key='support_records', rid=r['id']) }}"><span class="nowrap">{{ r['date'] }}</span>
         <span>{{ r['mood'] or '' }} {{ (r['content'] or '')|truncate(40) }}</span></a></li>
       {% else %}<li class="muted">まだありません</li>{% endfor %}</ul></div>
-    <div><h3>📞 連絡記録</h3><ul class="todo">
+    {% if feature_on('contact_logs') %}<div><h3>📞 連絡記録</h3><ul class="todo">
       {% for c in summary.contacts %}<li><a href="{{ url_for('crud.view', key='contact_logs', rid=c['id']) }}"><span class="nowrap">{{ c['date'] }}</span>
         <span>{{ c['counterpart'] or '' }}：{{ (c['content'] or '')|truncate(36) }}</span></a></li>
-      {% else %}<li class="muted">まだありません</li>{% endfor %}</ul></div>
+      {% else %}<li class="muted">まだありません</li>{% endfor %}</ul></div>{% endif %}
   </div>
 </section>
 {% endif %}

@@ -97,10 +97,14 @@ HUBS = [
     },
     {
         "key": "settings", "icon": "⚙️", "title": "設定", "desc": "事業所・住居・ログインする人・バックアップ",
-        "entities": ["homes"], "endpoints": ["views.settings", "auth.users", "views.audit_log", "system.update", "auth.reauth"],
+        "entities": ["homes"], "endpoints": ["views.settings", "auth.users", "views.audit_log", "system.update", "auth.reauth",
+                                                "customize.features", "customize.choices", "customize.fields"],
         "tasks": [
             ("住居（ユニット）を登録・変更する", "ホームの名前・定員・住所", lambda: url_for("crud.index", key="homes"), False),
             ("事業所の情報を変える", "事業所名・番号・単価・お知らせの日数", lambda: url_for("views.settings"), True),
+            ("使う機能をえらぶ", "使わない機能はメニューやホームから消えます", lambda: url_for("customize.features"), True),
+            ("選択肢を変える（会議の種類など）", "追加・使わない・並べ替え。ホームに出す会議も", lambda: url_for("customize.choices"), True),
+            ("独自の項目を追加する", "入居者・日誌などに事業所で必要な項目を足す", lambda: url_for("customize.fields"), True),
             ("ログインする人を追加する・パスワードを変える", "職員ごとにアカウントを作ります", lambda: url_for("auth.users"), True),
             ("自分のパスワードを変える", "", lambda: url_for("auth.my_password"), False),
             ("バックアップを保存する", "データをファイルに保存（毎日のバックアップは backup.bat）", lambda: url_for("views.backup"), True),
@@ -114,8 +118,11 @@ HUB_BY_KEY = {h["key"]: h for h in HUBS}
 
 
 def visible_tasks(hub):
+    from .customize import path_disabled
+
     admin = is_admin()
-    return [{"label": l, "desc": d, "url": u()} for l, d, u, adm in hub["tasks"] if admin or not adm]
+    tasks = [{"label": l, "desc": d, "url": u()} for l, d, u, adm in hub["tasks"] if admin or not adm]
+    return [t for t in tasks if not path_disabled(t["url"])]
 
 
 def visible_hubs():

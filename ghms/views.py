@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from . import excel
 from .auth import admin_required
 from .crud import audit, label_of, ref_options
+from .customize import feature_on, tracked_meetings
 from .db import get_db, get_setting, now, set_setting
 from .entities import MEAL, MED, MOOD, TIME_SLOT
 from .hubs import HUB_BY_KEY, visible_hubs, visible_tasks
@@ -18,8 +19,7 @@ bp = Blueprint("views", __name__)
 
 ACTIVE_RES = "status IS NULL OR status != '退居'"
 # (種別, この日数を過ぎたら注意)
-REQUIRED_MEETINGS = [("虐待防止委員会", 365), ("身体拘束適正化委員会", 365), ("感染症対策委員会", 365),
-                     ("業務継続計画(BCP)", 365), ("避難訓練", 183)]
+# ホームに最終実施日を出す会議は「設定」→「選択肢を変える」で決める（customize.tracked_meetings）
 
 
 def parse_date(s, default=None):
@@ -78,18 +78,18 @@ def dashboard():
     for r in db.execute(f"SELECT * FROM residents WHERE ({ACTIVE_RES}) AND id NOT IN "
                         "(SELECT resident_id FROM support_plans WHERE status IS NULL OR status != '終了')"):
         alerts.append(("個別支援計画が未作成", r["name"], "", url_for("crud.new", key="support_plans", resident_id=r["id"])))
-    for d in db.execute("SELECT d.*, r.name AS rname FROM resident_documents d JOIN residents r ON r.id=d.resident_id "
+    for d in ([] if not feature_on("documents") else db.execute("SELECT d.*, r.name AS rname FROM resident_documents d JOIN residents r ON r.id=d.resident_id "
                         f"WHERE (r.{ACTIVE_RES.replace(' OR status', ' OR r.status')}) AND d.expires_on IS NOT NULL AND d.expires_on <= ?",
-                        (cert_limit,)):
+                        (cert_limit,))):
         alerts.append((f"{d['doc_type']}の更新", d["rname"], d["expires_on"], url_for("crud.view", key="resident_documents", rid=d["id"])))
-    if g.user["role"] == "admin":
+    if g.user["role"] == "admin" and feature_on("invoices"):
         for i in db.execute("SELECT i.*, r.name AS rname FROM invoices i JOIN residents r ON r.id=i.resident_id "
                             "WHERE i.status != '入金済' AND i.due_date IS NOT NULL AND i.due_date < ?", (today.isoformat(),)):
             alerts.append((f"{i['ym']}分の利用料が未入金", i["rname"], i["due_date"], url_for("crud.edit", key="invoices", rid=i["id"])))
     from .absences import current_absences, sync_open
 
     sync_open()
-    away = current_absences()
+    away = current_absences() if feature_on("absences") else []
     for x in away:
         if x["need_contact"]:
             alerts.append((f"入院中の連絡が{x['days']}日ありません", x["a"]["rname"], "",
@@ -97,7 +97,7 @@ def dashboard():
     alerts.sort(key=lambda a: a[2] or "0000")
 
     meetings = []
-    for kind, limit in REQUIRED_MEETINGS:
+    for kind, limit in (tracked_meetings() if feature_on("meetings") else []):
         row = db.execute("SELECT MAX(date) FROM meetings WHERE kind=?", (kind,)).fetchone()
         last = row[0]
         meetings.append((kind, last, (not last) or parse_date(last, today) < today - timedelta(days=limit)))
@@ -208,7 +208,7 @@ def journal():
 
     from .absences import current_absences
 
-    away = current_absences(home_id)
+    away = current_absences(home_id) if feature_on("absences") else []
     log = db.execute("SELECT * FROM daily_logs WHERE date=? AND home_id IS ?", (d.isoformat(), home_id)).fetchone()
     recs = {r["resident_id"]: r for r in db.execute(
         "SELECT * FROM support_records WHERE date=? AND time_slot=?", (d.isoformat(), slot))}

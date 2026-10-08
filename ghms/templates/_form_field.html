@@ -4,7 +4,7 @@
   <textarea name="{{ name }}" rows="4">{{ v if v is not none }}</textarea>
 {% elif f.type == 'select' %}
   <select name="{{ name }}"><option value=""></option>
-  {% for o in f.options %}<option{% if v == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+  {% for o in opts(f, v) %}<option{% if v == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>
 {% elif f.type == 'ref' %}
   <select name="{{ name }}"><option value=""></option>
   {% for id, lab in refs[f.name] %}<option value="{{ id }}"{% if v is not none and v|string == id|string %} selected{% endif %}>{{ lab }}</option>{% endfor %}</select>

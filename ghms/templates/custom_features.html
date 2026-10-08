@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}使う機能{% endblock %}
+{% block content %}
+<h1>🧩 使う機能をえらぶ</h1>
+<p class="guide">事業所で使う機能にだけチェックを入れてください。チェックを外した機能は、メニュー・ホーム・検索から消え、画面も開けなくなります（入力済みのデータは消えません。あとでチェックを入れればまた使えます）。
+  日誌・入居者・個別支援計画・職員・設定はいつでも使えます。</p>
+<form method="post" class="card">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <div class="featgrid">
+  {% for k, name, desc, paths in features %}
+    <label class="feat"><input type="checkbox" name="on" value="{{ k }}"{% if k not in off %} checked{% endif %}>
+      <span><b>{{ name }}</b>{% if desc %}<br><small class="muted">{{ desc }}</small>{% endif %}</span></label>
+  {% endfor %}
+  </div>
+  <div class="actions"><button class="btn primary">💾 保存する</button></div>
+</form>
+{% endblock %}

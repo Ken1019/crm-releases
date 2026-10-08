@@ -6,6 +6,7 @@ from flask import Blueprint, abort, flash, g, redirect, render_template, request
 
 from . import excel
 from .auth import is_admin, require_admin
+from .customize import allowed_values, entity_on, options_for
 from .db import get_db, now
 from .entities import ENTITIES
 
@@ -123,7 +124,7 @@ def parse_form(ent, form):
             except ValueError:
                 errors.append(f'「{f["label"]}」は数値で入力してください。')
                 data[f["name"]] = raw
-        elif f["type"] == "select" and f.get("options") and raw not in f["options"]:
+        elif f["type"] == "select" and (f.get("options") or f.get("choices")) and raw not in allowed_values(f):
             errors.append(f'「{f["label"]}」の値が不正です。')
         else:
             data[f["name"]] = raw
@@ -192,7 +193,8 @@ def index(key):
     maps = ref_maps(ent)
     cols = [f for f in ent["fields"] if f.get("list")]
     filters = [f for f in ent["fields"] if f["type"] in ("ref", "select") and f.get("list")]
-    options = {f["name"]: (ref_options(f["ref"]) if f["type"] == "ref" else [(o, o) for o in f["options"]]) for f in filters}
+    options = {f["name"]: (ref_options(f["ref"]) if f["type"] == "ref" else [(o, o) for o in options_for(f, request.args.get(f["name"]))])
+               for f in filters}
     return render_template(
         "crud_list.html", key=key, ent=ent, rows=rows, cols=cols, maps=maps, fmt=fmt, total=total,
         page=page, pages=(total + PAGE_SIZE - 1) // PAGE_SIZE, filters=filters, options=options,
@@ -235,7 +237,7 @@ def view(key, rid):
         abort(404)
     related = []
     for k, e in ENTITIES.items():
-        if e.get("admin_only") and not is_admin():
+        if (e.get("admin_only") and not is_admin()) or not entity_on(k):
             continue
         for f in e["fields"]:
             if f["type"] == "ref" and f["ref"] == key:

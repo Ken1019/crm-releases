@@ -34,10 +34,10 @@
   <label><span>日付<span class="must">必須</span></span><input type="date" name="date" value="{{ today }}" required></label>
   <label><span>時刻</span><input type="time" name="time"></label>
   <label><span>連絡した相手</span><select name="counterpart"><option></option>
-    {% for o in COUNTERPART %}<option{% if (a['kind'] == '入院' and o == '医療機関・病院') or (a['kind'] != '入院' and o == '家族') %} selected{% endif %}>{{ o }}</option>{% endfor %}</select></label>
+    {% for o in opts(COUNTERPART) %}<option{% if (a['kind'] == '入院' and o == '医療機関・病院') or (a['kind'] != '入院' and o == '家族') %} selected{% endif %}>{{ o }}</option>{% endfor %}</select></label>
   <label><span>相手の名前・所属</span><input name="counterpart_name" placeholder="例：〇〇病院 3階病棟 看護師"></label>
-  <label><span>方法</span><select name="method"><option></option>{% for o in CONTACT_METHOD %}<option>{{ o }}</option>{% endfor %}</select></label>
-  <label><span>どちらから</span><select name="direction"><option></option>{% for o in CONTACT_DIRECTION %}<option>{{ o }}</option>{% endfor %}</select></label>
+  <label><span>方法</span><select name="method"><option></option>{% for o in opts(CONTACT_METHOD) %}<option>{{ o }}</option>{% endfor %}</select></label>
+  <label><span>どちらから</span><select name="direction"><option></option>{% for o in opts(CONTACT_DIRECTION) %}<option>{{ o }}</option>{% endfor %}</select></label>
   <label class="wide"><span>連絡の内容<span class="must">必須</span></span><textarea name="content" rows="3" required placeholder="例：本日面会。食事は半分ほど。来週退院の見込みと主治医より説明あり。"></textarea></label>
   <label class="wide"><span>今後の対応・申し送り</span><textarea name="next_action" rows="2"></textarea></label>
   <label><span>対応した職員</span><input name="staff" value="{{ me }}"></label>
