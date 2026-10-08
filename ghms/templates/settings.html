@@ -4,9 +4,10 @@
 <h1>🏢 事業所の設定</h1>
 <form method="post" class="card form">
   <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-  {% for k, label, v, choices in items %}
+  {% for k, label, v, choices, num in items %}
   <label><span>{{ label }}</span>
     {% if choices %}<select name="{{ k }}">{% for val, lab in choices %}<option value="{{ val }}"{% if v == val %} selected{% endif %}>{{ lab }}</option>{% endfor %}</select>
+    {% elif num %}<input name="{{ k }}" value="{{ v }}" type="number" min="{{ num[0] }}" max="{{ num[1] }}" step="{{ '1' if num[2] else 'any' }}" inputmode="decimal">
     {% else %}<input name="{{ k }}" value="{{ v }}">{% endif %}</label>
   {% endfor %}
   <div class="actions wide"><button class="btn primary">💾 保存する</button></div>

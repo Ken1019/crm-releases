@@ -8,6 +8,7 @@ from . import excel
 from .auth import admin_required
 from .billing import month_days
 from .db import get_db, get_setting, now
+from .forms import db_int
 from .views import parse_ym
 
 bp = Blueprint("shift", __name__, url_prefix="/shift")
@@ -29,10 +30,9 @@ def _types():
 
 
 def full_time_hours():
-    try:
-        return float(get_setting("full_time_hours", "160") or 160)
-    except ValueError:
-        return 160.0
+    from .forms import setting_number
+
+    return float(setting_number("full_time_hours", 160))
 
 
 def roster(first, last, home_id):
@@ -66,7 +66,7 @@ def index():
     first, last = parse_ym(request.values.get("ym"))
     ym = first.strftime("%Y-%m")
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
-    home_id = request.values.get("home_id", type=int)
+    home_id = request.values.get("home_id", type=db_int)
     staff, types, days, rows, by_job, night, base = roster(first, last, home_id)
     if request.method == "POST":
         valid = {t["code"] for t in types}
@@ -88,7 +88,7 @@ def index():
 @admin_required
 def export():
     first, last = parse_ym(request.args.get("ym"))
-    home_id = request.args.get("home_id", type=int)
+    home_id = request.args.get("home_id", type=db_int)
     staff, types, days, rows, by_job, night, base = roster(first, last, home_id)
     home = get_db().execute("SELECT name FROM homes WHERE id=?", (home_id,)).fetchone() if home_id else None
     headers = ["職種", "雇用形態", "氏名"] + [f"{d.day}\n{WEEK[d.weekday()]}" for d in days] + ["勤務時間", "常勤換算"]

@@ -13,6 +13,7 @@
   <input type="hidden" name="_csrf" value="{{ csrf_token }}">
   {% for k, label, d, help in PAY_SETTINGS %}
   <label><span>{{ label }}</span>{% if k in ('pay_yakin_mode', 'pay_leave_method') %}<select name="{{ k }}">{% for o in (['1回いくら', '時間で計算'] if k == 'pay_yakin_mode' else ['平均賃金', '通常の賃金']) %}<option{% if values[k] == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+    {% elif k in NUM %}<input name="{{ k }}" value="{{ values[k] }}" placeholder="{{ d }}" type="number" min="{{ NUM[k][0] }}" max="{{ NUM[k][1] }}" step="{{ '1' if NUM[k][2] else 'any' }}" inputmode="decimal">
     {% else %}<input name="{{ k }}" value="{{ values[k] }}" placeholder="{{ d }}">{% endif %}{% if help %}<small class="muted">{{ help }}</small>{% endif %}</label>
   {% endfor %}
   <label class="chip wide"><input type="checkbox" name="pay_health_required" value="1"{% if health_required %} checked{% endif %}> 出勤のとき体温の入力を必ずにする</label>

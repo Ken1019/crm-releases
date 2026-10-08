@@ -12,6 +12,7 @@ from .auth import admin_required
 from .crud import audit, label_of, ref_options
 from .customize import feature_on, tracked_meetings
 from .db import get_db, get_setting, now, set_setting
+from .forms import NUM_SETTINGS, check_setting, db_int, safe_float, safe_int, setting_number
 from .entities import MEAL, MED, MOOD, TIME_SLOT
 from .hubs import HUB_BY_KEY, visible_hubs, visible_tasks
 
@@ -22,17 +23,25 @@ ACTIVE_RES = "status IS NULL OR status != '退居'"
 # ホームに最終実施日を出す会議は「設定」→「選択肢を変える」で決める（customize.tracked_meetings）
 
 
+# 日付として受けつける年（9999年・1年などは、前後の日を計算するとエラーになるため使わない）
+DATE_YEARS = (1900, 2100)
+YM_YEARS = (2000, 2100)
+
+
 def parse_date(s, default=None):
     try:
-        return datetime.strptime(s, "%Y-%m-%d").date()
+        d = datetime.strptime(s, "%Y-%m-%d").date()
     except (TypeError, ValueError):
         return default
+    return d if DATE_YEARS[0] <= d.year <= DATE_YEARS[1] else default
 
 
 def parse_ym(s):
     try:
         d = datetime.strptime(s, "%Y-%m").date()
     except (TypeError, ValueError):
+        d = None
+    if d is None or not YM_YEARS[0] <= d.year <= YM_YEARS[1]:
         d = date.today().replace(day=1)
     last = date(d.year, d.month, calendar.monthrange(d.year, d.month)[1])
     return d, last
@@ -54,8 +63,9 @@ def _alerts_and_away():
     """受給者証・計画などの期限のお知らせと、いま不在の入居者"""
     db = get_db()
     today = date.today()
-    cert_days = int(get_setting("cert_alert_days", "60") or 60)
-    plan_days = int(get_setting("plan_alert_days", "30") or 30)
+    # まちがった値が保存されていても、ホームが開けなくならないように（初期値・範囲の中におさめる）
+    cert_days = setting_number("cert_alert_days", 60)
+    plan_days = setting_number("plan_alert_days", 30)
     cert_limit = (today + timedelta(days=cert_days)).isoformat()
     plan_limit = (today + timedelta(days=plan_days)).isoformat()
 
@@ -209,7 +219,7 @@ def journal():
     db = get_db()
     d = parse_date(request.values.get("date"), date.today())
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
-    home_id = request.values.get("home_id", type=int)
+    home_id = request.values.get("home_id", type=db_int)
     if home_id is None:
         home_id = homes[0]["id"] if homes else None
     # home_id=0 は「住居未設定」（住居が入っていない入居者）。業務日誌は住居なし（NULL）として保存する
@@ -223,10 +233,7 @@ def journal():
     if request.method == "POST":
         log = {f: (request.form.get(f, "").strip() or None) for f in LOG_FIELDS}
         if log["residents_count"]:
-            try:
-                log["residents_count"] = int(log["residents_count"])
-            except ValueError:
-                log["residents_count"] = None
+            log["residents_count"] = safe_int(log["residents_count"], None, 0, 100000)
         existing = db.execute("SELECT id FROM daily_logs WHERE date=? AND home_id IS ?", (d.isoformat(), log_home)).fetchone()
         cols = list(log)
         if existing:
@@ -244,12 +251,9 @@ def journal():
         for r in residents:
             rec = {f: (request.form.get(f"r{r['id']}_{f}", "").strip() or None) for f in REC_FIELDS}
             if rec["temperature"]:
-                try:
-                    rec["temperature"] = float(rec["temperature"])
-                except ValueError:
-                    rec["temperature"] = None
+                rec["temperature"] = safe_float(rec["temperature"], None, 20, 50)
             # 画面に出していた記録（行ごとの番号）だけを直す。同じ日・時間帯のほかの記録は上書きしない
-            rec_id = request.form.get(f"r{r['id']}_id", type=int)
+            rec_id = request.form.get(f"r{r['id']}_id", type=db_int)
             if rec_id:
                 ex = db.execute("SELECT id FROM support_records WHERE id=? AND resident_id=?", (rec_id, r["id"])).fetchone()
             elif by_id:
@@ -318,7 +322,7 @@ REC_WIDTH = [12, 14, 8, 7, 8, 8, 10, 60, 12]
 def journal_export():
     db = get_db()
     first, last = parse_ym(request.args.get("ym"))
-    home_id = request.args.get("home_id", type=int)
+    home_id = request.args.get("home_id", type=db_int)
     home = db.execute("SELECT * FROM homes WHERE id=?", (home_id,)).fetchone() if home_id else None
     hname = home["name"] if home else "全住居"
     wb = Workbook()
@@ -381,10 +385,7 @@ def addon_check():
     checks = {(r["addon_id"], r["item"]): r for r in db.execute("SELECT * FROM addon_checks WHERE ym=?", (ym,))}
     counts = _addon_counts(first, last)
     n_res = db.execute(f"SELECT COUNT(*) FROM residents WHERE {ACTIVE_RES}").fetchone()[0]
-    try:
-        price = float(get_setting("unit_price", "10") or 10)
-    except ValueError:
-        price = 10.0
+    price = setting_number("unit_price", 10)
     days = (last - first).days + 1
     items, total_units = [], 0
     for a in addons:
@@ -595,18 +596,32 @@ SETTING_DEFAULTS = {"session_timeout_min": "30", "staff_can_export": "0", "pin_t
 @admin_required
 def settings():
     if request.method == "POST":
-        for k, *_ in SETTINGS:
-            set_setting(k, request.form.get(k, "").strip())
+        bad = []
+        for k, label, *opts in SETTINGS:
+            v = request.form.get(k, "").strip()
+            if opts and v not in [o if isinstance(o, str) else o[0] for o in opts[0]]:
+                if v:  # 送られてこなかったときは、前の値のまま
+                    bad.append(f"「{label}」はえらんだ値が正しくありません")
+                continue
+            if k in NUM_SETTINGS:
+                v, err = check_setting(k, v)
+                if err:  # まちがった値は保存せず、前の値のままにする
+                    bad.append(f"「{label}」は{err}")
+                    continue
+            set_setting(k, v[:500])
         from .auth import log_event
 
         log_event("settings")
         get_db().commit()
-        flash("設定を保存しました。", "ok")
+        if bad:
+            flash("次の項目は前の値のままにしました：" + "／".join(bad) + "。", "error")
+        else:
+            flash("設定を保存しました。", "ok")
         return redirect(url_for("views.settings"))
     items = []
     for k, label, *opts in SETTINGS:
         choices = [(o, o) if isinstance(o, str) else o for o in opts[0]] if opts else None
-        items.append((k, label, get_setting(k, SETTING_DEFAULTS.get(k, "")), choices))
+        items.append((k, label, get_setting(k, SETTING_DEFAULTS.get(k, "")), choices, NUM_SETTINGS.get(k)))
     return render_template("settings.html", items=items)
 
 

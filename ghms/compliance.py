@@ -13,6 +13,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 from .auth import admin_required, log_event
 from .customize import feature_on, tracked_meetings
 from .db import get_db, get_setting, set_setting
+from .forms import db_int
 from .views import parse_date
 
 bp = Blueprint("compliance", __name__, url_prefix="/compliance")
@@ -405,7 +406,7 @@ def grouped(items):
 def index():
     if request.method == "POST":
         set_setting("comp_off", ",".join(k for k, _, _, _ in CHECKS if not request.form.get(f"on::{k}")))
-        set_setting("comp_days", str(max(1, min(60, request.form.get("comp_days", type=int) or 7))))
+        set_setting("comp_days", str(max(1, min(60, request.form.get("comp_days", type=db_int) or 7))))
         set_setting("comp_trainings", (request.form.get("comp_trainings") or "").strip() or DEFAULT_TRAININGS)
         log_event("settings", "compliance", None, "実地指導チェックの設定")
         get_db().commit()

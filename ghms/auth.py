@@ -22,6 +22,7 @@ from flask import Blueprint, abort, flash, g, redirect, render_template, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .db import get_db, get_setting, now
+from .forms import db_int
 
 bp = Blueprint("auth", __name__)
 
@@ -104,10 +105,9 @@ def password_problem(pw, username=""):
 
 def timeout_seconds():
     key, default = ("pin_timeout_min", 15) if session.get("via") == "pin" else ("session_timeout_min", 30)
-    try:
-        return max(int(get_setting(key, str(default)) or default), 1) * 60
-    except ValueError:
-        return default * 60
+    from .forms import setting_number
+
+    return setting_number(key, default) * 60
 
 
 def can_export():
@@ -346,7 +346,7 @@ def devices():
         log_event("device_add", "devices", cur.lastrowid, name)
         flash(f"この端末を「{name}」としてPIN対応にしました。", "ok")
     elif action == "remove":
-        did = request.form.get("id", type=int)
+        did = request.form.get("id", type=db_int)
         row = db.execute("SELECT * FROM devices WHERE id=?", (did,)).fetchone()
         if row:
             db.execute("UPDATE devices SET active=0 WHERE id=?", (did,))
@@ -403,7 +403,7 @@ def users():
     db = get_db()
     if request.method == "POST":
         action = request.form.get("action")
-        uid = request.form.get("id", type=int)
+        uid = request.form.get("id", type=db_int)
         target = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone() if uid else None
         if action == "add":
             username = request.form.get("username", "").strip()
@@ -419,7 +419,7 @@ def users():
                     "INSERT INTO users (username, display_name, password_hash, role, active, must_change, created_at, updated_at,"
                     " staff_id) VALUES (?,?,?,?,1,1,?,?,?)",
                     (username, request.form.get("display_name") or username, generate_password_hash(pw), role, now(), now(),
-                     request.form.get("staff_id", type=int)),
+                     request.form.get("staff_id", type=db_int)),
                 )
                 log_event("user_add", "users", cur.lastrowid, f"{username}（{ROLES[role]}）")
                 flash(f"「{username}」を追加しました。最初のログインでパスワードを変えてもらいます。", "ok")
@@ -459,7 +459,7 @@ def users():
             log_event("user_pin_clear", "users", uid, target["username"])
             flash(f"「{target['username']}」のPINを消しました。本人が設定し直します。", "ok")
         elif action == "staff":
-            db.execute("UPDATE users SET staff_id=?, updated_at=? WHERE id=?", (request.form.get("staff_id", type=int), now(), uid))
+            db.execute("UPDATE users SET staff_id=?, updated_at=? WHERE id=?", (request.form.get("staff_id", type=db_int), now(), uid))
             log_event("user_staff", "users", uid, target["username"])
             flash(f"「{target['username']}」を職員の情報とつなぎました。タイムカード・給与明細に使います。", "ok")
         elif action == "unlock":

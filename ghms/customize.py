@@ -9,6 +9,7 @@ from flask import Blueprint, abort, flash, g, redirect, render_template, request
 
 from .auth import admin_required, log_event
 from .db import get_db, get_setting, now, set_setting
+from .forms import db_int, safe_int
 from .entities import ENTITIES, F
 
 bp = Blueprint("customize", __name__, url_prefix="/settings")
@@ -193,7 +194,7 @@ def install(app):
 @admin_required
 def features():
     if request.method == "POST":
-        on = set(request.form.getlist("on"))
+        on = {k for k in request.form.getlist("on") if k in FEATURE_BY_KEY}  # 知らない機能の名前は無視する
         off = [k for k, *_ in FEATURES if k not in on]
         set_setting("features_off", ",".join(off))
         forget_features_cache()
@@ -215,12 +216,8 @@ def choices():
         for r in choice_rows(fkey):
             i = r["value"]
             active = 1 if request.form.get(f"active::{i}") else 0
-            try:
-                sort = int(request.form.get(f"sort::{i}") or r["sort"])
-            except ValueError:
-                sort = r["sort"]
-            track = request.form.get(f"track::{i}", "").strip()
-            track = int(track) if track.isdigit() and int(track) > 0 else None
+            sort = safe_int(request.form.get(f"sort::{i}"), r["sort"], -1_000_000, 1_000_000)
+            track = safe_int(request.form.get(f"track::{i}", ""), None, 1, 3650)
             db.execute("UPDATE choice_options SET active=?, sort=?, track_days=? WHERE field=? AND value=?",
                        (active, sort, track if fkey == "meetings.kind" else None, fkey, i))
         new = request.form.get("new", "").strip()
@@ -229,9 +226,9 @@ def choices():
                 flash("選択肢は40文字以内にしてください。", "error")
             else:
                 mx = db.execute("SELECT COALESCE(MAX(sort), 0) FROM choice_options WHERE field=?", (fkey,)).fetchone()[0]
-                track = request.form.get("new_track", "").strip()
+                track = safe_int(request.form.get("new_track", ""), None, 1, 3650)
                 db.execute("INSERT OR IGNORE INTO choice_options (field, value, sort, active, track_days) VALUES (?,?,?,1,?)",
-                           (fkey, new, mx + 10, int(track) if fkey == "meetings.kind" and track.isdigit() else None))
+                           (fkey, new, mx + 10, track if fkey == "meetings.kind" else None))
                 flash(f"「{new}」を追加しました。", "ok")
         log_event("settings", detail=f"選択肢: {CHOICE_FIELDS[fkey]}")
         db.commit()
@@ -269,7 +266,7 @@ def fields():
                             mx + 10, now()))
                 flash(f"「{label}」を追加しました。{ENTITIES[ent]['title']}の入力画面のいちばん下に出ます。", "ok")
         elif action == "update":
-            cid = request.form.get("id", type=int)
+            cid = request.form.get("id", type=db_int)
             db.execute("UPDATE custom_fields SET label=?, options=?, list_show=?, active=? WHERE id=? AND entity=?",
                        (request.form.get("label", "").strip()[:40] or "（名前なし）", request.form.get("options", ""),
                         1 if request.form.get("list_show") else 0, 1 if request.form.get("active") else 0, cid, ent))

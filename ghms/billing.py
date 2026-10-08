@@ -15,6 +15,7 @@ from . import excel
 from .auth import admin_required
 from .crud import COMPUTE, audit, save
 from .db import get_db, get_setting, now
+from .forms import clamp, db_int, safe_float
 from .views import fiscal_year, parse_date, parse_ym
 
 
@@ -63,7 +64,7 @@ def residents_in_month(first, last, home_id=None):
 
 def pick_home(homes):
     """画面でえらんだ住居。何もえらんでいなければ最初の住居（住居がなければ「住居未設定」）"""
-    home_id = request.values.get("home_id", type=int)
+    home_id = request.values.get("home_id", type=db_int)
     if home_id is None:
         home_id = homes[0]["id"] if homes else NO_HOME
     return home_id
@@ -92,8 +93,10 @@ def attendance_map(first, last, ids=None):
 def unit_price():
     """1単位の単価。小数の誤差が出ないよう Decimal で扱う（10.45 など）"""
     try:
-        v = Decimal(str(get_setting("unit_price", "10") or "10").strip())
-        return v if v.is_finite() and v > 0 else Decimal("10")
+        from .forms import normalize_num
+
+        v = Decimal(normalize_num(get_setting("unit_price", "10")) or "10")
+        return v if v.is_finite() and 1 <= v <= 100 else Decimal("10")
     except (InvalidOperation, ValueError):
         return Decimal("10")
 
@@ -276,7 +279,7 @@ def compute_benefit(first, last, home_id=None):
 def benefit():
     first, last = parse_ym(request.args.get("ym"))
     homes = get_db().execute("SELECT * FROM homes ORDER BY name").fetchall()
-    home_id = request.args.get("home_id", type=int)
+    home_id = request.args.get("home_id", type=db_int)
     results, price, rate = compute_benefit(first, last, home_id)
     return render_template("billing_benefit.html", results=results, price=price, rate=rate, first=first,
                            ym=first.strftime("%Y-%m"), homes=homes, home_id=home_id,
@@ -286,7 +289,7 @@ def benefit():
 @bp.route("/benefit.xlsx")
 def benefit_export():
     first, last = parse_ym(request.args.get("ym"))
-    home_id = request.args.get("home_id", type=int)
+    home_id = request.args.get("home_id", type=db_int)
     results, price, rate = compute_benefit(first, last, home_id)
     office = get_setting("office_name")
     wb = Workbook()
@@ -378,10 +381,9 @@ def calc_fees(r, first, last, billable, burden):
 
 def due_date(first):
     y, m = (first.year + 1, 1) if first.month == 12 else (first.year, first.month + 1)
-    try:
-        day = int(get_setting("invoice_due_day", "27") or 27)
-    except ValueError:
-        day = 27
+    from .forms import setting_number
+
+    day = setting_number("invoice_due_day", 27)
     return date(y, m, min(max(day, 1), calendar.monthrange(y, m)[1]))
 
 
@@ -410,10 +412,8 @@ def invoices():
                 if f == "other_label":
                     amounts[f] = raw or None
                 else:
-                    try:
-                        amounts[f] = int(float(raw)) if raw else 0
-                    except ValueError:
-                        amounts[f] = 0
+                    # 読めない・とても大きい値は0にする（±1億円の間におさめる）
+                    amounts[f] = int(clamp(safe_float(raw, 0), -100_000_000, 100_000_000)) if raw else 0
             if inv:
                 save("invoices", amounts, inv["id"])
                 updated += 1

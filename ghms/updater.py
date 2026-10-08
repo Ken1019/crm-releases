@@ -12,11 +12,13 @@ import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime
 
@@ -47,9 +49,42 @@ def update_url():
     return get_setting("update_url", "") or runtime.load_product()["update_url"] or DEFAULT_URL
 
 
-def fetch_manifest(url, opener=urllib.request.urlopen):
-    if not url.startswith("https://"):
-        raise ValueError("更新情報のURLは https:// で始まる必要があります")
+# 更新情報・インストーラーを受け取ってよい場所（GitHubのリリース）。ほかに、設定した update_url の場所も許す
+ALLOWED_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
+
+
+def allowed_hosts():
+    hosts = set(ALLOWED_HOSTS)
+    host = urllib.parse.urlsplit(update_url()).hostname
+    if host:
+        hosts.add(host.lower())
+    return hosts
+
+
+def check_url(url, what="更新情報"):
+    """https で、決まった場所（allowed_hosts）のURLだけを使う"""
+    parts = urllib.parse.urlsplit(url or "")
+    if parts.scheme != "https" or not parts.hostname:
+        raise ValueError(f"{what}のURLは https:// で始まる必要があります")
+    if parts.hostname.lower() not in allowed_hosts():
+        raise ValueError(f"{what}の場所（{parts.hostname}）は、更新の配布先として登録されていません")
+    return url
+
+
+class _CheckRedirects(urllib.request.HTTPRedirectHandler):
+    """転送（リダイレクト）先も、決まった場所の https だけにする"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        check_url(newurl, "転送先")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _open(req, timeout):
+    return urllib.request.build_opener(_CheckRedirects).open(req, timeout=timeout)
+
+
+def fetch_manifest(url, opener=_open):
+    check_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": f"GHMS/{VERSION}"})
     with opener(req, timeout=TIMEOUT) as r:
         data = json.loads(r.read().decode("utf-8"))
@@ -58,7 +93,7 @@ def fetch_manifest(url, opener=urllib.request.urlopen):
     return data
 
 
-def check(opener=urllib.request.urlopen):
+def check(opener=_open):
     """更新を確認して結果を保存する。戻り値は (manifest または None, エラー文 または None)"""
     try:
         m = fetch_manifest(update_url(), opener)
@@ -107,14 +142,16 @@ def sha256_file(path):
     return h.hexdigest()
 
 
-def download_installer(m, dest_dir, opener=urllib.request.urlopen):
+def download_installer(m, dest_dir, opener=_open):
     url = m.get("installer", "")
-    if not url.startswith("https://"):
-        raise ValueError("インストーラーの場所が https ではありません")
-    if not re.fullmatch(r"[0-9a-fA-F]{64}", m.get("sha256", "")):
+    check_url(url, "インストーラー")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", str(m.get("sha256", ""))):
         raise ValueError("更新情報に確認用の値（SHA-256）がありません")
     os.makedirs(dest_dir, exist_ok=True)
-    path = os.path.join(dest_dir, f"GHMS-Setup-{re.sub(r'[^0-9.]', '', m['version'])}.exe")
+    # ダウンロードのたびに、名前の予想できない新しいフォルダに置く（前のファイルの置きかえを防ぐ）
+    work = os.path.join(dest_dir, "dl_" + secrets.token_hex(12))
+    os.makedirs(work)
+    path = os.path.join(work, f"GHMS-Setup-{re.sub(r'[^0-9.]', '', str(m['version']))}.exe")
     req = urllib.request.Request(url, headers={"User-Agent": f"GHMS/{VERSION}"})
     with opener(req, timeout=120) as r, open(path + ".part", "wb") as f:
         shutil.copyfileobj(r, f)
@@ -140,10 +177,13 @@ def is_local_request():
     return request.remote_addr in ("127.0.0.1", "::1")
 
 
-def launch_installer(path):
-    """インストーラーを起動（Windowsの確認画面が出る）。インストーラーが古い版を止めて入れ替え、起動し直す"""
+def launch_installer(path, sha256):
+    """インストーラーを起動（Windowsの確認画面が出る）。インストーラーが古い版を止めて入れ替え、起動し直す。
+    起動する直前にもう一度 SHA-256 を確かめる（ダウンロードしたあとに入れかえられていないか）"""
     if sys.platform != "win32":
         raise RuntimeError("Windows でのみ更新できます")
+    if sha256_file(path).lower() != str(sha256).lower():
+        raise ValueError("インストーラーが確認したときと変わっています（改ざんのおそれ）。更新を中止しました。")
     os.startfile(path, "open", "/SILENT /SUPPRESSMSGBOXES /NORESTART /SP-")  # noqa: S606
 
 
@@ -181,7 +221,7 @@ def update():
                     backup = backup_before_update(current_app.config["DATABASE"], m["version"])
                     log_event("update_install", detail=f"{VERSION} → {m['version']}（バックアップ {os.path.basename(backup)}）")
                     get_db().commit()
-                    launch_installer(path)
+                    launch_installer(path, m["sha256"])
                 except Exception as e:
                     log_event("update_failed", detail=str(e)[:200])
                     get_db().commit()

@@ -485,6 +485,7 @@ def test_removed_device_and_short_timeout(client, app):
 
 # ---------------------------------------------------------------- ネット経由の更新
 import hashlib  # noqa: E402
+import os  # noqa: E402
 import io  # noqa: E402
 import json as _json  # noqa: E402
 
@@ -516,7 +517,7 @@ def test_version_compare():
 def test_update_check_and_download(app, tmp_path):
     from ghms import VERSION, updater
     exe = b"MZ fake installer"
-    good = {"version": "99.0.0", "installer": "https://example.com/GHMS-Setup-99.0.0.exe",
+    good = {"version": "99.0.0", "installer": "https://github.com/Ken1019/crm-releases/releases/download/v99.0.0/GHMS-Setup-99.0.0.exe",
             "sha256": hashlib.sha256(exe).hexdigest(), "notes": "新機能"}
     files = {updater.DEFAULT_URL: _json.dumps(good).encode(), good["installer"]: exe}
     with app.app_context():
@@ -533,10 +534,29 @@ def test_update_check_and_download(app, tmp_path):
             assert "正しくありません" in str(e)
         # https 以外は使わない
         try:
-            updater.download_installer(dict(good, installer="http://example.com/a.exe"), str(tmp_path), _fake_opener(files))
+            updater.download_installer(dict(good, installer="http://github.com/a.exe"), str(tmp_path), _fake_opener(files))
             assert False
         except ValueError:
             pass
+        # 登録していない場所（ホスト）からは受け取らない
+        evil = {"https://evil.example.com/a.exe": exe}
+        with pytest.raises(ValueError, match="登録されていません"):
+            updater.download_installer(dict(good, installer="https://evil.example.com/a.exe"), str(tmp_path), _fake_opener(evil))
+        with pytest.raises(ValueError, match="登録されていません"):
+            updater.fetch_manifest("https://evil.example.com/latest.json", _fake_opener({}))
+        # ダウンロードのたびに別の（予想できない名前の）フォルダに置く
+        path2 = updater.download_installer(m, str(tmp_path), _fake_opener(files))
+        assert os.path.dirname(path2) != os.path.dirname(path)
+        # 起動の直前にもう一度確かめる：入れかえられていたら起動しない
+        with open(path2, "wb") as f:
+            f.write(b"MZ swapped")
+        monkey_platform = updater.sys.platform
+        updater.sys.platform = "win32"
+        try:
+            with pytest.raises(ValueError, match="変わっています"):
+                updater.launch_installer(path2, good["sha256"])
+        finally:
+            updater.sys.platform = monkey_platform
         # ネットにつながらなくても落ちない
         m, err = updater.check(_fake_opener({}))
         assert m is None and "取得できませんでした" in err
@@ -1559,3 +1579,134 @@ def test_pin_admin_home_hides_money_until_password(client, app):
     with app.app_context():
         from ghms.db import get_db
         assert get_db().execute("SELECT COUNT(*) FROM contact_logs").fetchone()[0] == 0
+
+
+def _flash_texts(html):
+    return re.sub(r"<[^>]+>", " ", html)
+
+
+def test_bad_settings_rejected_and_home_still_opens(client, app):
+    # まちがった値は保存せず、前の値のまま。エラーを出す
+    post(client, "/settings", {"cert_alert_days": "90", "unit_price": "１０．２８円", "invoice_due_day": "27日"})
+    from ghms.db import get_setting
+    with app.app_context():
+        assert get_setting("cert_alert_days") == "90" and get_setting("unit_price") == "10.28"
+        assert get_setting("invoice_due_day") == "27"
+    for bad in ("abc", "nan", "1e400", "99999999999999999999", "-5"):
+        r = post(client, "/settings", {"cert_alert_days": bad, "unit_price": "10"})
+        html = client.get(r.headers["Location"]).get_data(as_text=True)
+        assert "前の値のままにしました" in html, bad
+        with app.app_context():
+            assert get_setting("cert_alert_days") == "90", bad
+    assert 'type="number"' in client.get("/settings").get_data(as_text=True)
+    # 給与の設定：「9.85%」「１０．２８」は数字にして保存、まちがいは前の値のまま
+    post(client, "/payroll/settings", {"ins_health": "9.85%", "pay_fever": "３７．８", "pay_break_default": "abc",
+                                       "pay_night_start": "25:99"})
+    with app.app_context():
+        assert get_setting("ins_health") == "9.85" and get_setting("pay_fever") == "37.8"
+        assert get_setting("pay_break_default", "60") == "60" and get_setting("pay_night_start", "22:00") == "22:00"
+    # 前の版などで、まちがった値が入ってしまっていても、ホーム・給与・打刻の画面は開ける
+    with app.app_context():
+        from ghms.db import get_db
+        db = get_db()
+        for k, v in [("cert_alert_days", "abc"), ("plan_alert_days", "1e400"), ("unit_price", "nan"),
+                     ("pay_break_default", "nan"), ("pay_max_shift_hours", "inf"), ("pay_fever", "x"),
+                     ("ins_health", "NaN"), ("pay_monthly_hours", "0"), ("full_time_hours", "-1"),
+                     ("session_timeout_min", "99999999999999999999"), ("invoice_due_day", "abc")]:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, v))
+        db.commit()
+    ym = date.today().strftime("%Y-%m")
+    for path in ["/", "/addons/check", "/payroll/", "/work/timecards", "/work/health", "/shift/", f"/billing/invoices?ym={ym}",
+                 "/settings", "/payroll/settings"]:
+        assert client.get(path).status_code == 200, path
+
+
+def test_legacy_builtin_record_columns_keep_counting(app):
+    """前の版（帰宅時支援・入院時支援が builtin）の列は、auto の列にして実績の帰・入で数え続ける。
+    事業所で足した列は消さず、様式18-1の列は「使わない」で足す"""
+    import sqlite3
+    from ghms.docs import AUTO_CODES, mark_of, seed_record_columns
+    con = sqlite3.connect(app.config["DATABASE"])
+    con.execute("DELETE FROM record_columns")
+    con.execute("DELETE FROM settings WHERE key='record_layout'")
+    con.executemany("INSERT INTO record_columns (label, sort, active, auto, builtin, mark) VALUES (?,?,1,?,?,'1')",
+                    [("日中支援", 10, "", "day"), ("帰宅時支援", 20, "", "home"), ("入院時支援", 30, "", "hosp"),
+                     ("夜間支援", 40, "stay", None), ("通院の付き添い", 50, "", None)])
+    con.commit()
+    seed_record_columns(con)
+    con.row_factory = sqlite3.Row
+    cols = {r["label"]: r for r in con.execute("SELECT * FROM record_columns")}
+    assert cols["帰宅時支援"]["auto"] == "home" and cols["帰宅時支援"]["builtin"] is None
+    assert cols["入院時支援"]["auto"] == "hosp" and cols["入院時支援"]["builtin"] is None
+    assert mark_of(cols["帰宅時支援"], "帰", None) and mark_of(cols["入院時支援"], "入", None)
+    assert not mark_of(cols["帰宅時支援"], "○", None)
+    assert "home" in AUTO_CODES and "hosp" in AUTO_CODES
+    assert cols["通院の付き添い"]["active"] == 1  # 事業所で足した列は消さない
+    assert cols["住居外利用"]["active"] == 0 and "日中支援加算" not in cols  # 足りない列は「使わない」で足す
+    assert con.execute("SELECT value FROM settings WHERE key='record_layout'").fetchone()[0] == "18-1"
+    n = con.execute("SELECT COUNT(*) FROM record_columns").fetchone()[0]
+    seed_record_columns(con)  # 2回目は何も変えない
+    assert con.execute("SELECT COUNT(*) FROM record_columns").fetchone()[0] == n
+    # 前の並びのまま（4列だけ・○なし）なら様式18-1に入れ替える
+    con.execute("DELETE FROM record_columns")
+    con.execute("DELETE FROM settings WHERE key='record_layout'")
+    con.executemany("INSERT INTO record_columns (label, sort, active, auto, builtin, mark) VALUES (?,?,1,?,?,'1')",
+                    [("日中支援", 10, "", "day"), ("帰宅時支援", 20, "", "home"), ("入院時支援", 30, "", "hosp"),
+                     ("夜間支援", 40, "stay", None)])
+    con.commit()
+    seed_record_columns(con)
+    labels = [r[0] for r in con.execute("SELECT label FROM record_columns ORDER BY sort")]
+    assert labels[0] == "住居外利用" and "帰宅時支援" not in labels and len(labels) == 10
+    con.close()
+
+
+def test_config_ini_with_percent(tmp_path, monkeypatch):
+    from ghms import runtime
+    monkeypatch.setenv("GHMS_HOME", str(tmp_path))
+    (tmp_path / "config.ini").write_text("[server]\nport = 8123\n[product]\nname = 100%サポート\n"
+                                         "update_url = https://example.com/a%20b/latest.json\n", encoding="utf-8")
+    assert runtime.load_product()["name"] == "100%サポート"
+    assert runtime.load_product()["update_url"].endswith("a%20b/latest.json")
+    assert runtime.load_config()["port"] == 8123
+    # ポートがまちがっていれば 8000（落ちない）
+    (tmp_path / "config.ini").write_text("[server]\nport = abc\n", encoding="utf-8")
+    assert runtime.load_config()["port"] == 8000
+    (tmp_path / "config.ini").write_text("[server]\nport = 70000\nlan = 1\n", encoding="utf-8")
+    assert runtime.load_config() == {"port": 8000, "lan": True}
+    # Shift-JIS（インストーラーが書く形）でも読める
+    (tmp_path / "config.ini").write_bytes("[office]\nname = ひだまり\n".encode("cp932"))
+    assert runtime.load_office()["name"] == "ひだまり"
+
+
+def test_huge_and_odd_numbers_do_not_crash(client, app):
+    # 数値の欄：無限大・とても大きい値はエラーとして画面に出す（500にしない）
+    for v in ("1e400", "inf", "nan", "1e13"):
+        r = post(client, "/m/homes/new", {"name": "テスト住居", "capacity": v})
+        html = r.get_data(as_text=True)
+        assert r.status_code == 200 and ("数値で入力" in html or "大きすぎます" in html), v
+    for v in ("99999999999999999999", "-3", "1.5"):
+        r = post(client, "/m/residents/new", {"name": "テスト", "home_id": v})
+        assert r.status_code == 200 and "値が正しくありません" in r.get_data(as_text=True), v
+    # 一覧のページ・期間・年月の値がおかしくても開ける
+    for path in ["/m/residents/?page=abc", "/m/residents/?page=99999999999999999999", "/docs/committee?days=abc",
+                 "/docs/committee?days=99999999999", "/docs/committee?days=-5", "/billing/invoices?ym=9999-12",
+                 "/billing/invoices?ym=0001-01", "/docs/menus?week=9999-12-31", "/docs/record-sheets?ym=9999-12",
+                 "/journal?date=9999-12-31", "/journal?date=0001-01-01", "/work/health?date=9999-12-31",
+                 "/m/residents/99999999999999999999", "/journal?home_id=99999999999999999999"]:
+        assert client.get(path).status_code in (200, 404), path
+    from ghms.views import parse_date, parse_ym
+    assert parse_ym("9999-12")[0] == date.today().replace(day=1)
+    assert parse_ym("0001-01")[0] == date.today().replace(day=1)
+    assert parse_date("9999-12-31") is None and parse_date("1950-04-01") == date(1950, 4, 1)
+
+
+def test_features_ignore_unknown_keys(client, app):
+    from ghms.customize import FEATURES
+    keys = [k for k, *_ in FEATURES]
+    r = post(client, "/settings/features", {"on": keys[:1] + ["nonexistent_feature", "<script>"]})
+    assert r.status_code == 302
+    with app.app_context():
+        from ghms.db import get_setting
+        off = get_setting("features_off").split(",")
+    assert set(off) == set(keys[1:])
+    assert client.get("/").status_code == 200

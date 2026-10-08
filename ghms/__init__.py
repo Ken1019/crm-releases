@@ -2,6 +2,7 @@ import os
 import secrets
 
 from flask import Flask, g
+from werkzeug.routing import IntegerConverter, ValidationError
 
 from . import db
 
@@ -17,6 +18,14 @@ def _secret_key(instance_path):
         return f.read().strip()
 
 
+class _BoundedInt(IntegerConverter):
+    def to_python(self, value):
+        n = super().to_python(value)
+        if n >= 2 ** 62:
+            raise ValidationError()
+        return n
+
+
 def _product():
     from .runtime import load_product
 
@@ -28,6 +37,7 @@ def create_app(test_config=None):
 
     data_dir = _data_dir()
     app = Flask(__name__, instance_path=os.path.abspath(data_dir))
+    app.url_map.converters["int"] = _BoundedInt  # URLのとても大きな番号は「見つかりません」にする
     os.makedirs(app.instance_path, exist_ok=True)
     app.config.update(
         DATABASE=os.path.join(app.instance_path, "ghms.sqlite3"),

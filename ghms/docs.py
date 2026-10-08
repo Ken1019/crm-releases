@@ -21,6 +21,7 @@ from . import excel
 from .auth import admin_required, log_event
 from .billing import attendance_map, in_residence, month_days, no_home_count, pick_home, residents_in_month, sync_open
 from .db import get_db, get_setting, now, set_setting
+from .forms import clamp, db_int, safe_int
 from .views import parse_date, parse_ym
 
 bp = Blueprint("docs", __name__, url_prefix="/docs")
@@ -44,7 +45,7 @@ def _week_start(d):
 def menus():
     db = get_db()
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
-    home_id = request.values.get("home_id", type=int) or (homes[0]["id"] if homes else None)
+    home_id = request.values.get("home_id", type=db_int) or (homes[0]["id"] if homes else None)
     start = _week_start(parse_date(request.values.get("week"), date.today()))
     days = [start + timedelta(days=i) for i in range(7)]
     if request.method == "POST":
@@ -85,7 +86,7 @@ def menus():
 def menus_export():
     db = get_db()
     first, last = parse_ym(request.args.get("ym"))
-    home_id = request.args.get("home_id", type=int)
+    home_id = request.args.get("home_id", type=db_int)
     home = db.execute("SELECT name FROM homes WHERE id=?", (home_id,)).fetchone() if home_id else None
     cells = {(r["date"], r["meal"]): r["text"] for r in db.execute(
         "SELECT * FROM menus WHERE home_id IS ? AND date BETWEEN ? AND ?", (home_id, first.isoformat(), last.isoformat()))}
@@ -129,17 +130,45 @@ def mark_text(col):
     return (col["mark"] or "").strip() or DEFAULT_MARK
 
 
+# 前の並び（様式18-1にする前）の4列。これと同じ名前だけのときは、様式18-1の列に入れ替えてよい
+OLD_DEFAULT_LABELS = {"日中支援", "帰宅時支援", "入院時支援", "夜間支援"}
+# 前の並びの列と、様式18-1で同じものにあたる列
+OLD_TO_18_1 = {"日中支援": "日中支援加算", "帰宅時支援": "帰宅時支援加算", "入院時支援": "入院時支援特別加算",
+               "夜間支援": "夜間支援等体制加算"}
+
+
 def seed_record_columns(con):
-    """様式18-1の列を用意する。前の並び（日中支援・夜間支援など4列）で、まだ何も入れていなければ入れ替える"""
+    """様式18-1の列を用意する。
+    - 前の版の「帰宅時支援」「入院時支援」（builtin）は、実績の「帰」「入」で自動でつく列（auto）に直す
+    - 前の並びのまま（4列の名前が同じで、まだ何も○を入れていない）なら様式18-1の列に入れ替える
+    - 事業所で名前を変えた・増やした列は消さない。様式18-1の足りない列を「使わない」で後ろに足す
+    """
+    # 前の版の自動の列（builtin home/hosp）は、いまの auto の列にする（実績の帰・入で数え続ける）
+    for kind in ("home", "hosp"):
+        con.execute("UPDATE record_columns SET auto=?, builtin=NULL WHERE builtin=?", (kind, kind))
+    con.commit()
     layout = con.execute("SELECT value FROM settings WHERE key='record_layout'").fetchone()
     if layout and layout[0] == RECORD_LAYOUT:
         return
     has_marks = con.execute("SELECT COUNT(*) FROM record_marks").fetchone()[0]
-    if not has_marks:
+    rows = con.execute("SELECT label, builtin FROM record_columns").fetchall()
+    labels = [r[0] for r in rows]
+    if not rows or (not has_marks and sorted(labels) == sorted(OLD_DEFAULT_LABELS)):
         con.execute("DELETE FROM record_columns")
         for i, (label, auto, builtin, unit) in enumerate(RECORD_DEFAULTS):
             con.execute("INSERT INTO record_columns (label, sort, active, auto, builtin, mark, unit) VALUES (?,?,1,?,?,?,?)",
                         (label, (i + 1) * 10, auto, builtin, DEFAULT_MARK, unit))
+    else:
+        # 事業所で直した列はそのまま。様式18-1の足りない列を「使わない」で足す（設定で「使う」にできる）
+        have = set(labels) | {OLD_TO_18_1[x] for x in labels if x in OLD_TO_18_1}
+        has_day = any(r[1] == "day" for r in rows)
+        mx = con.execute("SELECT COALESCE(MAX(sort), 0) FROM record_columns").fetchone()[0] or 0
+        for label, auto, builtin, unit in RECORD_DEFAULTS:
+            if label in have or (builtin == "day" and has_day):
+                continue
+            mx += 10
+            con.execute("INSERT INTO record_columns (label, sort, active, auto, builtin, mark, unit) VALUES (?,?,0,?,?,?,?)",
+                        (label, mx, auto, builtin, DEFAULT_MARK, unit))
     con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('record_layout', ?)", (RECORD_LAYOUT,))
     con.commit()
 
@@ -220,7 +249,7 @@ def record_sheet_data(first, last, rid=None):
 @admin_required
 def record_sheets():
     first, last = parse_ym(request.args.get("ym"))
-    rid = request.args.get("rid", type=int)
+    rid = request.args.get("rid", type=db_int)
     sheets, cols = record_sheet_data(first, last, rid)
     log_event("view", "record_sheets", rid, f"{first:%Y-%m} 実績記録票")
     get_db().commit()
@@ -235,7 +264,7 @@ def record_sheets_export():
     o = office()
     wb = Workbook()
     wb.remove(wb.active)
-    sheets, cols = record_sheet_data(first, last, request.args.get("rid", type=int))
+    sheets, cols = record_sheet_data(first, last, request.args.get("rid", type=db_int))
     for sh in sheets:
         r = sh["r"]
         ws = wb.create_sheet(excel.safe_sheet_title(r["name"]))
@@ -268,7 +297,7 @@ def record_columns_settings():
             mark = (request.form.get(f"mark::{cid}") or "").strip()[:3] or DEFAULT_MARK
             unit = "日" if request.form.get(f"unit::{cid}") == "日" else "回"
             db.execute("UPDATE record_columns SET label=?, sort=?, active=?, auto=?, mark=?, unit=? WHERE id=?",
-                       (label, request.form.get(f"sort::{cid}", type=int) or 0, 1 if request.form.get(f"active::{cid}") else 0,
+                       (label, safe_int(request.form.get(f"sort::{cid}"), 0, -1_000_000, 1_000_000), 1 if request.form.get(f"active::{cid}") else 0,
                         auto if auto in AUTO_KINDS else "", mark, unit, cid))
         new = (request.form.get("new") or "").strip()[:20]
         if new:
@@ -295,7 +324,7 @@ def record_marks():
     homes = db.execute("SELECT * FROM homes ORDER BY name").fetchall()
     home_id = pick_home(homes)
     cols = [c for c in record_columns() if not c["builtin"]]
-    col = next((c for c in cols if c["id"] == request.values.get("col", type=int)), cols[0] if cols else None)
+    col = next((c for c in cols if c["id"] == request.values.get("col", type=db_int)), cols[0] if cols else None)
     residents = residents_in_month(first, last, home_id)
     days = month_days(first, last)
     if col is None:
@@ -409,7 +438,7 @@ def staff_list():
 @admin_required
 def resumes():
     db = get_db()
-    sid = request.args.get("sid", type=int)
+    sid = request.args.get("sid", type=db_int)
     if sid:
         people = db.execute("SELECT * FROM staff WHERE id=?", (sid,)).fetchall()
     else:
@@ -461,7 +490,8 @@ def residents_status():
 @admin_required
 def committee():
     db = get_db()
-    since = (date.today() - timedelta(days=int(request.args.get("days", 730)))).isoformat()
+    days = clamp(request.args.get("days", 730, type=db_int), 1, 3650)
+    since = (date.today() - timedelta(days=days)).isoformat()
     meetings = db.execute("SELECT * FROM meetings WHERE date >= ? ORDER BY kind, date", (since,)).fetchall()
     trainings = db.execute("SELECT t.*, s.name AS sname FROM trainings t LEFT JOIN staff s ON s.id=t.staff_id "
                            "WHERE t.date >= ? ORDER BY t.date", (since,)).fetchall()

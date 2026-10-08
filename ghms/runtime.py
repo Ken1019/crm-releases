@@ -5,6 +5,7 @@
 """
 
 import configparser
+import logging
 import os
 import sys
 
@@ -34,25 +35,48 @@ def config_path():
     return os.path.join(base_dir(), "config.ini")
 
 
+def _parser():
+    # 「%」を特別な意味に使わない（パスワードやURLに % が入っていても、そのまま読む）
+    return configparser.ConfigParser(interpolation=None)
+
+
 def _read_ini():
     """config.ini を読む。インストーラー（Windows）は日本語をShift-JIS（cp932）で書くため、UTF-8 でなければ cp932 で読む"""
-    cp = configparser.ConfigParser()
+    path = config_path()
+    if not os.path.exists(path):
+        return _parser()
+    errors = []
     for enc in ("utf-8-sig", "cp932"):
+        cp = _parser()
         try:
-            cp.read(config_path(), encoding=enc)
+            cp.read(path, encoding=enc)
             return cp
-        except (UnicodeError, configparser.Error):
-            cp = configparser.ConfigParser()
-    return cp
+        except (UnicodeError, configparser.Error) as e:
+            errors.append(f"{enc}: {e}")
+    logging.getLogger(__name__).warning("config.ini を読めませんでした（初期の設定で動かします）: %s / %s", path, " / ".join(errors))
+    return _parser()
+
+
+DEFAULT_PORT = 8000
 
 
 def load_config():
-    """config.ini（インストーラーの選択や手で書いた設定）を読む"""
+    """config.ini（インストーラーの選択や手で書いた設定）を読む。ポートの値がまちがっていれば 8000 にする"""
     cp = _read_ini()
     sec = cp["server"] if cp.has_section("server") else {}
+    raw = str(sec.get("port", "") or "").strip()
+    port = DEFAULT_PORT
+    if raw:
+        try:
+            port = int(raw)
+            if not 1 <= port <= 65535:
+                raise ValueError(raw)
+        except ValueError:
+            logging.getLogger(__name__).warning("config.ini の port の値がまちがっています（%r）。%d を使います", raw, DEFAULT_PORT)
+            port = DEFAULT_PORT
     return {
-        "lan": str(sec.get("lan", "0")).strip() in ("1", "true", "yes"),
-        "port": int(sec.get("port", "8000") or 8000),
+        "lan": str(sec.get("lan", "0")).strip().lower() in ("1", "true", "yes"),
+        "port": port,
     }
 
 

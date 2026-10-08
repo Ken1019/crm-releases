@@ -76,6 +76,12 @@ def _setup_logging():
 
 
 def main():
+    # 設定を読む前にログを用意する（--windowed では画面に何も出ないため、まちがいはログに残す）
+    if runtime.is_installed():
+        try:
+            _setup_logging()
+        except OSError:
+            pass
     cfg = runtime.load_config()
     p = argparse.ArgumentParser()
     p.add_argument("--lan", action="store_true", default=cfg["lan"], help="LAN内の他のPCからの接続を許可する")
@@ -97,8 +103,6 @@ def main():
 
     os.environ.setdefault("GHMS_DATA_DIR", runtime.data_dir())
     os.makedirs(runtime.data_dir(), exist_ok=True)
-    if runtime.is_installed():
-        _setup_logging()
     with open(runtime.token_path(), "w", encoding="utf-8") as f:
         f.write(secrets.token_hex(24))
 
@@ -118,4 +122,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        # 画面のない起動（--windowed）でも、止まった理由をログ（logs\ghms.log）に残す
+        logging.getLogger("ghms").exception("起動できませんでした")
+        raise

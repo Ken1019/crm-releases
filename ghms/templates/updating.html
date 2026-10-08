@@ -5,14 +5,19 @@
   <h1>⏳ {{ version }} に更新しています</h1>
   <p>Windowsの確認画面が出たら「はい」を押してください。<br>終わると自動でこの画面が切り替わります（1〜2分）。</p>
   <p class="muted small" id="state">待っています…</p>
+<p id="stuck" hidden>更新が始まらない場合は、Windowsの確認（はい）を押したか確かめて、もう一度お試しください。<br>
+  <a class="btn" href="{{ url_for('system.update') }}">更新の画面にもどる</a></p>
 </div>
 <script>
 (function(){
-  var target='{{ version }}',el=document.getElementById('state'),n=0;
+  var target='{{ version }}',el=document.getElementById('state'),n=0,start=Date.now();
+  function stuck(){  // 3分たっても切り替わらないときは、待つのをやめて案内を出す
+    el.textContent='まだ更新が終わっていません。';document.getElementById('stuck').hidden=false;}
+  function next(){if(Date.now()-start>180000){stuck();}else{setTimeout(poll,3000);}}
   function poll(){fetch('/__ping',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
       if(j.version===target){el.textContent='更新が終わりました。';setTimeout(function(){location.href='/';},800);}
-      else{el.textContent='更新の準備をしています…';setTimeout(poll,3000);}})
-    .catch(function(){el.textContent='入れ替えています…（'+(++n)+'）';setTimeout(poll,3000);});}
+      else{el.textContent='更新の準備をしています…';next();}})
+    .catch(function(){el.textContent='入れ替えています…（'+(++n)+'）';next();});}
   setTimeout(poll,4000);
 })();
 </script>

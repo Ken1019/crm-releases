@@ -9,6 +9,8 @@
 
 import json
 import math
+import re
+import unicodedata
 from datetime import date, timedelta
 from decimal import ROUND_HALF_DOWN, Decimal, InvalidOperation
 
@@ -19,6 +21,7 @@ from . import excel
 from .auth import admin_required, log_event
 from .billing import compute_benefit
 from .db import get_db, get_setting, now, set_setting
+from .forms import NUM_SETTINGS, check_setting, clamp, db_int, normalize_num, safe_float
 from .views import parse_date, parse_ym
 from .work import month_summary, my_staff_id, setting_num
 
@@ -67,11 +70,15 @@ def rate(key):
 
 def pct(key):
     """料率（%）を、小数の誤差が出ないように Decimal で（例 "10.15" → 0.1015）"""
-    raw = (get_setting(key, pset(key)) or "").strip()
+    raw = normalize_num(get_setting(key, pset(key)))
+    lo, hi, _ = NUM_SETTINGS[key]
     try:
-        return Decimal(raw) / 100
-    except InvalidOperation:
-        return Decimal(pset(key)) / 100
+        v = Decimal(raw)
+        if v.is_finite() and lo <= v <= hi:
+            return v / 100
+    except (InvalidOperation, ValueError):
+        pass
+    return Decimal(pset(key)) / 100
 
 
 def half_down(x):
@@ -260,6 +267,12 @@ def _totals(data):
     return data
 
 
+def _yen(raw):
+    """明細の金額の欄。読めない値は0、0〜10億円の間におさめる"""
+    n = safe_float(raw, 0, lo=-1e15, hi=1e15)
+    return int(clamp(n, 0, 1_000_000_000))
+
+
 def load_slip(staff_id, ym):
     row = get_db().execute("SELECT * FROM payslips WHERE staff_id=? AND ym=?", (staff_id, ym)).fetchone()
     if not row:
@@ -359,14 +372,14 @@ def edit(sid, ym):
                 flash("職員の画面に明細を出しました。" if action == "share" else "職員の画面から明細を外しました。", "ok")
             log_event("payroll_" + action, "payslips", sid, ym)
         else:
-            earnings = {k: request.form.get(f"e_{k}", type=int) or 0 for k, _ in EARNINGS}
+            earnings = {k: _yen(request.form.get(f"e_{k}")) for k, _ in EARNINGS}
             if action == "recalc":
                 data = compute_pay(s, first, last, earnings)
                 flash("支給額から保険料・税を計算しなおしました（まだ保存していません。下の「保存する」を押してください）。", "ok")
                 return render_template("payroll_edit.html", s=s, ym=ym, first=first, d=data, auto=auto, slip=slip,
                                        EARNINGS=EARNINGS, DEDUCTIONS=DEDUCTIONS, WORK_ITEMS=WORK_ITEMS, hm=hm, unsaved=True)
             base = slip or auto
-            data = dict(base, earnings=earnings, deductions={k: request.form.get(f"d_{k}", type=int) or 0 for k, _ in DEDUCTIONS},
+            data = dict(base, earnings=earnings, deductions={k: _yen(request.form.get(f"d_{k}")) for k, _ in DEDUCTIONS},
                         memo=request.form.get("memo", ""), shared=False)
             status = "確定" if action == "confirm" else "下書き"
             save_slip(sid, ym, data, status)
@@ -422,7 +435,7 @@ def mine_slip(ym):
 @admin_required
 def ledger():
     """賃金台帳（1年分・職員ごとに1枚）"""
-    year = request.args.get("year", type=int) or date.today().year
+    year = clamp(request.args.get("year", type=db_int) or date.today().year, 2000, 2100)
     wb = Workbook()
     wb.remove(wb.active)
     for s in get_db().execute("SELECT * FROM staff ORDER BY kana, name"):
@@ -469,18 +482,37 @@ def settings():
               "ok" if done else "error")
         return redirect(url_for("payroll.settings"))
     if request.method == "POST":
-        for k, _, d, _ in PAY_SETTINGS:
+        bad = []
+        for k, label, d, _ in PAY_SETTINGS:
             v = (request.form.get(k) or "").strip()
-            set_setting(k, v or d)
+            if k in NUM_SETTINGS:
+                v, err = check_setting(k, v)
+                if err:  # まちがった値は保存せず、前の値のままにする
+                    bad.append(f"「{label}」は{err}")
+                    continue
+            elif k in ("pay_night_start", "pay_night_end") and v:
+                v = unicodedata.normalize("NFKC", v)
+                hm_ = re.fullmatch(r"(\d{1,2}):(\d{2})", v)
+                if not hm_ or int(hm_.group(1)) > 23 or int(hm_.group(2)) > 59:
+                    bad.append(f"「{label}」は 22:00 のように入れてください")
+                    continue
+            elif k == "pay_yakin_mode" and v not in ("1回いくら", "時間で計算"):
+                v = ""
+            elif k == "pay_leave_method" and v not in ("平均賃金", "通常の賃金"):
+                v = ""
+            set_setting(k, (v or d)[:200])
         set_setting("pay_health_required", "1" if request.form.get("pay_health_required") else "0")
         log_event("settings", "payroll", None, "給与の設定")
         get_db().commit()
-        flash("給与の設定を保存しました。", "ok")
+        if bad:
+            flash("次の項目は前の値のままにしました：" + "／".join(bad) + "。", "error")
+        else:
+            flash("給与の設定を保存しました。", "ok")
         return redirect(url_for("payroll.settings"))
     values = {k: get_setting(k, d) for k, _, d, _ in PAY_SETTINGS}
     from .presets import PREFECTURES, RATE_YEAR
 
-    return render_template("payroll_settings.html", PAY_SETTINGS=PAY_SETTINGS, values=values, PREFECTURES=PREFECTURES,
+    return render_template("payroll_settings.html", PAY_SETTINGS=PAY_SETTINGS, values=values, NUM=NUM_SETTINGS, PREFECTURES=PREFECTURES,
                            RATE_YEAR=RATE_YEAR, prefecture=get_setting("prefecture", ""),
                            health_required=get_setting("pay_health_required", "1") == "1")
 
@@ -514,7 +546,7 @@ def month_profit(first, last):
 @admin_required
 def profit():
     today = date.today()
-    fy = request.args.get("fy", type=int) or (today.year if today.month >= 4 else today.year - 1)
+    fy = clamp(request.args.get("fy", type=db_int) or (today.year if today.month >= 4 else today.year - 1), 2000, 2099)
     months = []
     for i in range(12):
         y, m = (fy, 4 + i) if i < 9 else (fy + 1, i - 8)

@@ -1,5 +1,6 @@
 """entities.py の定義から一覧・登録・編集・削除・Excel出力を共通処理で提供する。"""
 
+import math
 from datetime import date
 
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
@@ -9,6 +10,7 @@ from .auth import is_admin, require_admin
 from .customize import allowed_values, entity_on, options_for
 from .db import get_db, now
 from .entities import ENTITIES
+from .forms import DB_INT_MAX, NUM_MAX, clamp, db_int
 
 bp = Blueprint("crud", __name__, url_prefix="/m")
 
@@ -136,10 +138,20 @@ def parse_form(ent, form):
         if f["type"] in ("number", "ref"):
             try:
                 n = float(raw.replace(",", ""))
-                data[f["name"]] = int(n) if f["type"] == "ref" or n.is_integer() else n
+                if not math.isfinite(n):
+                    raise ValueError("not finite")
             except ValueError:
                 errors.append(f'「{f["label"]}」は数値で入力してください。')
                 data[f["name"]] = raw
+                continue
+            if f["type"] == "ref" and not (n.is_integer() and 0 < n < DB_INT_MAX):
+                errors.append(f'「{f["label"]}」の値が正しくありません。')
+                data[f["name"]] = None
+            elif f["type"] == "number" and abs(n) > NUM_MAX:
+                errors.append(f'「{f["label"]}」の数が大きすぎます。')
+                data[f["name"]] = raw
+            else:
+                data[f["name"]] = int(n) if f["type"] == "ref" or n.is_integer() else n
         elif f["type"] == "select" and (f.get("options") or f.get("choices")) and raw not in allowed_values(f):
             errors.append(f'「{f["label"]}」の値が不正です。')
         else:
@@ -220,7 +232,7 @@ def references_to(key, rid):
 @bp.route("/<key>/")
 def index(key):
     ent = get_entity(key)
-    page = max(int(request.args.get("page", 1) or 1), 1)
+    page = clamp(request.args.get("page", 1, type=db_int) or 1, 1, 10 ** 9)
     rows, total, date_field = query_rows(key, ent, request.args, PAGE_SIZE, (page - 1) * PAGE_SIZE)
     maps = ref_maps(ent)
     cols = [f for f in ent["fields"] if f.get("list")]

@@ -13,6 +13,7 @@ from . import excel
 from .auth import admin_required, is_admin, log_event, require_admin
 from .billing import month_days
 from .db import get_db, get_setting, now
+from .forms import clamp, db_int, finite_float, safe_int, setting_number
 from .views import parse_date, parse_ym
 
 bp = Blueprint("work", __name__, url_prefix="/work")
@@ -22,10 +23,8 @@ WEEK = "月火水木金土日"
 
 
 def setting_num(key, default):
-    try:
-        return float(get_setting(key, str(default)) or default)
-    except ValueError:
-        return float(default)
+    """数字の設定。まちがった値が保存されていても初期値を使い、決まった範囲の中におさめる（forms.NUM_SETTINGS）"""
+    return float(setting_number(key, default))
 
 
 def fever_line():
@@ -201,7 +200,7 @@ def is_unwell(h):
 
 
 def _save_health(staff_id, form, username):
-    temp = form.get("temp", type=float)
+    temp = form.get("temp", type=finite_float)
     temp = round(temp, 1) if temp is not None else None
     symptoms = "、".join(s for s in SYMPTOMS if form.get(f"sym::{s}"))
     if temp is None and not symptoms and not form.get("health_note"):
@@ -222,7 +221,7 @@ def punch(sid, action, form, username):
     if action == "in":
         if card:
             return [("error", f"すでに {card['clock_in']} に出勤しています。退勤のときは「退勤する」を押してください。")]
-        if get_setting("pay_health_required", "1") == "1" and form.get("temp", type=float) is None:
+        if get_setting("pay_health_required", "1") == "1" and form.get("temp", type=finite_float) is None:
             return [("error", "出勤の前に体温を入れてください。")]
         h = _save_health(sid, form, username)
         db.execute("INSERT INTO timecards (staff_id, date, clock_in, note, updated_by, updated_at) VALUES (?,?,?,?,?,?)",
@@ -235,9 +234,9 @@ def punch(sid, action, form, username):
         if not card:
             return [("error", "出勤の打刻が見つかりません。出勤を押し忘れたときや、長い時間がたったときは管理者に直してもらってください。")]
         out = t.strftime("%H:%M")
-        brk = form.get("break_min", type=int)
+        brk = _break_min(form.get("break_min"))
         db.execute("UPDATE timecards SET clock_out=?, break_min=?, updated_by=?, updated_at=? WHERE id=?",
-                   (out, default_break(card, out) if brk is None else max(0, brk), username, now(), card["id"]))
+                   (out, default_break(card, out) if brk is None else brk, username, now(), card["id"]))
         log_event("clock_out", "timecards", sid, out, username=username)
         msgs.append(("ok", f"{out} 退勤しました。おつかれさまでした。"))
     elif action == "health":
@@ -323,7 +322,7 @@ def kiosk():
         import secrets
 
         session["kiosk_csrf"] = secrets.token_hex(16)
-    sid = request.values.get("staff_id", type=int)
+    sid = request.values.get("staff_id", type=db_int)
     person = next((p for p in _kiosk_people() if p["s"]["id"] == sid), None) if sid else None
     if request.method == "POST" and person:
         if request.form.get("_k") != session.get("kiosk_csrf"):
@@ -382,6 +381,12 @@ def clock():
 
 
 # ---------------------------------------------------------------- タイムカード（月ごと。管理者は直せる）
+def _break_min(raw):
+    """休憩（分）。読めない値は空、0〜1440分（1日）の間におさめる"""
+    n = safe_int(raw, None)
+    return None if n is None else clamp(n, 0, 24 * 60)
+
+
 def _staff_list():
     return get_db().execute("SELECT * FROM staff WHERE status IS NULL OR status != '退職' ORDER BY kana, name").fetchall()
 
@@ -395,7 +400,7 @@ def timecards():
         require_admin()  # PINで入った管理者は、パスワードで確認してから
     admin = admin_view()
     staff_list = _staff_list() if admin else []
-    sid = request.values.get("staff_id", type=int) if admin else my_staff_id()
+    sid = request.values.get("staff_id", type=db_int) if admin else my_staff_id()
     if admin and not sid and staff_list:
         sid = staff_list[0]["id"]
     staff = db.execute("SELECT * FROM staff WHERE id=?", (sid,)).fetchone() if sid else None
@@ -418,7 +423,7 @@ def timecards():
             cout = (request.form.get(f"out_{c['id']}") or "").strip() or None
             if cout is not None and _min(cout) is None:
                 cout = c["clock_out"]
-            vals = (cin, cout, request.form.get(f"br_{c['id']}", type=int), request.form.get(f"note_{c['id']}") or "")
+            vals = (cin, cout, _break_min(request.form.get(f"br_{c['id']}")), request.form.get(f"note_{c['id']}") or "")
             if vals != (c["clock_in"], c["clock_out"], c["break_min"], c["note"] or ""):
                 db.execute("UPDATE timecards SET clock_in=?, clock_out=?, break_min=?, note=?, updated_by=?, updated_at=? WHERE id=?",
                            vals + (g.user["username"], now(), c["id"]))
@@ -428,7 +433,7 @@ def timecards():
             if _min(cin) is not None:
                 db.execute("INSERT INTO timecards (staff_id, date, clock_in, clock_out, break_min, note, updated_by, updated_at)"
                            " VALUES (?,?,?,?,?,?,?,?)", (sid, d.isoformat(), cin, request.form.get(f"out_new_{d.day}") or None,
-                                                        request.form.get(f"br_new_{d.day}", type=int), request.form.get(f"note_new_{d.day}") or "",
+                                                        _break_min(request.form.get(f"br_new_{d.day}")), request.form.get(f"note_new_{d.day}") or "",
                                                         g.user["username"], now()))
                 changed += 1
         if changed:

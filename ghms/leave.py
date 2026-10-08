@@ -15,6 +15,7 @@ from flask import Blueprint, abort, flash, g, redirect, render_template, request
 
 from .auth import admin_required, log_event
 from .db import get_db, get_setting, now
+from .forms import finite_float
 from .views import parse_date
 
 bp = Blueprint("leave", __name__, url_prefix="/leave")
@@ -237,7 +238,7 @@ def staff(sid):
         action = request.form.get("action")
         if action == "add":
             gd = parse_date(request.form.get("grant_date"))
-            n = request.form.get("days", type=float)
+            n = request.form.get("days", type=finite_float)
             if gd and n is not None:
                 db.execute("INSERT INTO leave_grants (staff_id, grant_date, days, basis, auto, updated_by, updated_at)"
                            " VALUES (?,?,?,?,0,?,?)", (sid, gd.isoformat(), n, request.form.get("basis") or "手で追加",
@@ -253,7 +254,7 @@ def staff(sid):
                     else:
                         db.execute("DELETE FROM leave_grants WHERE id=?", (r["id"],))
                     continue
-                n = request.form.get(f"days_{r['id']}", type=float)
+                n = request.form.get(f"days_{r['id']}", type=finite_float)
                 if n is not None and n != r["days"]:
                     db.execute("UPDATE leave_grants SET days=?, basis=?, auto=0, updated_by=?, updated_at=? WHERE id=?",
                                (n, (r["basis"] or "") + "（手で直した）", g.user["username"], now(), r["id"]))
