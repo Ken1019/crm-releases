@@ -156,13 +156,34 @@ def build(user_admin=True, staff_id=None, alerts=None):
                 ("まだ：" + "、".join(left[:6]) + (" ほか" if len(left) > 6 else "")) if left else "全員書きました",
                 url_for("views.journal", home_id=h["id"]), done=not left)
     if feature_on("timecard"):
-        if staff_id:
-            from .work import open_card
+        from .work import confirm_rows, open_card, punch_mode, unconfirmed_days
 
+        shift_mode = punch_mode() == "shift"
+        if staff_id and not shift_mode:
             mine = db.execute("SELECT 1 FROM timecards WHERE staff_id=? AND date=?", (staff_id, ts)).fetchone()
             add("today", "出勤の打刻と体温", "事務所のPCで名前を押してPIN", url_for("work.clock"), done=bool(mine or open_card(staff_id)))
+        rows_today = confirm_rows(today)[0] if shift_mode else []
+        if staff_id and shift_mode and any(r["s"]["id"] == staff_id for r in rows_today):
+            mine = db.execute("SELECT 1 FROM health_checks WHERE staff_id=? AND date=?", (staff_id, ts)).fetchone()
+            add("today", "体温を記録する", "勤務の前に体温と体調を入れる", url_for("work.my_health"), done=bool(mine))
+        if user_admin and shift_mode:
+            # 勤務の確定（勤務表どおりなら「出勤」、休んだら「休み」）。前の日の確定もれは急ぎ
+            left = [r["s"]["name"] for r in rows_today if not r["a"]]
+            if rows_today:
+                add("today", f"今日の勤務を確定する（{len(rows_today)}人）",
+                    ("まだ：" + "、".join(left[:6]) + (" ほか" if len(left) > 6 else "")) if left else "全員確定しました",
+                    url_for("work.confirm"), done=not left)
+            past = unconfirmed_days()
+            past.pop(ts, None)
+            if past:
+                first_day = min(past)
+                n = sum(len(v) for v in past.values())
+                add("over", f"勤務の確定をしていない日があります（{len(past)}日・{n}件）",
+                    "、".join(f"{k[5:].replace('-', '/')} {'・'.join(v[:3])}" for k, v in list(past.items())[:4]) + (" ほか" if len(past) > 4 else ""),
+                    url_for("work.confirm", date=first_day))
         if user_admin:
-            on = [r[0] for r in db.execute("SELECT DISTINCT staff_id FROM timecards WHERE date=?", (ts,))]
+            on = ([r["s"]["id"] for r in rows_today if not r["a"] or r["a"]["status"] == "work"] if shift_mode else
+                  [r[0] for r in db.execute("SELECT DISTINCT staff_id FROM timecards WHERE date=?", (ts,))])
             if on:
                 checked = {r[0] for r in db.execute("SELECT DISTINCT staff_id FROM health_checks WHERE date=?", (ts,))}
                 names = {s["id"]: s["name"] for s in db.execute("SELECT id, name FROM staff")}

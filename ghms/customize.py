@@ -26,7 +26,7 @@ FEATURES = [
     ("career", "キャリアパス・研修・人事評価", "処遇改善のキャリアパス要件の根拠にもなります",
      ["/career", "/m/career_grades", "/m/trainings", "/m/training_plans", "/m/evaluations"]),
     ("shift", "勤務表・常勤換算", "", ["/shift", "/m/shift_types"]),
-    ("timecard", "タイムカード・職員の体温", "事務所のPCで出勤・退勤を打刻。出勤のときに体温と体調を記録", ["/work"]),
+    ("timecard", "勤務の確定（出勤簿）・職員の体温", "勤務表から「出勤」「休み」を押して出勤簿を作る。職員が体温と体調を記録", ["/work"]),
     ("payroll", "給与計算・事業所の収支", "タイムカードから給与を計算、給与明細・賃金台帳。経費を記録して収支を見る",
      ["/payroll", "/m/expenses"]),
     ("addons", "加算の管理・毎月の要件チェック", "", ["/addons", "/m/addons", "/m/resident_addons"]),

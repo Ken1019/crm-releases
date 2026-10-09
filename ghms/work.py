@@ -1,5 +1,11 @@
-"""出勤タイムカードと職員の体温（健康チェック）。
+"""勤務の実績（出勤簿・タイムカード）と職員の体温（健康チェック）。
 
+勤務の実績の作り方は2つ（設定の attend_mode。画面には出さない）：
+- "shift"（初め）：管理者が勤務表を組み、その日に「出勤」（勤務表の時間で確定。時間は直せる）か
+  「休み」「有給」を押す（勤務の確定 /work/confirm）。打刻の画面は出さない。体温は職員が自分の画面で入れる
+- "punch"：事務所のPCで打刻する（/work/kiosk・/work/clock）。今は使っていないが、将来のために残してある。
+  使うときは settings に attend_mode=punch を入れる（docs/販売に向けて.md）
+打刻のとき：
 - 職員は自分の画面で「出勤する」「退勤する」を押すだけ。出勤のときに体温と体調をたずねる
 - 夜勤のように日をまたいだ勤務は、出勤した日の記録として扱う（退勤が出勤より前の時刻なら翌日）
 - 管理者は職員ごと・月ごとに打刻を直せる（直した人と日時が残る）。出勤簿をExcelで出せる
@@ -20,6 +26,11 @@ bp = Blueprint("work", __name__, url_prefix="/work")
 
 SYMPTOMS = ["せき", "のどの痛み", "鼻水", "だるさ", "頭痛", "下痢", "吐き気・おう吐", "味やにおいがわかりにくい"]
 WEEK = "月火水木金土日"
+
+
+def punch_mode():
+    """勤務の実績の作り方。"shift"＝勤務表から確定する（初め）／"punch"＝事務所のPCで打刻する（今は画面に出さない）"""
+    return "punch" if get_setting("attend_mode", "shift") == "punch" else "shift"
 
 
 def setting_num(key, default):
@@ -331,8 +342,8 @@ def kiosk():
 
     from .auth import current_device
 
-    if _timecard_off():
-        # 「使う機能」でタイムカードを止めているときは打刻できない
+    if _timecard_off() or punch_mode() != "punch":
+        # 「使う機能」でタイムカードを止めているとき・勤務表から確定するときは打刻できない
         if request.method == "POST":
             abort(403)
         return render_template("work_kiosk.html", off=True, device=None, people=[], person=None)
@@ -384,6 +395,8 @@ def kiosk():
 # ---------------------------------------------------------------- 出勤・退勤（職員の画面）
 @bp.route("/clock", methods=["GET", "POST"])
 def clock():
+    if punch_mode() != "punch":
+        return redirect(url_for("work.confirm") if admin_view() else url_for("work.my_health"))
     db = get_db()
     sid = my_staff_id()
     staff = db.execute("SELECT * FROM staff WHERE id=?", (sid,)).fetchone() if sid else None
@@ -439,6 +452,7 @@ def timecards():
         for c in month_cards(sid, first, last):
             if request.form.get(f"del_{c['id']}"):
                 db.execute("DELETE FROM timecards WHERE id=?", (c["id"],))
+                db.execute("DELETE FROM attend_days WHERE card_id=?", (c["id"],))  # 勤務の確定も「まだ」にもどす
                 changed += 1
                 continue
             cin = (request.form.get(f"in_{c['id']}") or "").strip()
@@ -553,7 +567,11 @@ def today_status():
         ((date.today() - timedelta(days=2)).isoformat(),)) if c["id"] not in forgot]
     unwell = [(names.get(h["staff_id"], "?"), h) for h in db.execute("SELECT * FROM health_checks WHERE date=? ORDER BY time", (today,))
               if is_unwell(h)]
-    return {"working": working, "unwell": unwell}
+    confirm = None
+    if punch_mode() == "shift":
+        rows, _ = confirm_rows(date.today())
+        confirm = {"total": len(rows), "done": sum(1 for r in rows if r["a"])}
+    return {"working": working, "unwell": unwell, "confirm": confirm}
 
 
 # ---------------------------------------------------------------- 勤務表（管理者が組む）とのつき合わせ
@@ -587,10 +605,11 @@ def shift_differences(staff_id, first, last):
         t = tmap.get(plan.get(key, ""))
         cs = cards.get(key, [])
         diffs = []
+        word = "打刻" if punch_mode() == "punch" else "出勤簿"
         if _is_work_type(t) and not cs:
-            diffs.append(("打刻なし", f"勤務表は「{t['name']}」ですが打刻がありません"))
+            diffs.append(("打刻なし" if word == "打刻" else "確定なし", f"勤務表は「{t['name']}」ですが{word}がありません"))
         elif cs and not _is_work_type(t):
-            diffs.append(("予定外", f"勤務表は「{t['name'] if t else '空欄'}」ですが {cs[0]['clock_in'] or '時刻なし'} に打刻があります"))
+            diffs.append(("予定外", f"勤務表は「{t['name'] if t else '空欄'}」ですが {cs[0]['clock_in'] or '時刻なし'} に{word}があります"))
         elif cs and t:
             first_in = min((_min(c["clock_in"]) for c in cs if _min(c["clock_in"]) is not None), default=None)
             ps, pe = _min(t["start"]), _min(t["end"])
@@ -643,3 +662,247 @@ def my_shift():
     return render_template("work_my_shift.html", rows=rows, first=first, ym=first.strftime("%Y-%m"), linked=bool(sid),
                            leave=my_balance(sid) if sid else None,
                            hours=hours, today=date.today(), types=list(tmap.values()))
+
+
+# ---------------------------------------------------------------- 勤務の確定（勤務表から。打刻のかわり）
+CONFIRM_NOTE = "勤務表で確定"
+
+
+def off_kinds():
+    from .leave import LEAVE_CODE
+
+    return {"休": "休み", LEAVE_CODE: "有給"}
+
+
+def shift_break(t):
+    """勤務の種類の休憩（分）：開始〜終了の長さから「勤務時間（休憩を除く）」を引いた分。
+    勤務時間が入っていない（0の宿直など）ときは、ふつうの休憩（6時間をこえたら設定の分）"""
+    s, e = _min(t["start"]), _min(t["end"])
+    if s is None or e is None:
+        return 0
+    span = (e - s) % 1440 or 1440
+    hours = t["hours"]
+    if hours:
+        return clamp(span - round(float(hours) * 60), 0, span)
+    return int(setting_num("pay_break_default", 60)) if span > 360 else 0
+
+
+def attend_of(staff_id, d):
+    return get_db().execute("SELECT * FROM attend_days WHERE staff_id=? AND date=?", (staff_id, d)).fetchone()
+
+
+def _set_shift(staff_id, d, code, username):
+    db = get_db()
+    if code:
+        db.execute("INSERT OR REPLACE INTO shifts (staff_id, date, code, updated_by, updated_at) VALUES (?,?,?,?,?)",
+                   (staff_id, d, code, username, now()))
+    else:
+        db.execute("DELETE FROM shifts WHERE staff_id=? AND date=?", (staff_id, d))
+
+
+def undo_confirm(staff_id, d, username):
+    """確定を取り消す：作ったタイムカードを消し、休み・有給で直した勤務表を元にもどす"""
+    db = get_db()
+    a = attend_of(staff_id, d)
+    if not a:
+        return False
+    if a["card_id"]:
+        db.execute("DELETE FROM timecards WHERE id=?", (a["card_id"],))
+    if a["status"] != "work" or a["planned_code"] != (planned_shifts_on(staff_id, d) or ""):
+        _set_shift(staff_id, d, a["planned_code"] or "", username)
+    db.execute("DELETE FROM attend_days WHERE staff_id=? AND date=?", (staff_id, d))
+    return True
+
+
+def planned_shifts_on(staff_id, d):
+    r = get_db().execute("SELECT code FROM shifts WHERE staff_id=? AND date=?", (staff_id, d)).fetchone()
+    return r["code"] if r else None
+
+
+def confirm_work(staff_id, d, start, end, brk, username, code=None):
+    """出勤で確定：その時間のタイムカードを作る。code（勤務表にない日に足すとき）は勤務表にも入れる"""
+    db = get_db()
+    undo_confirm(staff_id, d, username)
+    planned = planned_shifts_on(staff_id, d) or ""
+    if code and code != planned:
+        _set_shift(staff_id, d, code, username)
+    cur = db.execute("INSERT INTO timecards (staff_id, date, clock_in, clock_out, break_min, note, updated_by, updated_at)"
+                     " VALUES (?,?,?,?,?,?,?,?)", (staff_id, d, start, end, brk, CONFIRM_NOTE, username, now()))
+    db.execute("INSERT INTO attend_days (staff_id, date, status, planned_code, card_id, confirmed_by, confirmed_at) VALUES (?,?,?,?,?,?,?)",
+               (staff_id, d, "work", planned, cur.lastrowid, username, now()))
+
+
+def confirm_off(staff_id, d, kind, username):
+    """休み・有給で確定：勤務表をそのように直す（元の予定は覚えておき、取り消すと元にもどす）"""
+    db = get_db()
+    undo_confirm(staff_id, d, username)
+    planned = planned_shifts_on(staff_id, d) or ""
+    _set_shift(staff_id, d, kind, username)
+    db.execute("INSERT INTO attend_days (staff_id, date, status, planned_code, card_id, confirmed_by, confirmed_at) VALUES (?,?,?,?,?,?,?)",
+               (staff_id, d, "paid" if kind == off_kinds_paid() else "off", planned, None, username, now()))
+
+
+def off_kinds_paid():
+    from .leave import LEAVE_CODE
+
+    return LEAVE_CODE
+
+
+def confirm_rows(d):
+    """その日の勤務表と確定の状態。勤務の日（開始の時間がある種類）と、確定した人を出す"""
+    db = get_db()
+    tmap = shift_types_map()
+    ds = d.isoformat()
+    plan = {r["staff_id"]: r["code"] for r in db.execute("SELECT staff_id, code FROM shifts WHERE date=?", (ds,))}
+    att = {r["staff_id"]: r for r in db.execute("SELECT * FROM attend_days WHERE date=?", (ds,))}
+    cards = {r["id"]: r for r in db.execute("SELECT * FROM timecards WHERE date=?", (ds,))}
+    temps = {}
+    for h in db.execute("SELECT * FROM health_checks WHERE date=? ORDER BY time", (ds,)):
+        temps.setdefault(h["staff_id"], h)
+    rows = []
+    for s in _staff_list():
+        a = att.get(s["id"])
+        code = plan.get(s["id"], "")
+        t = tmap.get(code)
+        orig = tmap.get(a["planned_code"]) if a else t  # 休み・有給で確定した日は、元の予定
+        if not a and not _is_work_type(t):
+            continue
+        card = cards.get(a["card_id"]) if a and a["card_id"] else None
+        rows.append({"s": s, "code": code, "t": t, "orig": orig, "a": a, "card": card, "health": temps.get(s["id"]),
+                     "brk": shift_break(orig) if _is_work_type(orig) else 0})
+    others = [s for s in _staff_list() if s["id"] not in {r["s"]["id"] for r in rows}]
+    return rows, others
+
+
+def unconfirmed_days(days=31):
+    """今日までで、勤務の日（勤務表）なのに確定していない日：{日付: [職員の名前]}。使い始めた日より前は見ない"""
+    from .compliance import before_start
+
+    db = get_db()
+    today = date.today()
+    since = (today - timedelta(days=days)).isoformat()
+    work_codes = [c for c, t in shift_types_map().items() if _is_work_type(t)]
+    if not work_codes:
+        return {}
+    q = ",".join("?" * len(work_codes))
+    out = {}
+    for r in db.execute(f"SELECT sh.date, st.name FROM shifts sh JOIN staff st ON st.id=sh.staff_id "
+                        f"WHERE sh.code IN ({q}) AND sh.date BETWEEN ? AND ? AND (st.status IS NULL OR st.status != '退職') "
+                        "AND NOT EXISTS (SELECT 1 FROM attend_days a WHERE a.staff_id=sh.staff_id AND a.date=sh.date) "
+                        "ORDER BY sh.date, st.kana", work_codes + [since, today.isoformat()]):
+        if before_start(parse_date(r["date"])):
+            continue
+        out.setdefault(r["date"], []).append(r["name"])
+    return out
+
+
+def _hhmm(raw, default):
+    v = (raw or "").strip()
+    return v if _min(v) is not None and len(v) <= 5 else default
+
+
+@bp.route("/confirm", methods=["GET", "POST"])
+@admin_required
+def confirm():
+    """勤務の確定：勤務表どおりに働いたら「出勤」、休んだら「休み」「有給」。時間がちがうときは直してから「出勤」"""
+    db = get_db()
+    today = date.today()
+    d = parse_date(request.values.get("date"), today)
+    if d > today:
+        d = today
+    ds = d.isoformat()
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        sid = request.form.get("staff_id", type=db_int)
+        staff = db.execute("SELECT * FROM staff WHERE id=?", (sid,)).fetchone() if sid else None
+        tmap = shift_types_map()
+        user = g.user["username"]
+        msg = None
+        if action == "all":
+            rows, _ = confirm_rows(d)
+            n = 0
+            for r in rows:
+                if not r["a"] and _is_work_type(r["t"]):
+                    confirm_work(r["s"]["id"], ds, r["t"]["start"], r["t"]["end"], shift_break(r["t"]), user)
+                    n += 1
+            msg = f"{n}人を勤務表どおりに確定しました。"
+            log_event("attend_confirm", "attend_days", None, f"{ds} まとめて {n}人")
+        elif staff is None:
+            abort(400)
+        elif action in ("work", "add"):
+            code = request.form.get("code", "") if action == "add" else None
+            if action == "add":
+                t = tmap.get(code or "")
+            else:  # 休み・有給で確定したあとに出勤へ直すときは、元の予定の時間
+                a = attend_of(sid, ds)
+                t = tmap.get((a["planned_code"] if a else planned_shifts_on(sid, ds)) or "")
+            if action == "add" and not _is_work_type(t):
+                flash("勤務の種類を選んでください。", "error")
+                return redirect(url_for("work.confirm", date=ds))
+            start = _hhmm(request.form.get("start"), t["start"] if t else None)
+            end = _hhmm(request.form.get("end"), t["end"] if t else None)
+            if start is None or end is None:
+                flash(f"{staff['name']} さん：始まりと終わりの時間を入れてください。", "error")
+                return redirect(url_for("work.confirm", date=ds))
+            brk = _break_min(request.form.get("break_min"))
+            if brk is None:
+                brk = shift_break(t) if _is_work_type(t) else default_break({"clock_in": start}, end)
+            confirm_work(sid, ds, start, end, brk, user, code=code)
+            temp = request.form.get("temp", type=finite_float)
+            if temp is not None:
+                db.execute("INSERT INTO health_checks (staff_id, date, time, temp, symptoms, note, updated_by, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                           (sid, ds, start, round(temp, 1), "", "勤務の確定で記録", user, now()))
+            msg = f"{staff['name']} さん：{start}〜{end} の出勤で確定しました。"
+            log_event("attend_confirm", "attend_days", sid, f"{ds} 出勤 {start}〜{end}")
+        elif action.startswith("off:"):
+            kind = action[4:]
+            kinds = off_kinds()
+            if kind not in kinds:
+                abort(400)
+            if kind not in tmap:
+                flash(f"勤務の種類に「{kind}」がありません。「勤務の種類」に追加してください。", "error")
+                return redirect(url_for("work.confirm", date=ds))
+            confirm_off(sid, ds, kind, user)
+            msg = f"{staff['name']} さん：{kinds[kind]}で確定しました（勤務表も「{kind}」にしました）。"
+            log_event("attend_confirm", "attend_days", sid, f"{ds} {kinds[kind]}")
+        elif action == "undo":
+            if undo_confirm(sid, ds, user):
+                msg = f"{staff['name']} さんの確定を取り消しました。"
+                log_event("attend_undo", "attend_days", sid, ds)
+        else:
+            abort(400)
+        db.commit()
+        if msg:
+            flash(msg, "ok")
+        return redirect(url_for("work.confirm", date=ds) + (f"#s{sid}" if sid else ""))
+    rows, others = confirm_rows(d)
+    work_types = [t for t in shift_types_map().values() if _is_work_type(t)]
+    left = unconfirmed_days()
+    left.pop(ds, None)
+    return render_template("work_confirm.html", d=d, rows=rows, others=others, work_types=work_types, WEEK=WEEK, hm=hm,
+                           kinds=off_kinds(), left=left, today=today, fever=fever_line(), work_minutes=work_minutes,
+                           prev=(d - timedelta(days=1)).isoformat(), next=(d + timedelta(days=1)).isoformat() if d < today else None)
+
+
+@bp.route("/my-health", methods=["GET", "POST"])
+def my_health():
+    """職員：自分の体温・体調を記録する（勤務表から確定するときの、打刻のかわり）"""
+    sid = my_staff_id()
+    db = get_db()
+    if request.method == "POST":
+        if not sid:
+            abort(400)
+        if _save_health(sid, request.form, g.user["username"]) is None:
+            flash("体温を入れてください。", "error")
+        else:
+            h = health_of(sid, date.today().isoformat())[-1]
+            if is_unwell(h):
+                flash("体調がよくないようです。勤務の前に管理者に連絡してください。管理者のホームにもお知らせが出ます。", "error")
+            else:
+                flash("体温・体調を記録しました。", "ok")
+            log_event("health", "health_checks", sid)
+        db.commit()
+        return redirect(url_for("work.my_health"))
+    rows = db.execute("SELECT * FROM health_checks WHERE staff_id=? ORDER BY date DESC, time DESC LIMIT 60", (sid,)).fetchall() if sid else []
+    return render_template("work_my_health.html", rows=rows, linked=bool(sid), SYMPTOMS=SYMPTOMS, fever=fever_line(),
+                           today_health=health_of(sid, date.today().isoformat()) if sid else [])

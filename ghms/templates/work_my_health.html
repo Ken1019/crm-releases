@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block title %}体温の記録{% endblock %}
+{% block content %}
+<h1>🌡️ 体温・体調の記録</h1>
+{% if not linked %}<div class="card"><p>このログインが職員の情報とつながっていません。管理者に連絡してください。</p></div>
+{% else %}
+<p class="guide">勤務の日は、勤務の前に体温を入れてください。{{ fever }}℃以上や体調がよくないときは、管理者に連絡してください。</p>
+{% if today_health %}<p class="flash ok">今日は {{ today_health[-1]['time'] }} に {{ '%.1f'|format(today_health[-1]['temp']) if today_health[-1]['temp'] else '' }}℃ と記録しています。</p>{% endif %}
+<form method="post" class="card form">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <label><span>体温（℃）</span><input type="number" name="temp" step="0.1" min="34" max="42" inputmode="decimal" placeholder="36.5" required></label>
+  <fieldset><legend>体調（あてはまるものだけ）</legend>
+    {% for s in SYMPTOMS %}<label class="check"><input type="checkbox" name="sym::{{ s }}" value="1"> {{ s }}</label>{% endfor %}</fieldset>
+  <label><span>メモ</span><input name="health_note"></label>
+  <div class="actions"><button class="btn primary big">✔ 記録する</button></div>
+</form>
+<div class="tablewrap card"><table class="list">
+  <thead><tr><th>日付</th><th>時刻</th><th>体温</th><th>体調</th></tr></thead>
+  {% for h in rows %}<tr><td>{{ h['date'] }}</td><td>{{ h['time'] }}</td><td>{% if (h['temp'] or 0) >= fever %}<span class="pill ng">{{ '%.1f'|format(h['temp']) }}</span>{% else %}{{ '%.1f'|format(h['temp']) if h['temp'] else '' }}{% endif %}</td><td>{{ h['symptoms'] or '' }}</td></tr>
+  {% else %}<tr><td colspan="4" class="empty">まだ記録がありません。</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+{% endblock %}

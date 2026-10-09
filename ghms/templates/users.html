@@ -91,7 +91,7 @@
     <label><span>はじめのPIN（4桁の数字）</span><input name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" class="w5">
       <small class="muted">入れておくと、事務所のPCの打刻の画面ですぐ使えます。本人に伝えてください（本人が「パスワード変更」の画面で変えられます）。「1234」「1111」のようなPINは使えません。</small></label>
     <label><span>職員の情報</span><select name="staff_id"><option value="">（あとで）</option>{% for s in staff %}<option value="{{ s['id'] }}">{{ s['name'] }}</option>{% endfor %}</select>
-      <small class="muted">つなぐと、その人のタイムカード・体温・給与明細になります。</small></label>
+      <small class="muted">つなぐと、その人の出勤簿・体温・給与明細になります。</small></label>
     <div class="actions wide"><button class="btn primary">＋ 追加する</button></div>
   </form>
 </section>

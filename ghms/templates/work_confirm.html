@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block title %}勤務の確定{% endblock %}
+{% block content %}
+<h1>✅ 勤務の確定（{{ d.month }}月{{ d.day }}日・{{ WEEK[d.weekday()] }}）</h1>
+<form method="get" class="filters card">
+  <a class="btn" href="{{ url_for('work.confirm', date=prev) }}">◀ 前の日</a>
+  <input type="date" name="date" value="{{ d.isoformat() }}" max="{{ today.isoformat() }}" onchange="this.form.submit()" aria-label="日付">
+  {% if next %}<a class="btn" href="{{ url_for('work.confirm', date=next) }}">次の日 ▶</a>{% endif %}
+  <a class="btn" href="{{ url_for('shift.index', ym=d.strftime('%Y-%m')) }}">📅 勤務表</a>
+</form>
+<p class="guide">勤務表どおりに働いたら<b>「出勤」</b>、休んだら<b>「休み」</b>か<b>「有給」</b>を押すだけです。
+  遅刻・早退・残業のときは、時間を直してから「出勤」を押してください。確定した時間が出勤簿になり、給与の計算に使われます。</p>
+
+{% if left %}<p class="flash error">確定していない日があります：
+  {% for day, names in left.items() %}<a href="{{ url_for('work.confirm', date=day) }}">{{ day[5:].replace('-', '/') }}（{{ names|join('、') }}）</a>{{ '、' if not loop.last }}{% endfor %}</p>{% endif %}
+
+{% set pending = rows|rejectattr('a')|list %}
+{% if pending %}
+<form method="post" class="card" onsubmit="return confirm('まだ確定していない{{ pending|length }}人を、勤務表どおりの時間で「出勤」にします。よろしいですか？')">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="date" value="{{ d.isoformat() }}"><input type="hidden" name="action" value="all">
+  <button class="btn primary big">✅ 残りの{{ pending|length }}人を、勤務表どおりにまとめて確定</button>
+</form>
+{% endif %}
+
+<div class="tablewrap card"><table class="list">
+  <thead><tr><th>職員</th><th>勤務表</th><th>状態</th><th>始まり</th><th>終わり</th><th>休憩（分）</th><th>体温</th><th></th></tr></thead>
+  {% for r in rows %}{% set t = r.orig %}{% set f = 'c' ~ r.s['id'] %}
+  <tr id="s{{ r.s['id'] }}">
+    <td><b>{{ r.s['name'] }}</b></td>
+    <td class="nowrap">{{ t['name'] if t else '—' }}{% if t and t['start'] %}<br><small class="muted">{{ t['start'] }}〜{{ t['end'] }}</small>{% endif %}</td>
+    <td class="nowrap">{% if not r.a %}<span class="pill warn">まだ</span>
+      {% elif r.a['status'] == 'work' %}<span class="pill ok">出勤</span>{% if r.card %}<br><small>{{ r.card['clock_in'] }}〜{{ r.card['clock_out'] }}{% set w = work_minutes(r.card) %}{% if w %}（実働 {{ hm(w.total) or '0:00' }}）{% endif %}</small>{% endif %}
+      {% else %}<span class="pill">{{ '有給' if r.a['status'] == 'paid' else '休み' }}</span>{% endif %}</td>
+    <td><input form="{{ f }}" type="time" name="start" value="{{ r.card['clock_in'] if r.card else (t['start'] if t else '') }}" aria-label="始まり"></td>
+    <td><input form="{{ f }}" type="time" name="end" value="{{ r.card['clock_out'] if r.card else (t['end'] if t else '') }}" aria-label="終わり"></td>
+    <td><input form="{{ f }}" type="number" name="break_min" value="{{ r.card['break_min'] if r.card and r.card['break_min'] is not none else r.brk }}" min="0" class="w5" aria-label="休憩"></td>
+    <td>{% if r.health %}<span class="{{ 'pill ng' if (r.health['temp'] or 0) >= fever or r.health['symptoms'] }}">{{ '%.1f'|format(r.health['temp']) if r.health['temp'] else '' }}{{ ' ' ~ r.health['symptoms'] if r.health['symptoms'] }}</span>
+      {% else %}<input form="{{ f }}" type="number" name="temp" step="0.1" min="34" max="42" class="w5" placeholder="36.5" aria-label="体温">{% endif %}</td>
+    <td class="nowrap">
+      <form id="{{ f }}" method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="date" value="{{ d.isoformat() }}">
+        <input type="hidden" name="staff_id" value="{{ r.s['id'] }}">
+      <button class="btn primary" name="action" value="work">{{ '出勤に直す' if r.a and r.a['status'] != 'work' else ('時間を直す' if r.a else '出勤') }}</button>
+      {% for k, label in kinds.items() %}{% if not r.a or r.a['status'] == 'work' or (r.a['status'] == 'paid') != (label == '有給') %}
+      <button class="btn" name="action" value="off:{{ k }}">{{ label }}</button>{% endif %}{% endfor %}
+      {% if r.a %}<button class="btn danger" name="action" value="undo">取り消す</button>{% endif %}
+      </form>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="8" class="empty">この日の勤務表に、勤務の人がいません。<a href="{{ url_for('shift.index', ym=d.strftime('%Y-%m')) }}">勤務表</a>に入れるか、下で足してください。</td></tr>
+  {% endfor %}
+</table></div>
+
+{% if others and work_types %}
+<section class="card">
+  <h2>➕ 勤務表にない人が働いたとき</h2>
+  <form method="post" class="filters">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="date" value="{{ d.isoformat() }}"><input type="hidden" name="action" value="add">
+    <select name="staff_id" aria-label="職員">{% for s in others %}<option value="{{ s['id'] }}">{{ s['name'] }}</option>{% endfor %}</select>
+    <select name="code" aria-label="勤務の種類">{% for t in work_types %}<option value="{{ t['code'] }}">{{ t['name'] }}（{{ t['start'] }}〜{{ t['end'] }}）</option>{% endfor %}</select>
+    <input type="time" name="start" aria-label="始まり（空なら勤務の種類の時間）"> 〜 <input type="time" name="end" aria-label="終わり">
+    <button class="btn primary">✅ 出勤で確定（勤務表にも入れる）</button>
+  </form>
+  <p class="muted small">時間を空にすると、選んだ勤務の種類の時間で確定します。</p>
+</section>
+{% endif %}
+{% endblock %}

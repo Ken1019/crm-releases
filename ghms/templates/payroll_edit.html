@@ -13,8 +13,8 @@
     <table class="list">{% for k, label, unit in WORK_ITEMS %}<tr><th>{{ label }}</th><td class="num">{% if k in ('hours', 'ot_h', 'night_h') %}{{ hm(d.work[k]) }}{% else %}{{ d.work[k] }}{{ unit }}{% endif %}</td></tr>{% endfor %}</table>
     {% for w in d.warnings or [] %}<p class="flash error">{{ w }}</p>{% endfor %}
     {% for w in notes or [] %}<p class="flash warn">{{ w }}　<a href="{{ url_for('crud.edit', key='staff', rid=s['id']) }}">職員の情報を直す</a></p>{% endfor %}
-    {% if d.missing %}<p class="flash error">退勤の打刻がない日が {{ d.missing }}回あります。<a href="{{ url_for('work.timecards', ym=ym, staff_id=s['id']) }}">タイムカードを直す</a></p>{% endif %}
-    <p><a href="{{ url_for('work.timecards', ym=ym, staff_id=s['id']) }}">📅 タイムカードを見る</a></p></section>
+    {% if d.missing %}<p class="flash error">退勤の打刻がない日が {{ d.missing }}回あります。<a href="{{ url_for('work.timecards', ym=ym, staff_id=s['id']) }}">出勤簿を直す</a></p>{% endif %}
+    <p><a href="{{ url_for('work.timecards', ym=ym, staff_id=s['id']) }}">📅 出勤簿を見る</a></p></section>
   <section class="card"><h2>支給</h2>
     <table class="list">{% for k, label in EARNINGS %}<tr><th>{{ label }}</th><td><input type="number" name="e_{{ k }}" value="{{ d.earnings[k] }}" class="num w8"{{ ' readonly' if locked }}>{% if auto.earnings[k] != d.earnings[k] %}<br><small class="muted">自動：{{ '{:,}'.format(auto.earnings[k]) }}</small>{% endif %}</td></tr>{% endfor %}
       <tr class="total"><th>総支給額</th><td class="num"><b>{{ '{:,}'.format(d.gross) }}</b></td></tr></table></section>

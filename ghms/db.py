@@ -83,6 +83,9 @@ def init_db(path):
     con.execute("CREATE TABLE IF NOT EXISTS payslips (staff_id INTEGER, ym TEXT, data TEXT, gross INTEGER, deductions INTEGER,"
                 " net INTEGER, status TEXT, updated_by TEXT, updated_at TEXT, PRIMARY KEY (staff_id, ym))")
     _ensure_columns(con, "users", {"staff_id": "INTEGER"})
+    # 勤務の確定（勤務表から：出勤＝勤務表の時間でタイムカードを作る／休み・有給＝勤務表をそのように直す）
+    con.execute("CREATE TABLE IF NOT EXISTS attend_days (staff_id INTEGER, date TEXT, status TEXT, planned_code TEXT, card_id INTEGER,"
+                " confirmed_by TEXT, confirmed_at TEXT, PRIMARY KEY (staff_id, date))")
     con.execute("CREATE TABLE IF NOT EXISTS todo_done (key TEXT, period TEXT, done_by TEXT, done_at TEXT, PRIMARY KEY (key, period))")
     con.execute("CREATE TABLE IF NOT EXISTS leave_grants (id INTEGER PRIMARY KEY, staff_id INTEGER, grant_date TEXT, days REAL,"
                 " basis TEXT, auto INTEGER, updated_by TEXT, updated_at TEXT)")  # ログインする人と職員の情報をつなぐ

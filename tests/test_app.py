@@ -45,6 +45,13 @@ def staff_client(admin, app, username="worker"):
     return c
 
 
+def use_punch(app):
+    with app.app_context():
+        from ghms.db import get_db, set_setting
+        set_setting("attend_mode", "punch")
+        get_db().commit()
+
+
 def post(client, path, data):
     data = dict(data, _csrf=csrf(client))
     return client.post(path, data=data)
@@ -856,6 +863,7 @@ def test_activities_with_participants_and_birthdays(client):
 
 # ---------------------------------------------------------------- タイムカード・打刻・給与
 def test_timecard_kiosk_and_payroll(client, app):
+    use_punch(app)  # 事務所のPCで打刻するしかた（今は画面に出さない）
     post(client, "/m/staff/new", {"name": "佐藤 一郎", "status": "在籍", "pay_type": "時給", "hourly_wage": "1200",
                                   "night_allowance": "5000", "employment_insurance": "1",
                                   "commute_type": "1日あたり×出勤日数", "commute": "300"})
@@ -960,7 +968,7 @@ def test_compliance_warnings_on_home(client, app):
     # 職員の画面：管理者むけのお知らせ・メニューは出ない
     staff = staff_client(client, app)
     page = staff.get("/").get_data(as_text=True)
-    assert "出勤する" in page and "業務日誌がない日" in page
+    assert "体温を記録する" in page and "出勤する" not in page and "業務日誌がない日" in page
     assert "実地指導チェック" not in page and "受給者証番号" not in page and "収支" not in page
     assert staff.get("/compliance/").status_code == 403
 
@@ -982,9 +990,9 @@ def test_shift_view_for_staff_and_differences(client, app):
     with app.test_request_context():
         diffs = shift_differences(1, _d(2026, 9, 1), _d(2026, 9, 30))
     kinds = {k: [x[0] for x in v] for k, v in diffs.items()}
-    assert kinds == {"2026-09-01": ["遅刻"], "2026-09-02": ["打刻なし"], "2026-09-05": ["予定外"]}
+    assert kinds == {"2026-09-01": ["遅刻"], "2026-09-02": ["確定なし"], "2026-09-05": ["予定外"]}
     page = client.get("/work/timecards?ym=2026-09&staff_id=1").get_data(as_text=True)
-    assert "遅刻" in page and "打刻なし" in page and "予定外" in page and "日勤" in page
+    assert "遅刻" in page and "確定なし" in page and "予定外" in page and "日勤" in page
     # 職員は自分の勤務表を見られる（変えられない）
     page = staff.get("/work/my-shift?ym=2026-09").get_data(as_text=True)
     assert "日勤" in page and "夜勤" in page and "16:00〜10:00" in page
@@ -1193,6 +1201,7 @@ def test_leave_part_table_and_deleted_grant_stays(client, app):
 
 
 def test_kiosk_failures_do_not_lock_password_login(client, app):
+    use_punch(app)  # 事務所のPCで打刻するしかた（今は画面に出さない）
     post(client, "/m/staff/new", {"name": "佐藤 一郎", "status": "在籍"})
     post(client, "/m/staff/new", {"name": "管理 花子", "status": "在籍"})
     staff = staff_client(client, app)
@@ -1221,6 +1230,7 @@ def test_kiosk_failures_do_not_lock_password_login(client, app):
 
 
 def test_kiosk_closed_when_timecard_feature_off(client, app):
+    use_punch(app)  # 事務所のPCで打刻するしかた（今は画面に出さない）
     with app.app_context():
         from ghms.db import set_setting
         set_setting("features_off", "timecard")
@@ -1775,6 +1785,7 @@ def test_benefit_counts_night_support_from_record_sheet(client, app):
 
 
 def test_forgotten_clock_out_then_new_clock_in(client, app):
+    use_punch(app)  # 事務所のPCで打刻するしかた（今は画面に出さない）
     from datetime import datetime, timedelta
 
     from werkzeug.datastructures import MultiDict
@@ -1866,6 +1877,7 @@ def test_journal_lists_residents_living_there_on_that_day(client):
 
 
 def test_admin_sets_initial_pin(client, app):
+    use_punch(app)  # 事務所のPCで打刻するしかた（今は画面に出さない）
     post(client, "/m/staff/new", {"name": "新人 さん", "status": "在籍"})
     post(client, "/users", {"action": "add", "username": "newbie", "password": "temppass1", "role": "staff", "staff_id": "1",
                             "pin": "1234"})   # 推測されやすいPINはだめ
@@ -2024,3 +2036,99 @@ def test_data_dir_from_config(tmp_path, monkeypatch):
     assert runtime.data_dir() == str(chosen)
     (tmp_path / "config.ini").write_text("[data]\ndir = relative\\path\n", encoding="cp932")
     assert runtime.data_dir() == str(tmp_path / "data")
+
+
+# ---------------------------------------------------------------- 勤務の確定（勤務表から。打刻のかわり）
+def test_attend_confirm_from_shift(client, app):
+    from datetime import timedelta
+
+    for n in ("確定一郎", "確定花子", "応援三郎"):
+        post(client, "/m/staff/new", {"name": n, "status": "在籍"})
+    today = date.today()
+    ts, ys = today.isoformat(), (today - timedelta(days=1)).isoformat()
+    with app.app_context():
+        from ghms.db import get_db
+        db = get_db()
+        ids = {r["name"]: r["id"] for r in db.execute("SELECT id, name FROM staff")}
+        for sid, d, code in [(ids["確定一郎"], ts, "日"), (ids["確定花子"], ts, "日"), (ids["確定一郎"], ys, "夜")]:
+            db.execute("INSERT INTO shifts (staff_id, date, code) VALUES (?,?,?)", (sid, d, code))
+        db.commit()
+    a, b, c = ids["確定一郎"], ids["確定花子"], ids["応援三郎"]
+    home = client.get("/").get_data(as_text=True)
+    assert "今日の勤務を確定する（2人）" in home and "勤務の確定をしていない日があります" in home
+    # 打刻の画面は出さない（しくみは残してある）
+    assert "出勤・退勤の打刻はこちら" not in app.test_client().get("/login").get_data(as_text=True)
+    assert client.get("/work/clock").status_code == 302
+    page = client.get(f"/work/confirm?date={ts}").get_data(as_text=True)
+    assert "確定一郎" in page and "応援三郎" in page  # 応援三郎は「勤務表にない人」に出る
+
+    def rows(sql, *args):
+        with app.app_context():
+            from ghms.db import get_db
+            return get_db().execute(sql, args).fetchall()
+
+    # 出勤：勤務表の時間（日勤 9:00〜18:00・勤務8時間→休憩60分）で出勤簿ができる
+    post(client, "/work/confirm", {"date": ts, "staff_id": a, "action": "work", "start": "", "end": "", "break_min": "", "temp": "36.4"})
+    card = rows("SELECT * FROM timecards WHERE staff_id=? AND date=?", a, ts)[0]
+    assert (card["clock_in"], card["clock_out"], card["break_min"]) == ("09:00", "18:00", 60)
+    assert rows("SELECT temp FROM health_checks WHERE staff_id=?", a)[0]["temp"] == 36.4
+    # 時間を直す（残業）：同じ日のタイムカードは1つのまま
+    post(client, "/work/confirm", {"date": ts, "staff_id": a, "action": "work", "start": "09:00", "end": "19:30", "break_min": "60"})
+    cs = rows("SELECT * FROM timecards WHERE staff_id=? AND date=?", a, ts)
+    assert len(cs) == 1 and cs[0]["clock_out"] == "19:30"
+    # 休み：勤務表を「休」に直し、出勤簿は作らない。取り消すと元の勤務表にもどる
+    post(client, "/work/confirm", {"date": ts, "staff_id": b, "action": "off:休"})
+    assert rows("SELECT code FROM shifts WHERE staff_id=? AND date=?", b, ts)[0]["code"] == "休"
+    assert not rows("SELECT * FROM timecards WHERE staff_id=?", b)
+    assert "全員確定しました" in client.get("/").get_data(as_text=True)
+    post(client, "/work/confirm", {"date": ts, "staff_id": b, "action": "undo"})
+    assert rows("SELECT code FROM shifts WHERE staff_id=? AND date=?", b, ts)[0]["code"] == "日"
+    # 有給（前の日の夜勤）→ 出勤に直す：夜勤 16:00〜10:00（勤務16時間→休憩120分）
+    post(client, "/work/confirm", {"date": ys, "staff_id": a, "action": "off:有"})
+    assert rows("SELECT code FROM shifts WHERE staff_id=? AND date=?", a, ys)[0]["code"] == "有"
+    post(client, "/work/confirm", {"date": ys, "staff_id": a, "action": "work", "start": "", "end": "", "break_min": ""})
+    assert rows("SELECT code FROM shifts WHERE staff_id=? AND date=?", a, ys)[0]["code"] == "夜"
+    with app.app_context():
+        from ghms.work import month_summary, work_minutes
+        yk = rows("SELECT * FROM timecards WHERE staff_id=? AND date=?", a, ys)[0]
+        assert yk["break_min"] == 120 and work_minutes(yk)["yakin"]
+        first = (today - timedelta(days=1)).replace(day=1)
+        assert month_summary(a, first, today)["yakin"] == 1
+    # まとめて確定
+    post(client, "/work/confirm", {"date": ts, "action": "all"})
+    assert rows("SELECT * FROM attend_days WHERE staff_id=? AND date=?", b, ts)[0]["status"] == "work"
+    # 勤務表にない人を足す → 勤務表にも入る。取り消すと勤務表からも消える
+    post(client, "/work/confirm", {"date": ts, "staff_id": c, "action": "add", "code": "早", "start": "", "end": ""})
+    assert rows("SELECT code FROM shifts WHERE staff_id=? AND date=?", c, ts)[0]["code"] == "早"
+    assert rows("SELECT clock_in FROM timecards WHERE staff_id=?", c)[0]["clock_in"] == "06:00"
+    post(client, "/work/confirm", {"date": ts, "staff_id": c, "action": "undo"})
+    assert not rows("SELECT * FROM shifts WHERE staff_id=? AND date=?", c, ts)
+    assert not rows("SELECT * FROM timecards WHERE staff_id=?", c)
+    home = client.get("/").get_data(as_text=True)
+    assert "勤務の確定をしていない日" not in home
+    # まだ来ていない日は確定できない（今日にする）
+    future = (today + timedelta(days=3)).isoformat()
+    post(client, "/work/confirm", {"date": future, "staff_id": c, "action": "add", "code": "日"})
+    assert not rows("SELECT * FROM attend_days WHERE date=?", future)
+    # 職員は確定できない
+    st = staff_client(client, app)
+    assert st.get("/work/confirm").status_code == 403
+
+
+def test_staff_records_own_temperature(client, app):
+    post(client, "/m/staff/new", {"name": "体温太郎", "status": "在籍"})
+    st = staff_client(client, app)
+    with app.app_context():
+        from ghms.db import get_db
+        db = get_db()
+        sid = db.execute("SELECT id FROM staff WHERE name='体温太郎'").fetchone()[0]
+        db.execute("UPDATE users SET staff_id=? WHERE username='worker'", (sid,))
+        db.execute("INSERT INTO shifts (staff_id, date, code) VALUES (?,?,?)", (sid, date.today().isoformat(), "日"))
+        db.commit()
+    page = st.get("/").get_data(as_text=True)
+    assert "体温を記録する" in page and "出勤する" not in page
+    post(st, "/work/my-health", {"temp": "38.0"})
+    with app.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT temp FROM health_checks WHERE staff_id=?", (sid,)).fetchone()[0] == 38.0
+    assert "38.0" in client.get("/work/health").get_data(as_text=True)

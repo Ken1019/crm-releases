@@ -8,8 +8,10 @@
 {% include '_today.html' %}
 
 <div class="bigmenu">
-  {% if feature_on('timecard') %}<a class="main" href="{{ url_for('work.clock') }}"><span class="ic">⏰</span><b>{{ '退勤する' if card else '出勤する' }}</b>
-    <small>{{ (card['clock_in'] ~ ' から勤務中') if card else '体温を入れて打刻' }}</small></a>{% endif %}
+  {% if feature_on('timecard') and punch_mode() == 'punch' %}<a class="main" href="{{ url_for('work.clock') }}"><span class="ic">⏰</span><b>{{ '退勤する' if card else '出勤する' }}</b>
+    <small>{{ (card['clock_in'] ~ ' から勤務中') if card else '体温を入れて打刻' }}</small></a>
+  {% elif feature_on('timecard') %}<a class="main" href="{{ url_for('work.my_health') }}"><span class="ic">🌡️</span><b>体温を記録する</b>
+    <small>勤務の前に体温と体調を入れる</small></a>{% endif %}
   <a class="{{ 'main' if not feature_on('timecard') }}" href="{{ url_for('views.journal') }}"><span class="ic">📝</span><b>今日の日誌・記録を書く</b><small>業務日誌と入居者ごとの様子</small></a>
   {% if feature_on('contact_logs') %}<a href="{{ url_for('crud.new', key='contact_logs') }}"><span class="ic">📞</span><b>連絡を記録する</b><small>家族・病院・相談員</small></a>{% endif %}
   {% if feature_on('incidents') %}<a href="{{ url_for('crud.new', key='incidents') }}"><span class="ic">⚠️</span><b>ヒヤリハットを書く</b><small>小さなことでもすぐ</small></a>{% endif %}
@@ -60,7 +62,7 @@
 
 <section class="card finder">
   <label for="finder"><b>🔍 やりたいことを言葉でさがす</b></label>
-  <input id="finder" type="search" placeholder="例：日誌、連絡、タイムカード" autocomplete="off">
+  <input id="finder" type="search" placeholder="例：日誌、連絡、体温" autocomplete="off">
   <ul class="todo" id="finder-list" hidden>
     {% for t in all_tasks %}<li data-text="{{ t.label }} {{ t.desc }} {{ t.hub.title }}"><a href="{{ t.url }}"><span class="ic">{{ t.hub.icon }}</span>
       <span><b>{{ t.label }}</b><br><small class="muted">{{ t.desc }}</small></span></a></li>{% endfor %}

@@ -2,10 +2,10 @@
 {% block title %}給与計算{% endblock %}
 {% block content %}
 <h1>💴 給与計算（{{ first.strftime('%Y年%m月') }}分）</h1>
-<p class="guide">タイムカード（実働・残業・深夜・夜勤）と職員の情報（給与の形・手当・保険）から自動で計算しています。名前を押すと1項目ずつ直せます。確かめたら「確定」し、「職員に見せる」を押すと本人の画面に明細が出ます。保険料・所得税は概算です（料率は「給与の設定」で直せます）。</p>
+<p class="guide">出勤簿（実働・残業・深夜・夜勤）と職員の情報（給与の形・手当・保険）から自動で計算しています。名前を押すと1項目ずつ直せます。確かめたら「確定」し、「職員に見せる」を押すと本人の画面に明細が出ます。保険料・所得税は概算です（料率は「給与の設定」で直せます）。</p>
 <form method="get" class="filters card">
   <input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
-  <a class="btn" href="{{ url_for('work.timecards', ym=ym) }}">📅 タイムカード</a>
+  <a class="btn" href="{{ url_for('work.timecards', ym=ym) }}">📅 出勤簿</a>
   <a class="btn" href="{{ url_for('payroll.ledger', year=first.year) }}">📥 賃金台帳（{{ first.year }}年）</a>
   <a class="btn" href="{{ url_for('payroll.settings') }}">⚙️ 給与の設定</a>
 </form>

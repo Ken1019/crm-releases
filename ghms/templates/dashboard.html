@@ -12,9 +12,11 @@
 {% if work_today or profit_now %}
 <div class="cols">
   {% if work_today %}<section class="card"><h2>⏰ 今日の勤務</h2>
-    <p><b>勤務中：</b>{{ work_today.working|join('、') or 'いません' }}</p>
+    {% if work_today.confirm is not none %}<p><b>今日の勤務の確定：</b>{{ work_today.confirm.done }} / {{ work_today.confirm.total }}人
+      <a class="btn" href="{{ url_for('work.confirm') }}">✅ 勤務を確定する</a></p>
+    {% else %}<p><b>勤務中：</b>{{ work_today.working|join('、') or 'いません' }}</p>{% endif %}
     {% for name, h in work_today.unwell %}<p class="flash error">🌡️ {{ name }} さん {{ h['time'] }} {{ '%.1f'|format(h['temp']) if h['temp'] else '' }}℃ {{ h['symptoms'] or '' }}</p>{% endfor %}
-    <p><a href="{{ url_for('work.health') }}">今日の体温を見る</a>・<a href="{{ url_for('work.timecards') }}">タイムカード</a></p></section>{% endif %}
+    <p><a href="{{ url_for('work.health') }}">今日の体温を見る</a>・<a href="{{ url_for('work.timecards') }}">出勤簿</a></p></section>{% endif %}
   {% if profit_now %}<section class="card"><h2>📊 今月の収支（見込み）</h2>
     <table class="list"><tr><td>収入</td><td class="num">{{ '{:,}'.format(profit_now.income_total) }}円</td></tr>
       <tr><td>支出（給与・保険料・経費）</td><td class="num">{{ '{:,}'.format(profit_now.expense_total) }}円</td></tr>

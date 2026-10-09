@@ -80,6 +80,7 @@ def create_app(test_config=None):
 
     from .entities import ENTITIES, GROUP_ICONS, GROUPS
 
+    app.jinja_env.globals["punch_mode"] = work.punch_mode
     app.jinja_env.filters["reject_page"] = lambda args: {k: v for k, v in args.items() if k != "page"}
 
     from .hubs import current_hub, hub_url, visible_hubs

@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
-{% block title %}タイムカード{% endblock %}
+{% block title %}出勤簿{% endblock %}
 {% block content %}
-<h1>📅 タイムカード（{{ first.strftime('%Y年%m月') }}）</h1>
+<h1>📅 出勤簿（{{ first.strftime('%Y年%m月') }}）</h1>
 <form method="get" class="filters card">
   <input type="month" name="ym" value="{{ ym }}" onchange="this.form.submit()" aria-label="月">
   {% if admin %}<select name="staff_id" onchange="this.form.submit()" aria-label="職員">{% for s in staff_list %}<option value="{{ s['id'] }}"{% if staff and s['id'] == staff['id'] %} selected{% endif %}>{{ s['name'] }}</option>{% endfor %}</select>

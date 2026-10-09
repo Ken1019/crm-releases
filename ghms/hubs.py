@@ -97,19 +97,22 @@ HUBS = [
         ],
     },
     {
-        "key": "work", "icon": "⏰", "title": "勤怠・給与", "desc": "出勤・退勤・体温・タイムカード・給与明細", "staff_menu": True,
-        "entities": [], "endpoints": ["work.clock", "work.timecards", "work.health", "payroll.index", "payroll.edit",
+        "key": "work", "icon": "⏰", "title": "勤怠・給与", "desc": "勤務の確定・体温・出勤簿・給与明細", "staff_menu": True,
+        "entities": [], "endpoints": ["work.clock", "work.confirm", "work.my_health", "work.timecards", "work.health", "payroll.index", "payroll.edit",
                                       "payroll.mine", "payroll.settings", "work.my_shift", "leave.index", "leave.staff"],
         "tasks": [
-            ("出勤・退勤を打刻する", "出勤のときに体温と体調も記録します", lambda: url_for("work.clock"), False),
+            # 5つ目：打刻のしかた（"shift"＝勤務表から確定するときだけ／"punch"＝事務所のPCで打刻するときだけ。work.punch_mode）
+            ("今日の勤務を確定する", "勤務表どおりなら「出勤」、休んだら「休み」を押すだけ", lambda: url_for("work.confirm"), True, "shift"),
+            ("出勤・退勤を打刻する", "出勤のときに体温と体調も記録します", lambda: url_for("work.clock"), False, "punch"),
+            ("自分の体温を記録する", "勤務の日に体温と体調を入れます", lambda: url_for("work.my_health"), "staff", "shift"),
             ("自分の勤務表（シフト）を見る", "管理者が組んだ勤務。見るだけ", lambda: url_for("work.my_shift"), "staff"),
-            ("自分のタイムカードを見る", "今月の出勤日数・実働・残業", lambda: url_for("work.timecards"), "staff"),
-            ("自分の体温の記録を見る", "出勤のときに入れた体温", lambda: url_for("work.health"), "staff"),
+            ("自分の出勤簿を見る", "今月の出勤日数・実働・残業", lambda: url_for("work.timecards"), "staff"),
+            ("自分の体温の記録を見る", "出勤のときに入れた体温", lambda: url_for("work.health"), "staff", "punch"),
             ("自分の給与明細を見る", "管理者が見せた月だけ出ます", lambda: url_for("payroll.mine"), "staff"),
-            ("職員のタイムカードを見る・直す", "打刻のまちがい・退勤忘れを直す。出勤簿をExcelで", lambda: url_for("work.timecards"), True),
+            ("職員の出勤簿を見る・直す", "確定した勤務の時間を直す。出勤簿をExcelで", lambda: url_for("work.timecards"), True),
             ("今日の職員の体温を見る", "37.5℃以上・体調不良の人が上に出ます", lambda: url_for("work.health"), True),
             ("有給の残り・付与を見る", "勤続年数と出勤日数から自動で付与。年5日の取得もチェック", lambda: url_for("leave.index"), True),
-            ("給与を計算する・明細を出す", "タイムカードから自動計算。直して確定・職員に見せる", lambda: url_for("payroll.index"), True),
+            ("給与を計算する・明細を出す", "出勤簿から自動計算。直して確定・職員に見せる", lambda: url_for("payroll.index"), True),
             ("賃金台帳をExcelで出す", "1年分・職員ごと", lambda: url_for("payroll.ledger"), True),
             ("給与・保険料率の設定", "所定労働時間・割増・保険料率・勤務の上限", lambda: url_for("payroll.settings"), True),
         ],
@@ -159,8 +162,11 @@ def visible_tasks(hub):
 
     admin = is_admin()
     # adm: True＝管理者だけ、False＝全員、"staff"＝職員だけ（管理者には別の言い方のタスクがあるもの）
-    tasks = [{"label": l, "desc": d, "url": u()} for l, d, u, adm in hub["tasks"]
-             if adm is False or (adm is True and admin) or (adm == "staff" and not admin)]
+    from .work import punch_mode
+
+    mode = punch_mode()
+    tasks = [{"label": l, "desc": d, "url": u()} for l, d, u, adm, *only in hub["tasks"]
+             if (adm is False or (adm is True and admin) or (adm == "staff" and not admin)) and (not only or only[0] == mode)]
     return [t for t in tasks if not path_disabled(t["url"])]
 
 
