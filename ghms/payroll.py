@@ -218,7 +218,7 @@ def compute_pay(s, first, last, earnings=None, leave=True):
         mw = setting_num("pay_min_wage", pset("pay_min_wage"))
         for c, w in sm["yk_cards"]:
             need = mw * (w["total"] / 60) + mw * rate("pay_night_rate") * (w["night"] / 60) + mw * rate("pay_ot_rate") * (w["over"] / 60)
-            if mw and per_yakin < need:
+            if mw and per_yakin < need and get_setting("pay_yakin_checked", "0") != "1":
                 warnings.append(f"{c['date'][5:].replace('-', '/')}の夜勤：実働 {w['total'] // 60}時間{w['total'] % 60:02d}分だと、"
                                 f"最低賃金と割増で {round(need):,}円 以上が必要です（1回 {per_yakin:,}円）")
     pt = s["pay_type"] or "月給"
@@ -564,6 +564,7 @@ def settings():
                 v = ""
             set_setting(k, (v or d)[:200])
         set_setting("pay_health_required", "1" if request.form.get("pay_health_required") else "0")
+        set_setting("pay_yakin_checked", "1" if request.form.get("pay_yakin_checked") else "0")
         log_event("settings", "payroll", None, "給与の設定")
         get_db().commit()
         if bad:
@@ -576,7 +577,8 @@ def settings():
 
     return render_template("payroll_settings.html", PAY_SETTINGS=PAY_SETTINGS, values=values, NUM=NUM_SETTINGS, PREFECTURES=PREFECTURES,
                            RATE_YEAR=RATE_YEAR, prefecture=get_setting("prefecture", ""),
-                           health_required=get_setting("pay_health_required", "1") == "1")
+                           health_required=get_setting("pay_health_required", "1") == "1",
+                           yakin_checked=get_setting("pay_yakin_checked", "0") == "1")
 
 
 # ---------------------------------------------------------------- 事業所の収支

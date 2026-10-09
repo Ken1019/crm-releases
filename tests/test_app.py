@@ -1896,3 +1896,14 @@ def test_admin_sets_initial_pin(client, app):
         db = get_db()
         assert check_password_hash(db.execute("SELECT pin_hash FROM users WHERE id=?", (uid,)).fetchone()[0], "5937")
         assert db.execute("SELECT COUNT(*) FROM audit_log WHERE action='user_pin_set'").fetchone()[0] == 2
+
+
+def test_rent_subsidy_not_prorated_and_yakin_checked(client):
+    post(client, "/m/homes/new", {"name": "ひまわり"})
+    post(client, "/m/residents/new", {"name": "途中入居", "home_id": "1", "move_in": "2026-10-17", "rent": "31000",
+                                      "rent_subsidy": "10000"})
+    post(client, "/billing/invoices", {"ym": "2026-10"})
+    # 家賃は15日分 15,000、家賃助成は日割りしないで 10,000 → 5,000
+    assert '<b class="rowtotal">5,000</b>' in client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
+    post(client, "/payroll/settings", {"pay_yakin_checked": "1"})
+    assert 'name="pay_yakin_checked" value="1" checked' in client.get("/payroll/settings").get_data(as_text=True)

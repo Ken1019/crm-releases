@@ -394,7 +394,8 @@ def calc_fees(r, first, last, billable, burden):
         food = int(_num(r["food_amount"]) * billable)
     else:
         food = pro(r["food_amount"])
-    data = {"rent": pro(r["rent"]), "rent_subsidy": min(pro(r["rent_subsidy"]), pro(r["rent"])), "food": food,
+    # 家賃助成は日割りしない（月の途中の入退居でも満額。その月の家賃が上限）
+    data = {"rent": pro(r["rent"]), "rent_subsidy": min(int(_num(r["rent_subsidy"])), pro(r["rent"])), "food": food,
             "utility": pro(r["utility"]), "daily_goods": pro(r["daily_goods"]), "user_burden": burden,
             "other_label": None, "other_amount": None}
     invoice_total(data)
