@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% block title %}同期の設定{% endblock %}
+{% block content %}
+<h1>🔄 本部とグループホームの同期</h1>
+{% if not cfg %}
+<p class="guide">グループホームのPCと本部のPCで、同じデータを使えるようにします。データは<b>暗号化してから</b> Firebase（給与計算ソフトで使っている受け渡し場所）に置くので、Google や Firebase からは中身が見えません。<br>
+  ふだんは、<b>グループホーム</b>で日々の入力（日誌・記録・実績・勤務の確定など）、<b>本部</b>で請求・給与・経費・加算・設定を行います。本部で入力を直すときは「本部操作」をオンにします（その間、グループホームのPCは見るだけになります）。</p>
+<ol class="small">
+  <li>はじめに<b>グループホームのPC（いまのデータがあるPC）</b>で設定します。暗号の鍵ができるので、鍵のファイルをUSBメモリに保存してください。</li>
+  <li>本部のPCにGHMSを入れ、はじめての設定をすませてから、この画面で「本部」を選び、鍵のファイルを選びます。グループホームのデータがすべて届きます（本部で作ったログインは、グループホームのログインに置きかわります）。</li>
+  <li>Firebase の準備（メールとパスワードのログイン・データベースのルール）は「docs/同期の設定.md」を見てください。</li>
+</ol>
+<form method="post" enctype="multipart/form-data" class="card form">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="setup">
+  <fieldset><legend>このPCの役</legend>
+    <label class="check"><input type="radio" name="role" value="{{ HOME }}" required> グループホーム（日々の入力をするPC・いまのデータがあるPC）</label>
+    <label class="check"><input type="radio" name="role" value="{{ HQ }}"> 本部（請求・給与をするPC）</label></fieldset>
+  <label><span>事業所のID（両方のPCで同じにする。半角英数字）</span><input name="site" value="{{ default_site }}" required pattern="[A-Za-z0-9_\-]{3,40}"></label>
+  <label><span>Firebase のウェブAPIキー（プロジェクトの設定 → 全般）</span><input name="api_key" required autocomplete="off"></label>
+  <label><span>Firebase のプロジェクトID</span><input name="project" required autocomplete="off"></label>
+  <label><span>同期用のログイン（Firebase Authentication に作ったメール）</span><input name="email" type="email" required autocomplete="off"></label>
+  <label><span>そのパスワード</span><input name="password" type="password" required autocomplete="new-password"></label>
+  <fieldset><legend>暗号の鍵（本部のときだけ。グループホームのときは自動で作ります）</legend>
+    <label><span>鍵のファイル（ghms-sync-key.txt）</span><input type="file" name="key_file" accept=".txt"></label>
+    <label><span>または、鍵の文字をはりつけ</span><input name="key" autocomplete="off"></label></fieldset>
+  <div class="actions"><button class="btn primary big">🔄 つないで同期を始める</button></div>
+</form>
+{% else %}{% set st = s.st %}
+<div class="tiles">
+  <div class="tile"><b>{{ s.label }}</b><span>このPCの役（事業所のID：{{ cfg.site }}）</span></div>
+  <div class="tile"><b class="small">{{ st.get('last_ok_at') or 'まだ' }}</b><span>最後に同期した日時</span></div>
+  <div class="tile"><b class="small">{{ st.get('last_down_at') or 'まだ' }}</b><span>相手のデータを受け取った日時</span></div>
+</div>
+{% if st.get('error') %}<p class="flash error">最後のまちがい（{{ st.get('error_at') }}）：{{ st['error'] }}</p>{% endif %}
+{% if st.get('forced_note') %}<div class="flash warn">{{ st['forced_note'] }}
+  <form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="clear_note"><button class="btn">確認しました</button></form></div>{% endif %}
+
+{% if s.role == HQ %}
+<section class="card">
+  <h2>🛠 本部操作</h2>
+  {% if s.mode == 'joining' %}<p>グループホームのデータを受け取っています。グループホームのPCでGHMSが動いていれば、1〜2分で終わります。</p>
+  {% elif s.mode == 'hq_all' %}
+    <p class="flash warn">本部操作中です（{{ st.lock.by }}・{{ st.lock.since }} から）。入力も直せます。<b>グループホームのPCは見るだけ</b>になっています。終わったら、すぐにオフにしてください。</p>
+    <form method="post"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="lock_off">
+      <button class="btn primary big">✔ 本部操作をオフにする（グループホームで入力できるようにもどす）</button></form>
+  {% elif s.mode == 'waiting' %}
+    <p>グループホームのPCに本部操作をお願いしています（{{ st.lock.since }}）。グループホームのPCが最新のデータを送ってくると、入力も直せるようになります。</p>
+    <form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="lock_off"><button class="btn">やめる</button></form>
+  {% elif s.mode == 'releasing' %}
+    <p>本部操作をオフにしました。グループホームのPCが受け取ると、また入力できるようになります。</p>
+  {% else %}
+    <p>請求・給与・経費・加算・設定は、いつでも本部で直せます。<b>日誌・記録・実績・勤務表などの入力を本部で直すとき</b>は、本部操作をオンにしてください。その間、グループホームのPCには「本部操作中」と出て、見るだけになります（同じものを2か所で直して、片方が消えないようにするため）。</p>
+    <form method="post"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="lock_on">
+      <button class="btn primary big">🛠 本部操作をオンにする</button>
+      <label class="check small"><input type="checkbox" name="force" value="1"> グループホームのPCが動いていない（強制）。グループホームのPCで、まだ送れていない入力は反映されません（そのPCのバックアップには残ります）</label></form>
+  {% endif %}
+</section>
+{% else %}
+<section class="card">
+  <h2>🏠 このPCはグループホーム</h2>
+  {% if s.mode == 'locked' %}<p class="flash error">本部操作中です（{{ st.locked.by }}・{{ st.locked.since }} から）。この間は見るだけです。</p>
+  {% else %}<p>日々の入力はこのPCで行います。請求・給与・経費・加算・設定は本部のPCで行います（このPCでは見るだけです）。</p>{% endif %}
+  <p><a class="btn" href="{{ url_for('sync.key_file') }}">🔑 暗号の鍵のファイルを保存（本部のPCの設定に使う）</a></p>
+  <p class="muted small">鍵は、本部のPCに設定したら、USBメモリから消すか鍵のかかる場所に保管してください。鍵があれば受け渡し場所のデータを開けてしまいます。</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="actions">
+    <form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="now"><button class="btn">🔄 今すぐ同期する</button></form>
+  </div>
+  <p class="muted small">GHMS が動いているあいだ、1分ごとに自動で同期します。送るのは暗号化したデータだけです。Firebase：{{ cfg.project }}／{{ cfg.email }}</p>
+  <details><summary>同期をやめる</summary>
+    <form method="post" class="form"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="stop">
+      <label><span>確認のため「やめる」と入れてください（このPCのデータはそのまま残ります）</span><input name="word" autocomplete="off"></label>
+      <button class="btn danger">同期をやめる</button></form></details>
+</section>
+{% endif %}
+{% endblock %}

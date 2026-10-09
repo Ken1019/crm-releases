@@ -393,6 +393,10 @@ def build(user_admin=True, staff_id=None, alerts=None):
 
         for lv, title, detail in health(current_app.config["DATABASE"], get_setting("backup_dir2", "")):
             add(lv, title, detail, url_for("backups.index"))
+        from .sync import health as sync_health
+
+        for lv, title, detail in sync_health(current_app.config["DATABASE"]):
+            add(lv, title, detail, url_for("sync.index"))
     # 受給者証・計画などの期限（ホームのお知らせと同じもの）
     if user_admin:
         if alerts is None:

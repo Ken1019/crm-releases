@@ -667,5 +667,5 @@ AUDIT_ACTIONS = {
     "user_enable": "ユーザー再開", "user_unlock": "ロック解除", "reauth": "管理者画面の本人確認",
     "pin_set": "PINの設定", "pin_clear": "PINを消した", "user_pin_set": "PINの設定（管理者）", "user_pin_clear": "PINを消した（管理者）",
     "device_add": "PIN端末の登録", "device_remove": "PIN端末の解除",
-    "update_check": "更新の確認", "update_install": "更新の開始", "update_failed": "更新の失敗", "backup": "バックアップ", "restore": "バックアップから元にもどした",
+    "update_check": "更新の確認", "update_install": "更新の開始", "update_failed": "更新の失敗", "backup": "バックアップ", "sync_lock": "本部操作", "restore": "バックアップから元にもどした",
 }

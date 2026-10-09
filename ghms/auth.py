@@ -122,7 +122,9 @@ def install(app):
         if uid:
             user = get_db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
             seen = session.get("seen", 0)
-            if user is None or not user["active"] or session.get("ver", 0) != (user["session_ver"] or 0):
+            # sync_epoch：同期ではじめて相手のデータを受け取ったとき変わる（前のログインは別の人のIDかもしれないため）
+            if user is None or not user["active"] or session.get("ver", 0) != (user["session_ver"] or 0) \
+                    or session.get("ep", "") != get_setting("sync_epoch", ""):
                 session.clear()
             elif time.time() - seen > timeout_seconds():
                 session.clear()
@@ -197,6 +199,7 @@ def _login(user, via="password"):
     session["seen"] = time.time()
     session["via"] = via
     session["ver"] = user["session_ver"] or 0
+    session["ep"] = get_setting("sync_epoch", "")
 
 
 def _safe_next(default="views.dashboard"):
@@ -363,7 +366,7 @@ def my_pin():
     if not check_password_hash(g.user["password_hash"], request.form.get("current", "")):
         flash("今のパスワードが違います。", "error")
     elif request.form.get("action") == "clear":
-        db.execute("UPDATE users SET pin_hash=NULL WHERE id=?", (g.user["id"],))
+        db.execute("UPDATE users SET pin_hash=NULL, updated_at=? WHERE id=?", (now(), g.user["id"]))
         log_event("pin_clear")
         flash("PINを消しました。", "ok")
     else:
@@ -374,7 +377,7 @@ def my_pin():
         elif pin != request.form.get("pin2", ""):
             flash("確認のために入れたPINが一致しません。", "error")
         else:
-            db.execute("UPDATE users SET pin_hash=? WHERE id=?", (generate_password_hash(pin), g.user["id"]))
+            db.execute("UPDATE users SET pin_hash=?, updated_at=? WHERE id=?", (generate_password_hash(pin), now(), g.user["id"]))
             bump_session(g.user["id"])
             log_event("pin_set")
             flash("PINを設定しました。登録された事業所の端末で、名前をえらんでPINでログインできます。", "ok")
@@ -472,7 +475,7 @@ def users():
                 log_event("user_pin_set", "users", uid, target["username"])
                 flash(f"「{target['username']}」のPINを入れました。本人に伝えてください（本人が「パスワード変更」の画面で変えられます）。", "ok")
         elif action == "clear_pin":
-            db.execute("UPDATE users SET pin_hash=NULL WHERE id=?", (uid,))
+            db.execute("UPDATE users SET pin_hash=NULL, updated_at=? WHERE id=?", (now(), uid))
             bump_session(uid)
             log_event("user_pin_clear", "users", uid, target["username"])
             flash(f"「{target['username']}」のPINを消しました。本人が設定し直します。", "ok")

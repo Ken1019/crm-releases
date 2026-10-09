@@ -137,7 +137,7 @@ HUBS = [
     },
     {
         "key": "settings", "icon": "⚙️", "title": "設定", "desc": "事業所・住居・ログインする人・バックアップ",
-        "entities": ["homes"], "endpoints": ["views.settings", "auth.users", "views.audit_log", "system.update", "auth.reauth", "backups.index",
+        "entities": ["homes"], "endpoints": ["views.settings", "auth.users", "views.audit_log", "system.update", "auth.reauth", "backups.index", "sync.index",
                                                 "customize.features", "customize.choices", "customize.fields"],
         "tasks": [
             ("住居（ユニット）を登録・変更する", "ホームの名前・定員・住所", lambda: url_for("crud.index", key="homes"), False),
@@ -148,6 +148,7 @@ HUBS = [
             ("ログインする人を追加する・パスワードを変える", "職員ごとにアカウントを作ります", lambda: url_for("auth.users"), True),
             ("自分のパスワードを変える", "", lambda: url_for("auth.my_password"), False),
             ("バックアップ（自動・2か所目・元にもどす）", "毎日自動で保存。USBメモリなどへの保存・元にもどすのもここ", lambda: url_for("backups.index"), True),
+            ("本部とグループホームの同期（本部操作）", "Firebase で暗号化して受け渡し。本部で入力を直すときの「本部操作」", lambda: url_for("sync.index"), True),
             ("だれが何をしたか見る", "操作の記録", lambda: url_for("views.audit_log"), True),
             ("ソフトを最新の版に更新する", "新しい版の確認・ネット経由で更新", lambda: url_for("system.update"), True),
         ],

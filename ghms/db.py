@@ -53,7 +53,7 @@ def init_db(path):
         "CREATE TABLE IF NOT EXISTS devices (id INTEGER PRIMARY KEY, name TEXT, token_hash TEXT UNIQUE,"
         " active INTEGER DEFAULT 1, created_by TEXT, created_at TEXT, last_used TEXT)"
     )
-    _ensure_columns(con, "audit_log", {"detail": "TEXT", "ip": "TEXT"})
+    _ensure_columns(con, "audit_log", {"detail": "TEXT", "ip": "TEXT", "origin": "TEXT"})  # origin：同期で受け取った相手のPC
     # 月ごとのグリッド入力（在居・外泊などの実績、勤務表）
     con.execute(
         "CREATE TABLE IF NOT EXISTS attendance (resident_id INTEGER, date TEXT, code TEXT,"

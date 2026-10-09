@@ -35,6 +35,14 @@
 </nav>
 <main>
 {% endif %}
+  {% if sync_status %}{% set ss = sync_status %}
+    {% if ss.mode == 'locked' %}<div class="syncbar lock" role="status">🔒 <b>本部操作中</b>（{{ ss.st.locked.by }}・{{ ss.st.locked.since }} から）：この間、このPCでは見るだけです。本部が終わると、また入力できます。</div>
+    {% elif ss.mode == 'hq_all' %}<div class="syncbar on" role="status">🛠 <b>本部操作中</b>：入力も直せます。終わったら <a href="{{ url_for('sync.index') }}">本部操作をオフ</a> にしてください（その間、グループホームのPCは見るだけです）。</div>
+    {% elif ss.mode == 'waiting' %}<div class="syncbar" role="status">⏳ グループホームのPCに本部操作をお願いしています。返事がくると入力も直せます。<a href="{{ url_for('sync.index') }}">同期の設定</a></div>
+    {% elif ss.mode == 'joining' %}<div class="syncbar" role="status">⏳ グループホームのデータを受け取っています…</div>
+    {% elif ss.role == 'hq' %}<div class="syncbar small noprint">🏢 本部のPC：請求・給与・設定を直せます。入力（日誌・実績など）を直すときは <a href="{{ url_for('sync.index') }}">本部操作</a> をオンに。</div>
+    {% endif %}
+  {% endif %}
   {% with msgs = get_flashed_messages(with_categories=true) %}
     {% for cat, m in msgs %}<div class="flash {{ cat }}" role="status">{{ m }}</div>{% endfor %}
   {% endwith %}

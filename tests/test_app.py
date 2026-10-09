@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import date
 
@@ -2132,3 +2133,132 @@ def test_staff_records_own_temperature(client, app):
         from ghms.db import get_db
         assert get_db().execute("SELECT temp FROM health_checks WHERE staff_id=?", (sid,)).fetchone()[0] == 38.0
     assert "38.0" in client.get("/work/health").get_data(as_text=True)
+
+
+# ---------------------------------------------------------------- 本部とグループホームの同期（Firebase のかわりにメモリ）
+def _sync_pair(tmp_path, monkeypatch):
+    from ghms import sync as sy
+    from ghms.customize import FEATURES
+
+    store = sy.MemoryStore()
+
+    def make(name, username):
+        d = tmp_path / name
+        d.mkdir()
+        monkeypatch.setenv("GHMS_DATA_DIR", str(d))
+        a = create_app({"TESTING": True})
+        sy._stores[a.config["DATABASE"]] = store
+        c = a.test_client()
+        c.post("/setup", data={"office_name": "同期ホーム", "username": username, "password": "password123",
+                               "home_types": "介護サービス包括型", "features": [k for k, *_ in FEATURES]})
+        with a.app_context():
+            from ghms.db import get_db
+            get_db().execute("UPDATE settings SET value='2026-01-01' WHERE key='system_start'")
+            get_db().commit()
+        return a, c
+
+    home, hc = make("home", "admin")
+    hq, qc = make("hq", "hqtemp")
+    cfg = {"site": "office1", "api_key": "k", "project": "p", "email": "s@example.com", "password": "x"}
+    post(hc, "/m/homes/new", {"name": "ひまわり"})
+    post(hc, "/m/residents/new", {"name": "同期太郎", "home_id": "1", "status": "入居中"})
+    assert post(hc, "/sync", dict(cfg, action="setup", role="home")).status_code == 302
+    key = sy.load_cfg(home.config["DATABASE"])["key"]
+    assert post(qc, "/sync", dict(cfg, action="setup", role="hq", key=sy.key_file_text(dict(cfg, key=key)))).status_code == 302
+    return sy, store, home, hc, hq, qc
+
+
+def _rounds(sy, *apps, n=2):
+    for _ in range(n):
+        for a in apps:
+            st = sy.run_once(a.config["DATABASE"])
+            assert not st.get("error"), st.get("error")
+
+
+def test_sync_home_and_hq(tmp_path, monkeypatch):
+    sy, store, home, hc, hq, qc = _sync_pair(tmp_path, monkeypatch)
+    hdb, qdb = home.config["DATABASE"], hq.config["DATABASE"]
+    _rounds(sy, hq, home, hq)
+    assert sy.load_state(qdb).get("joined")
+    # 本部のログインはグループホームのログインに置きかわる
+    assert qc.get("/").status_code == 302
+    qc.post("/login", data={"username": "admin", "password": "password123"})
+    assert "同期太郎" in qc.get("/m/residents/").get_data(as_text=True)
+    # 受け渡し場所には暗号化したものだけ
+    assert all("同期太郎" not in json.dumps(d, ensure_ascii=False) for d in store.docs.values())
+    # グループホームの入力 → 本部に届く
+    post(hc, "/m/residents/new", {"name": "同期花子", "home_id": "1", "status": "入居中"})
+    _rounds(sy, home, hq)
+    assert "同期花子" in qc.get("/m/residents/").get_data(as_text=True)
+    # 本部の経費 → グループホームに届く
+    post(qc, "/m/expenses/new", {"date": "2026-10-01", "kind": "水道光熱費", "item": "本部の経費", "amount": "1234"})
+    _rounds(sy, hq, home)
+    assert "本部の経費" in hc.get("/m/expenses/").get_data(as_text=True)
+    # 相手の表は直せない
+    post(hc, "/m/expenses/new", {"date": "2026-10-02", "kind": "水道光熱費", "item": "ホームの経費", "amount": "1"})
+    assert "本部のPCで行います" in hc.get("/").get_data(as_text=True)
+    post(qc, "/m/residents/new", {"name": "本部の入居者", "home_id": "1", "status": "入居中"})
+    assert "本部操作" in qc.get("/").get_data(as_text=True)
+    with hq.app_context():
+        from ghms.db import get_db
+        assert not get_db().execute("SELECT 1 FROM residents WHERE name='本部の入居者'").fetchone()
+    # パスワードの変更は両方で受け取る
+    post(hc, "/password", {"current": "password123", "password": "newpass2026", "password2": "newpass2026"})
+    _rounds(sy, home, hq)
+    q2 = hq.test_client()
+    q2.post("/login", data={"username": "admin", "password": "newpass2026"})
+    assert q2.get("/").status_code == 200
+
+    # 本部操作：オン → グループホームは見るだけ → 本部が入力を直す → オフ → グループホームにもどる
+    post(q2, "/sync", {"action": "lock_on"})
+    assert sy.status(qdb)["mode"] == "waiting"
+    _rounds(sy, home, n=1)
+    assert sy.status(hdb)["mode"] == "locked"
+    post(hc, "/m/residents/new", {"name": "ロック中の入力", "home_id": "1", "status": "入居中"})
+    page = hc.get("/").get_data(as_text=True)
+    assert "本部操作中" in page
+    _rounds(sy, hq, n=1)
+    assert sy.status(qdb)["mode"] == "hq_all"
+    post(q2, "/m/residents/new", {"name": "本部で直した入居者", "home_id": "1", "status": "入居中"})
+    _rounds(sy, hq, home, n=1)
+    assert "本部で直した入居者" in hc.get("/m/residents/").get_data(as_text=True)  # 見るだけでも最新が見える
+    post(q2, "/sync", {"action": "lock_off"})
+    _rounds(sy, home, hq, n=2)
+    assert sy.status(hdb)["mode"] == "normal" and sy.status(qdb)["mode"] == "normal"
+    post(hc, "/m/residents/new", {"name": "もどった入力", "home_id": "1", "status": "入居中"})
+    _rounds(sy, home, hq)
+    html = q2.get("/m/residents/").get_data(as_text=True)
+    assert "もどった入力" in html and "本部で直した入居者" in html and "ロック中の入力" not in html
+    # 操作の記録は両方の分がそろう
+    with hq.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT 1 FROM audit_log WHERE origin='home'").fetchone()
+    # 同期中はバックアップから元にもどせない
+    post(q2, "/backup/restore", {"id": "x", "word": "復元する"})
+    assert "元にもどせません" in q2.get("/backup").get_data(as_text=True)
+
+
+def test_sync_force_lock_and_wrong_key(tmp_path, monkeypatch):
+    sy, store, home, hc, hq, qc = _sync_pair(tmp_path, monkeypatch)
+    hdb, qdb = home.config["DATABASE"], hq.config["DATABASE"]
+    _rounds(sy, hq, home, hq)
+    qc.post("/login", data={"username": "admin", "password": "password123"})
+    # グループホームのPCが止まっている：強制でオン → すぐ直せる
+    post(qc, "/sync", {"action": "lock_on", "force": "1"})
+    assert sy.status(qdb)["mode"] == "hq_all"
+    post(qc, "/m/residents/new", {"name": "強制で足した", "home_id": "1", "status": "入居中"})
+    _rounds(sy, hq, n=1)
+    # グループホームのPCが動き出すと、見るだけになり、バックアップに残してお知らせ
+    _rounds(sy, home, n=1)
+    assert sy.status(hdb)["mode"] == "locked" and sy.load_state(hdb).get("forced_note")
+    post(qc, "/sync", {"action": "lock_off"})
+    _rounds(sy, home, hq, n=2)
+    assert "強制で足した" in hc.get("/m/residents/").get_data(as_text=True)
+    assert "強制で本部操作" in hc.get("/").get_data(as_text=True)
+    # 鍵がちがうと開けない
+    cfg = sy.load_cfg(qdb)
+    cfg["key"] = sy.new_key()
+    sy.save_cfg(qdb, cfg)
+    post(hc, "/m/residents/new", {"name": "鍵のテスト", "home_id": "1", "status": "入居中"})
+    sy.run_once(hdb)
+    assert "鍵がちがう" in sy.run_once(qdb)["error"]

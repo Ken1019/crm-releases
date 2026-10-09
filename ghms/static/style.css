@@ -68,6 +68,8 @@ form.inline { display:inline; }
 .flash.warn { background:var(--warn-soft); color:var(--warn); } .flash.warn::before { content:"！ "; }
 .guide { background:var(--sky-soft); border-radius:12px; padding:7px 14px; margin:0 0 10px; color:#1f5f8b; font-size:.9em; line-height:1.6; }
 .guide::before { content:"💡 "; }
+.syncbar { padding:8px 14px; border-radius:12px; margin-bottom:10px; background:var(--sky-soft); color:#1f5f8b; }
+.syncbar.lock { background:#ffe3e3; color:#9b1c1c; font-size:1.1em; } .syncbar.on { background:var(--warn-soft); color:var(--warn); }
 
 /* 入力 */
 .filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }

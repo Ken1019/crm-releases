@@ -57,8 +57,12 @@ def create_app(test_config=None):
     app.teardown_appcontext(db.close_db)
     if not app.testing and not app.config.get("NO_AUTO_BACKUP"):
         backup.start_auto(app.config["DATABASE"])
+    if not app.testing:
+        from . import sync
 
-    from . import absences, auth, backup_views, billing, crud, customize, compliance, docs, leave, payroll, today, shift, updater, views, work
+        sync.start_auto(app.config["DATABASE"])
+
+    from . import absences, auth, backup_views, billing, sync_views, crud, customize, compliance, docs, leave, payroll, today, shift, updater, views, work
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(crud.bp)
@@ -75,7 +79,9 @@ def create_app(test_config=None):
     app.register_blueprint(leave.bp)
     app.register_blueprint(today.bp)
     app.register_blueprint(backup_views.bp)
+    app.register_blueprint(sync_views.bp)
     auth.install(app)
+    sync_views.install(app)
     customize.install(app)
 
     from .entities import ENTITIES, GROUP_ICONS, GROUPS

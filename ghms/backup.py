@@ -27,8 +27,9 @@ log = logging.getLogger(__name__)
 
 ROOT2_NAME = "GHMSバックアップ"
 KINDS = {"daily": "毎日", "monthly": "毎月", "manual": "手動", "before_update": "版が変わる前",
-         "before_install": "インストールの前", "before_restore": "復元の前"}
-KEEP = {"daily": 30, "monthly": 24, "manual": 20, "before_update": 20, "before_install": 20, "before_restore": 20}
+         "before_install": "インストールの前", "before_restore": "復元の前", "before_sync": "同期の前"}
+KEEP = {"daily": 30, "monthly": 24, "manual": 20, "before_update": 20, "before_install": 20, "before_restore": 20,
+        "before_sync": 20}
 TO_DEST2 = ("daily", "monthly", "manual")
 FILE_RE = re.compile(r"^ghms[\w.\-]*\.sqlite3$")
 REFRESH_SEC = 3600  # その日のバックアップを新しくする間かく
