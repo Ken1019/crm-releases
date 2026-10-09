@@ -106,7 +106,7 @@ Windows PC 1台にインストールし、ブラウザで操作します。事�
   - USBメモリ・ネットワーク上のフォルダ・Program Files の中は選べません（こわれる・なくす・アンインストールで消えるおそれ）
   - ほかのファイルがあるフォルダやドライブのいちばん上を選んだときは、その中に `GHMSデータ` フォルダを作ります
   - 画面を出さずに入れるとき：`GHMS-Setup-版.exe /VERYSILENT /DATADIR="D:\GHMSデータ"`
-- 選んだ場所は `C:\ProgramData\GHMS\config.ini` の `[data] dir` に記録されます。`ghms.sqlite3`（データ）と `secret_key` はこのフォルダに置きます
+- 選んだ場所はレジストリ（`HKLM\SOFTWARE\GHMS` の `DataDir`）に記録されます（日本語のフォルダ名でもこわれないように）。`config.ini` に `[data] dir` を書くと、そちらが先になります。`ghms.sqlite3`（データ）と `secret_key` はこのフォルダに置きます
 - Python版は `data` フォルダ
 
 ### 更新・アンインストールでデータを消さないしくみ

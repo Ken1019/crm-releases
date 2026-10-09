@@ -37,14 +37,33 @@ def data_dir():
     return chosen or os.path.join(base_dir(), "data")
 
 
+REG_KEY = r"SOFTWARE\GHMS"
+
+
+def _registry_data_dir():
+    """インストーラーが記録したデータの場所（HKLM\SOFTWARE\GHMS の DataDir）。
+    config.ini は Windows の言語の文字コードで書かれ、日本語のフォルダ名がこわれることがあるため、レジストリに置く"""
+    if sys.platform != "win32":
+        return ""
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, REG_KEY) as k:
+            return str(winreg.QueryValueEx(k, "DataDir")[0] or "").strip()
+    except OSError:
+        return ""
+
+
 def configured_data_dir():
+    """config.ini の [data] dir（手で書いたとき）→ インストーラーが記録した場所 の順"""
     cp = _read_ini()
     raw = (cp.get("data", "dir", fallback="") or "").strip().strip('"')
     if raw and os.path.isabs(raw):
         return raw
     if raw:
         logging.getLogger(__name__).warning("config.ini の [data] dir はドライブから書いてください（%r）。決まった場所を使います", raw)
-    return ""
+    reg = _registry_data_dir() if is_installed() else ""
+    return reg if reg and os.path.isabs(reg) else ""
 
 
 def config_path():

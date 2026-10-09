@@ -97,10 +97,21 @@ begin
   Result := ExpandConstant('{commonappdata}\GHMS\data');
 end;
 
-// config.ini に書いてあるデータの場所（なければ初めの場所）
-function ConfiguredDataDir(): String;
+// 記録してあるデータの場所（レジストリ HKLM\SOFTWARE\GHMS の DataDir。日本語のフォルダ名もこわれない）。
+// 手で config.ini の [data] dir を書いたときはそちらを先に見る（GHMS と同じ順）。なければ初めの場所
+function RecordedDataDir(): String;
 begin
   Result := RemoveBackslashUnlessRoot(Trim(GetIniString('data', 'dir', '', ConfigFile())));
+  if Result = '' then
+    if RegQueryStringValue(HKLM, 'SOFTWARE\GHMS', 'DataDir', Result) then
+      Result := RemoveBackslashUnlessRoot(Trim(Result))
+    else
+      Result := '';
+end;
+
+function ConfiguredDataDir(): String;
+begin
+  Result := RecordedDataDir();
   if Result = '' then
     Result := DefaultDataDir();
 end;
@@ -225,8 +236,7 @@ procedure InitializeWizard();
 var
   Def: String;
 begin
-  Upgrading := (Trim(GetIniString('data', 'dir', '', ConfigFile())) <> '') or
-               FileExists(AddBackslash(ConfiguredDataDir()) + 'ghms.sqlite3');
+  Upgrading := (RecordedDataDir() <> '') or FileExists(AddBackslash(ConfiguredDataDir()) + 'ghms.sqlite3');
   DataPage := CreateInputDirPage(wpSelectDir, 'データの保存場所',
     '入居者・職員などのデータを保存するフォルダを選んでください。',
     'ふつうはこのままで大丈夫です。別のドライブ（D: など）に置きたいときだけ変えてください。' #13#10 +
@@ -301,7 +311,8 @@ begin
   begin
     ForceDirectories(ExpandConstant('{commonappdata}\GHMS'));
     ForceDirectories(ChosenDataDir());
-    SetIniString('data', 'dir', ChosenDataDir(), ConfigFile());
+    // アンインストールしても消さない（入れ直したとき、同じデータを使うため）
+    RegWriteStringValue(HKLM, 'SOFTWARE\GHMS', 'DataDir', ChosenDataDir());
   end;
   if CurStep = ssPostInstall then
   begin
@@ -342,7 +353,7 @@ begin
   begin
     Bk := AddBackslash(Dir) + 'backup\before_install';
     Name := Bk + '\ghms_' + GetDateTimeString('yyyymmdd_hhnnss', #0, #0) + '_to_{#AppVersion}.sqlite3';
-    if (not ForceDirectories(Bk)) or (not FileCopy(Db, Name, False)) then
+    if (not ForceDirectories(Bk)) or (not CopyFile(Db, Name, False)) then
       Result := '入れかえる前のデータのバックアップを作れなかったため、インストールを中止しました（データはそのままです）。' #13#10 +
                 'ディスクの空きを確かめてから、もう一度インストールしてください。' #13#10 + Db
     else

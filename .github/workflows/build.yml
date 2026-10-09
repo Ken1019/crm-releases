@@ -95,13 +95,13 @@ jobs:
             Start-Process -FilePath $exe -ArgumentList "--no-browser"; Start-Sleep -Seconds 10
             try { return Invoke-RestMethod http://127.0.0.1:8000/__ping -TimeoutSec 5 } catch {
               # 起動しないときは、原因がわかるようにログ・設定・権限を出す
-              Write-Host "---- config.ini"; Get-Content (Join-Path $env:ProgramData "GHMS\config.ini") -ErrorAction SilentlyContinue
-              Write-Host "---- ghms.log"; Get-Content (Join-Path $env:ProgramData "GHMS\logs\ghms.log") -Tail 80 -ErrorAction SilentlyContinue
+              Write-Host "---- config.ini"; Get-Content (Join-Path $env:ProgramData "GHMS\config.ini") -ErrorAction SilentlyContinue | Out-Host
+              Write-Host "---- ghms.log"; Get-Content (Join-Path $env:ProgramData "GHMS\logs\ghms.log") -Tail 80 -ErrorAction SilentlyContinue | Out-Host
               Write-Host "---- files"; Get-ChildItem -Recurse (Join-Path $env:ProgramData "GHMS"), $data -ErrorAction SilentlyContinue | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 300 | Write-Host
-              Write-Host "---- acl"; icacls (Join-Path $env:ProgramData "GHMS"); icacls $data
+              Write-Host "---- acl"; icacls (Join-Path $env:ProgramData "GHMS") | Out-Host; icacls $data | Out-Host; reg query "HKLM\SOFTWARE\GHMS" | Out-Host
               Write-Host "---- processes"; Get-Process GHMS -ErrorAction SilentlyContinue | Format-Table Id, StartTime, CPU | Out-String | Write-Host
-              Write-Host "---- netstat"; netstat -ano | Select-String ":8000"
-              Write-Host "---- installer log"; Get-ChildItem $env:TEMP -Filter "Setup Log*.txt" | Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content -Tail 60
+              Write-Host "---- netstat"; netstat -ano | Select-String ":8000" | Out-Host
+              Write-Host "---- installer log"; Get-ChildItem $env:TEMP -Filter "Setup Log*.txt" | Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content -Tail 60 | Out-Host
               throw "GHMS が起動しませんでした"
             }
           }
