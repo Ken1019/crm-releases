@@ -38,10 +38,10 @@ def install(app):
         return {"sync_status": sy.status(app.config["DATABASE"])}
 
 
-def _test_connection(db_path, cfg):
+def _test_connection(db_path, cfg, create=False):
     store = sy.store_for(db_path, cfg)
     if isinstance(store, sy.Firestore):
-        store.token()
+        store.sign_up() if create else store.token()
     store.get("ctl_hq")
 
 
@@ -81,7 +81,7 @@ def index():
                     new["origin"] = False
             if not errs:
                 try:
-                    _test_connection(db_path, new)
+                    _test_connection(db_path, new, create=action == "start" and bool(request.form.get("create")))
                 except sy.SyncError as e:
                     errs.append(str(e))
             if errs:
@@ -108,17 +108,29 @@ def index():
             flash(f"同期できませんでした：{st['error']}" if st.get("error") else "同期しました。", "error" if st.get("error") else "ok")
         elif action == "lock_on" and cfg["role"] == sy.HQ:
             force = bool(request.form.get("force"))
-            st = sy.lock_on(db_path, user, force=force)
+            try:
+                st = sy.lock_on(db_path, user, force=force)
+            except sy.SyncError as e:
+                flash(f"本部操作をオンにできませんでした：{e}", "error")
+                return redirect(url_for("sync.index"))
             log_event("sync_lock", detail="本部操作をオン" + ("（強制）" if force else ""))
             get_db().commit()
             ready = (st.get("lock") or {}).get("ready")
             flash("本部操作をオンにしました。入力も直せます。" if ready else
                   "グループホームのPCに本部操作をお願いしました。返事がくると（ふつう1分ほど）入力も直せるようになります。", "ok")
         elif action == "lock_off" and cfg["role"] == sy.HQ:
-            sy.lock_off(db_path)
+            try:
+                sy.lock_off(db_path)
+            except sy.SyncError as e:
+                flash(f"本部操作のおわりを送れませんでした（次の同期でやり直します）：{e}", "error")
+                return redirect(url_for("sync.index"))
             log_event("sync_lock", detail="本部操作をオフ")
             get_db().commit()
             flash("本部操作をオフにしました。グループホームのPCが受け取ると、また入力できるようになります。", "ok")
+        elif action == "skip_release" and cfg["role"] == sy.HQ:
+            sy.skip_release(db_path)
+            log_event("sync_lock", detail="本部操作のおわりの返事を待つのをやめた")
+            get_db().commit()
         elif action == "clear_note":
             st = sy.load_state(db_path)
             st.pop("forced_note", None)
@@ -134,6 +146,7 @@ def index():
             flash("同期をやめました（このPCのデータはそのままです）。", "ok")
         return redirect(url_for("sync.index"))
     return render_template("sync.html", cfg=cfg, s=sy.status(db_path), HOME=sy.HOME, HQ=sy.HQ,
+                           rules=sy.rules_text(cfg["email"] if cfg else "ghms-sync@example.com"),
                            default_site=(get_setting("office_no", "") or "").strip() or "office1")
 
 

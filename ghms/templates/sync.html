@@ -22,7 +22,11 @@
   <label><span>Firebase のウェブAPIキー（プロジェクトの設定 → 全般）</span><input name="api_key" required autocomplete="off"></label>
   <label><span>Firebase のプロジェクトID</span><input name="project" required autocomplete="off"></label>
   <label><span>同期用のログイン（Firebase Authentication に作ったメール）</span><input name="email" type="email" required autocomplete="off"></label>
-  <label><span>そのパスワード</span><input name="password" type="password" required autocomplete="new-password"></label>
+  <label><span>そのパスワード（12文字以上の、ほかで使っていないもの）</span><input name="password" type="password" required minlength="6" autocomplete="new-password"></label>
+  <label class="check"><input type="checkbox" name="create" value="1" checked> 同期用のログインを、このメールとパスワードで新しく作る（はじめてのとき）</label>
+  <details><summary>Firestore のルールに足すもの（つなぐ前に Firebase の画面で足してください）</summary>
+    <p class="small">Firebase コンソール → Firestore Database → ルール で、いまのルールの <code>match /databases/{database}/documents {</code> の中に足して「公開」。メールは上で入れるものに変えてください。</p>
+    <pre class="pre">{{ rules }}</pre></details>
   <div class="actions"><button class="btn primary big">🔄 つないで始める</button></div>
 </form>
 </section>
@@ -57,7 +61,11 @@
     <p>グループホームのPCに本部操作をお願いしています（{{ st.lock.since }}）。グループホームのPCが最新のデータを送ってくると、入力も直せるようになります。</p>
     <form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="lock_off"><button class="btn">やめる</button></form>
   {% elif s.mode == 'releasing' %}
-    <p>本部操作をオフにしました。グループホームのPCが受け取ると、また入力できるようになります。</p>
+    <p>本部操作をオフにしました。グループホームのPCが受け取ると、また入力できるようになります（グループホームのPCでGHMSが動いていれば1〜2分）。</p>
+    {% if not st.get('pending_release') %}
+    <form method="post" onsubmit="return confirm('グループホームのPCの返事を待たずに、ふだんの同期にもどします。グループホームのPCが止まったままのときだけ使ってください。よろしいですか？')">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="skip_release">
+      <button class="btn small">グループホームのPCが止まっている：返事を待たずにもどす</button></form>{% endif %}
   {% else %}
     <p>請求・給与・経費・加算・設定は、いつでも本部で直せます。<b>日誌・記録・実績・勤務表などの入力を本部で直すとき</b>は、本部操作をオンにしてください。その間、グループホームのPCには「本部操作中」と出て、見るだけになります（同じものを2か所で直して、片方が消えないようにするため）。</p>
     <form method="post"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="lock_on">
@@ -83,6 +91,8 @@
     接続ファイルには同期用のパスワードと暗号の鍵が入っています。参加させたら、USBメモリから消してください。</p>
 </section>
 {% endif %}
+<details class="card"><summary>Firestore のルール（同期用のログイン：{{ cfg.email }}）</summary>
+  <pre class="pre">{{ rules }}</pre></details>
 <section class="card">
   <div class="actions">
     <form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="now"><button class="btn">🔄 今すぐ同期する</button></form>

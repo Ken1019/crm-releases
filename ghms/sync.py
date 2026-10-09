@@ -45,12 +45,13 @@ HQ_TABLES = {"invoices", "payslips", "expenses", "basic_units", "addons", "resid
 LOCAL_TABLES = {"devices"}  # PINの端末はPCごと
 MERGED = {"users", "audit_log", "settings"}
 # PCごとの設定（送らない・受け取っても上書きしない）
-LOCAL_SETTING_RE = re.compile(r"^(update_|backup_|sync_|app_version$|seeded|track_defaults)")
+LOCAL_SETTING_RE = re.compile(r"^(update_|backup_|sync_|app_version$|seeded|track_defaults|kiosk_fail)")
 USER_PROFILE = ["username", "display_name", "password_hash", "role", "active", "must_change", "pin_hash", "staff_id",
                 "created_at", "updated_at"]
 CHUNK = 700_000  # Firestore の1つの文書は1MBまで
 AUDIT_DAYS = 60  # ふだん送る操作の記録の日数（すべて送るときは全部）
 POLL_SEC = 60
+SETTLE_SEC = 2  # 見るだけにしてから送るまで待つ秒数（保存の途中の画面を待つ）。テストでは 0
 SITE_RE = re.compile(r"^[A-Za-z0-9_-]{3,40}$")
 _lock = threading.RLock()
 
@@ -179,6 +180,35 @@ class SyncError(Exception):
     pass
 
 
+FIREBASE_ERRORS = [
+    ("OPERATION_NOT_ALLOWED", "Firebase で「メール / パスワード」のログインが有効になっていません（Authentication → ログイン方法）"),
+    ("EMAIL_EXISTS", "そのメールの同期用ログインはもうあります。「新しく作る」のチェックを外して、そのパスワードを入れてください"),
+    ("INVALID_LOGIN_CREDENTIALS", "同期用のログインのメールかパスワードがちがいます"),
+    ("INVALID_PASSWORD", "同期用のログインのパスワードがちがいます"),
+    ("EMAIL_NOT_FOUND", "その同期用のログインがありません（「新しく作る」にチェックすると作れます）"),
+    ("WEAK_PASSWORD", "同期用のログインのパスワードは6文字以上にしてください（長いものがおすすめ）"),
+    ("API key not valid", "Firebase のウェブAPIキーがちがいます"),
+    ("PERMISSION_DENIED", "Firestore のルールで、同期用のログインが許可されていません（この画面の「Firestore のルール」を足してください）"),
+    ("NOT_FOUND", "Firebase のプロジェクトIDがちがうか、Firestore のデータベースが作られていません"),
+]
+
+
+def explain_error(code, detail):
+    for k, msg in FIREBASE_ERRORS:
+        if k in detail:
+            return msg
+    return f"Firebase がエラーを返しました（{code}）：{detail[:300]}"
+
+
+def rules_text(email):
+    """Firestore のルールに足すもの（給与計算ソフトなどの今のルールの中に入れる）"""
+    return ("    // GHMS の同期：同期用のログインだけが読み書きできる\n"
+            "    match /ghms_sync/{site}/{rest=**} {\n"
+            "      allow read, write: if request.auth != null\n"
+            f"                         && request.auth.token.email == \"{email}\";\n"
+            "    }\n")
+
+
 class Firestore:
     """Firebase の Firestore（REST）。ログインは Firebase Authentication のメールとパスワード"""
 
@@ -201,10 +231,17 @@ class Firestore:
         except urllib.error.HTTPError as e:
             if e.code == 404 and method == "GET":
                 return None
-            detail = e.read().decode(errors="replace")[:300]
-            raise SyncError(f"Firebase がエラーを返しました（{e.code}）：{detail}") from e
+            detail = e.read().decode(errors="replace")[:500]
+            raise SyncError(explain_error(e.code, detail)) from e
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             raise SyncError(f"Firebase につながりません（インターネットの接続を確かめてください）：{e}") from e
+
+    def sign_up(self):
+        """同期用のログインを Firebase Authentication に作る（メール/パスワードのログインが有効なとき）"""
+        key = urllib.parse.quote(self.cfg["api_key"])
+        r = self._req("POST", f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={key}",
+                      {"email": self.cfg["email"], "password": self.cfg["password"], "returnSecureToken": True}, auth=False)
+        self._token, self._exp = r["idToken"], time.time() + int(r.get("expiresIn", 3600))
 
     def token(self):
         if self._token and time.time() < self._exp - 120:
@@ -267,8 +304,35 @@ class MemoryStore:
 _stores = {}  # テストで差しかえる：{db_path: store}
 
 
+class Prefixed:
+    """同期を始めるたびに変わる番号（sid）を、受け渡し場所の文書の名前の前につける（前の設定の古い文書を読まないため）"""
+
+    def __init__(self, store, sid):
+        self.store, self.pre = store, (f"{sid}_" if sid else "")
+
+    def get(self, name):
+        return self.store.get(self.pre + name)
+
+    def put(self, name, data):
+        self.store.put(self.pre + name, data)
+
+    def delete(self, name):
+        self.store.delete(self.pre + name)
+
+
+_clients = {}
+
+
 def store_for(db_path, cfg):
-    return _stores.get(db_path) or Firestore(cfg)
+    base = _stores.get(db_path)
+    if base is None:
+        # ログインのしるし（1時間使える）を毎回取り直さないように、同じ設定なら使い回す
+        k = json.dumps([cfg.get(x) for x in ("api_key", "project", "site", "email", "password")])
+        c = _clients.get(db_path)
+        if not c or c[0] != k:
+            c = _clients[db_path] = (k, Firestore(cfg))
+        base = c[1]
+    return Prefixed(base, cfg.get("sid", ""))
 
 
 # ---------------------------------------------------------------- 暗号化
@@ -308,8 +372,9 @@ def _cols(con, table):
 
 def build(db_path, role, full):
     """送るデータ。full でなければ自分の表（＋ログインする人・自分の操作の記録）だけ"""
-    con = sqlite3.connect(db_path, timeout=30)
+    con = sqlite3.connect(db_path, timeout=30, isolation_level=None)
     try:
+        con.execute("BEGIN")  # すべての表を同じ時点で読む
         out = {}
         for t in _tables(con):
             if t in LOCAL_TABLES or t == "audit_log":
@@ -359,8 +424,10 @@ def apply(db_path, pkg, tables_from, replace_users=False):
                 continue
             if t == "users" and replace_users:
                 _replace(con, t, data)
+                # 前にこのPCでログインしていた人は、すべて入り直し（同じIDが別の人になっているため）。同じ書きこみの中で
+                con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sync_epoch', ?)", (secrets.token_hex(8),))
             elif t == "users":
-                _merge_users(con, data)
+                _merge_users(con, data, sender)
             elif table_owner(t) not in tables_from:
                 continue
             elif t == "settings":
@@ -396,29 +463,35 @@ def _replace(con, t, data):
         con.executemany(f'INSERT INTO "{t}" ({names}) VALUES ({q})', ([r[i] for i in idx] for r in data["rows"]))
 
 
-def _merge_users(con, data):
+# ログインする人の、本部が決めること（本部から届いたら、いつでもそのとおりにする）と、本人が変えること（新しいほう）
+USER_AUTHORITY = ["username", "display_name", "role", "active", "staff_id", "created_at"]
+USER_SECRET = ["password_hash", "pin_hash", "must_change"]
+
+
+def _merge_users(con, data, sender):
+    """ログインする人を合わせる。役・停止などは本部のとおり、パスワード・PINは新しく変えたほう。
+    ログインの切れ目（session_ver）は送らない（片方でログアウトすると、もう片方まで切れてしまうため）"""
     mine = set(_cols(con, "users"))
     rows = [dict(zip(data["cols"], r)) for r in data["rows"]]
-    local = {r[0]: r for r in con.execute("SELECT id, updated_at, session_ver FROM users")}
+    local = {r[0]: r[1] for r in con.execute("SELECT id, updated_at FROM users")}
     for r in rows:
-        prof = {k: r[k] for k in USER_PROFILE if k in r and k in mine}
-        lr = local.get(r["id"])
-        if lr is None:
-            names = ["id"] + list(prof) + (["session_ver"] if "session_ver" in r and "session_ver" in mine else [])
-            vals = [r["id"]] + list(prof.values()) + ([r["session_ver"]] if "session_ver" in names else [])
+        auth_cols = [k for k in USER_AUTHORITY if k in r and k in mine]
+        secret_cols = [k for k in USER_SECRET if k in r and k in mine]
+        if r["id"] not in local:
+            names = ["id"] + auth_cols + secret_cols + (["updated_at"] if "updated_at" in r else [])
             try:
-                con.execute(f'INSERT INTO users ({",".join(names)}) VALUES ({",".join("?" * len(names))})', vals)
+                con.execute(f'INSERT INTO users ({",".join(names)}) VALUES ({",".join("?" * len(names))})', [r[k] for k in names])
             except sqlite3.IntegrityError:
                 log.warning("同じ名前のログインがあるため、受け取れませんでした: %s", r.get("username"))
             continue
-        if (r.get("updated_at") or "") > (lr[1] or ""):
-            sets = ",".join(f'"{k}"=?' for k in prof)
+        sets = auth_cols if sender == HQ else []
+        if (r.get("updated_at") or "") > (local[r["id"]] or ""):
+            sets = sets + secret_cols + ["updated_at"]
+        if sets:
             try:
-                con.execute(f"UPDATE users SET {sets} WHERE id=?", list(prof.values()) + [r["id"]])
+                con.execute(f'UPDATE users SET {",".join(f"{k}=?" for k in sets)} WHERE id=?', [r[k] for k in sets] + [r["id"]])
             except sqlite3.IntegrityError:
                 log.warning("同じ名前のログインがあるため、受け取れませんでした: %s", r.get("username"))
-        if "session_ver" in r:
-            con.execute("UPDATE users SET session_ver=MAX(COALESCE(session_ver,0), ?) WHERE id=?", (r["session_ver"] or 0, r["id"]))
 
 
 def _merge_audit(con, data, sender):
@@ -508,7 +581,19 @@ def _receive(db_path, cfg, store, st, name, tables_from, after=None, replace_use
 
 
 def _put_ctl(store, cfg, st):
-    store.put(f"ctl_{cfg['role']}", st.setdefault("ctl", {}))
+    """やりとりの合図も暗号化する（受け渡し場所に書ける人が、合図をにせたり読んだりできないように）"""
+    ctl = st.setdefault("ctl", {})
+    ctl["stamp"] = now()
+    name = f"ctl_{cfg['role']}"
+    store.put(name, {"d": encrypt(cfg, name, 0, ctl)})
+
+
+def _get_ctl(store, cfg, role):
+    name = f"ctl_{role}"
+    d = store.get(name)
+    if not d or not d.get("d"):
+        return {}
+    return decrypt(cfg, name, 0, d["d"])
 
 
 # ---------------------------------------------------------------- 1回の同期
@@ -538,15 +623,29 @@ def is_origin(cfg):
     return bool(cfg.get("origin", cfg["role"] == HOME))
 
 
+def _settle():
+    """見るだけにしてから、保存の途中の画面が終わるのを少し待つ（そのあとで読んだものを送る）"""
+    if SETTLE_SEC:
+        time.sleep(SETTLE_SEC)
+
+
 def _answer_full(db_path, cfg, store, st, other):
     """相手が「すべてほしい」（はじめての参加・取り直し）と言っていれば、すべてを送る"""
     ctl = st.setdefault("ctl", {})
+    o = OTHER[cfg["role"]]
     if other.get("need_full") and ctl.get("full_for") != other["need_full"] and not st.get("locked"):
-        seq = upload(db_path, cfg, store, st, full=True, force=True)
-        ctl.update(full_for=other["need_full"], full_seq=seq, at=now())
-        _put_ctl(store, cfg, st)
-        # すべてを送ったときから、相手の表は相手が直す（このあとこのPCで直すと、相手が受け取らないため）
+        # 送る前から、相手の表は相手が直す（このあとこのPCで直すと、相手が受け取らないため）。
+        # 前の相手の番号・本部操作の途中の状態は忘れる（入れかえたPCの時計で番号が戻っても受け取れるように）
         st["partner_joined"] = True
+        for k in (f"pkg_{o}", f"full_{o}"):
+            st.setdefault("down", {}).pop(k, None)
+        for k in ("min_home_seq", "wait_release", "pending_release", "lock"):
+            st.pop(k, None)
+        save_state(db_path, st)
+        _settle()
+        seq = upload(db_path, cfg, store, st, full=True, force=True)
+        ctl.update(full_for=other["need_full"], full_seq=seq, at=now(), want="none")
+        _put_ctl(store, cfg, st)
     if other.get("joined"):
         st["partner_joined"] = True
 
@@ -561,28 +660,33 @@ def _join(db_path, cfg, store, st, other):
     if other.get("full_for") != ctl["need_full"]:
         return False
     o = OTHER[cfg["role"]]
+    # ログインする人はそっくり置きかえ、前のログインはすべて切る（apply の中で sync_epoch を変える）
     seq = _receive(db_path, cfg, store, st, f"full_{o}", {HOME, HQ}, after=int(other.get("full_seq") or 0) - 1,
                    replace_users=True)
     if seq is None:
         return False
-    # このPCで前にログインしていた人は、すべて入り直し（同じIDが別の人になっているため）
-    con = sqlite3.connect(db_path, timeout=30)
-    try:
-        con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sync_epoch', ?)", (secrets.token_hex(8),))
-        con.commit()
-    finally:
-        con.close()
     st["joined"] = True
     st.setdefault("down", {})[f"pkg_{o}"] = seq
-    st.setdefault("up", {})  # 受け取った内容と同じものは送り直さない
     ctl.pop("need_full", None)
     ctl["joined"] = True
     _put_ctl(store, cfg, st)
     return True
 
 
+def _receive_then_upload(db_path, cfg, store, st, name, tables_from, after=None):
+    """相手の分を受け取ってから、自分の分を送る。受け取れなくても、自分の分は送る（片方が止まらないように）"""
+    err = None
+    try:
+        _receive(db_path, cfg, store, st, name, tables_from, after=after)
+    except Exception as e:  # noqa: BLE001
+        err = e
+    upload(db_path, cfg, store, st, full=False)
+    if err:
+        raise err
+
+
 def _run_home(db_path, cfg, store, st):
-    hq = store.get("ctl_hq") or {}
+    hq = _get_ctl(store, cfg, HQ)
     ctl = st.setdefault("ctl", {})
     req = hq.get("req", "")
     if not is_origin(cfg) and not st.get("joined"):
@@ -593,12 +697,13 @@ def _run_home(db_path, cfg, store, st):
         # 本部操作が始まる：先に見るだけにしてから、すべてを送る
         st["locked"] = {"req": req, "by": hq.get("by", ""), "since": hq.get("at", ""), "force": bool(hq.get("force"))}
         save_state(db_path, st)
+        _settle()
         if hq.get("force"):
             from .backup import event_backup
 
             event_backup(db_path, "before_sync", "forced")
-            st["forced_note"] = (f"{hq.get('at', '')} に本部が強制で本部操作を始めました。それまでにこのPCで入力して、"
-                                 "まだ送れていなかったものは反映されていません（バックアップの「同期の前」に残しています）。")
+            st["forced_note"] = (f"{hq.get('at', '')} に本部が強制で本部操作を始めました。このPCで入力して、"
+                                 "まだ本部に送れていなかったものは反映されていません（バックアップの「同期の前」に残しています）。")
             seq = 0
         else:
             seq = upload(db_path, cfg, store, st, full=True, force=True)
@@ -615,21 +720,33 @@ def _run_home(db_path, cfg, store, st):
                 ctl.update(released=lock["req"], after_seq=_seq(st, f"pkg_{HOME}") - 1, at=now())
                 _put_ctl(store, cfg, st)
         return
-    _receive(db_path, cfg, store, st, f"pkg_{HQ}", {HQ})
-    upload(db_path, cfg, store, st, full=False)
+    if hq.get("want") != HQ and req and ctl.get("released") != req:
+        # 本部操作をやめた（こちらが見るだけになる前に）ときも「おわりを受け取った」と答える
+        ctl.update(released=req, after_seq=_seq(st, f"pkg_{HOME}") - 1, at=now())
+        _put_ctl(store, cfg, st)
+    _receive_then_upload(db_path, cfg, store, st, f"pkg_{HQ}", {HQ})
 
 
 def _run_hq(db_path, cfg, store, st):
-    home = store.get("ctl_home") or {}
+    home = _get_ctl(store, cfg, HOME)
     ctl = st.setdefault("ctl", {})
     if not is_origin(cfg) and not st.get("joined"):
         _join(db_path, cfg, store, st, home)
         return
     _answer_full(db_path, cfg, store, st, home)
+    if st.get("pending_release"):
+        # 本部操作のおわり：最後のすべてを送ってから「おわり」と書く（とちゅうで止まっても、次の同期でやり直す）
+        seq = upload(db_path, cfg, store, st, full=True, force=True)
+        ctl.update(want="none", req=st["pending_release"], release_seq=seq, at=now())
+        _put_ctl(store, cfg, st)
+        st["pending_release"] = None
+        save_state(db_path, st)
     lock = st.get("lock")
     if lock:
         if not lock.get("ready"):
             if lock.get("force"):
+                # グループホームが止まっている：先に、もう届いているグループホームの分を受け取る
+                _receive(db_path, cfg, store, st, f"pkg_{HOME}", {HOME}, after=st.get("min_home_seq"))
                 lock["ready"] = True
             elif home.get("granted") == lock["req"]:
                 seq = _receive(db_path, cfg, store, st, f"full_{HOME}", {HOME}, after=int(home.get("grant_seq") or 0) - 1)
@@ -646,8 +763,7 @@ def _run_hq(db_path, cfg, store, st):
             return
         st["wait_release"] = None
         st["min_home_seq"] = int(home.get("after_seq") or 0)
-    _receive(db_path, cfg, store, st, f"pkg_{HOME}", {HOME}, after=st.get("min_home_seq"))
-    upload(db_path, cfg, store, st, full=False)
+    _receive_then_upload(db_path, cfg, store, st, f"pkg_{HOME}", {HOME}, after=st.get("min_home_seq"))
 
 
 # ---------------------------------------------------------------- 本部操作（本部のPC）
@@ -655,12 +771,12 @@ def lock_on(db_path, user, force=False):
     cfg = load_cfg(db_path)
     with _lock:
         st = load_state(db_path)
-        if st.get("lock"):
+        if st.get("lock") or st.get("pending_release"):
             return st
         req = secrets.token_hex(8)
         st["lock"] = {"req": req, "ready": False, "force": bool(force), "by": user, "since": now()}
         st.setdefault("ctl", {}).update(want=HQ, req=req, force=bool(force), by=user, at=now(), release_seq=0)
-        _put_ctl(store_for(db_path, cfg), cfg, st)
+        _put_ctl(store_for(db_path, cfg), cfg, st)  # つながらなければ SyncError（状態は変えない）
         save_state(db_path, st)
     return run_once(db_path)
 
@@ -673,13 +789,31 @@ def lock_off(db_path):
         if not lock:
             return st
         store = store_for(db_path, cfg)
-        seq = upload(db_path, cfg, store, st, full=True, force=True) if lock.get("ready") else 0
-        st.setdefault("ctl", {}).update(want="none", req=lock["req"], release_seq=seq or 0, at=now())
-        _put_ctl(store, cfg, st)
+        if not lock.get("ready"):
+            # まだ始まっていない（グループホームの返事待ち）ときにやめる：返事をもらっていれば、おわりを待つ
+            granted = _get_ctl(store, cfg, HOME).get("granted") == lock["req"]
+            st.setdefault("ctl", {}).update(want="none", req=lock["req"], release_seq=0, at=now())
+            _put_ctl(store, cfg, st)
+            st["lock"] = None
+            st["wait_release"] = lock["req"] if granted else None
+            save_state(db_path, st)
+            return run_once(db_path)
+        # 先に本部も「入力は直せない」にしてから、最後のすべてを送る（送ったあとの入力が消えないように）
         st["lock"] = None
+        st["pending_release"] = lock["req"]
         st["wait_release"] = lock["req"]
         save_state(db_path, st)
+    _settle()
     return run_once(db_path)
+
+
+def skip_release(db_path):
+    """グループホームのPCが「おわり」を受け取らないまま止まっているとき、待つのをやめる"""
+    with _lock:
+        st = load_state(db_path)
+        if not st.get("pending_release"):
+            st["wait_release"] = None
+        save_state(db_path, st)
 
 
 # ---------------------------------------------------------------- 画面で使う
@@ -702,7 +836,7 @@ def status(db_path):
             s["mode"] = "hq_all"
         elif lock:
             s["mode"] = "waiting"
-        elif st.get("wait_release"):
+        elif st.get("wait_release") or st.get("pending_release"):
             s["mode"] = "releasing"
     return s
 

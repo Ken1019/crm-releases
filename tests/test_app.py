@@ -2142,6 +2142,7 @@ def _sync_pair(tmp_path, monkeypatch):
     from ghms.customize import FEATURES
 
     store = sy.MemoryStore()
+    monkeypatch.setattr(sy, "SETTLE_SEC", 0)
 
     def make(name, username):
         d = tmp_path / name
@@ -2276,3 +2277,61 @@ def test_sync_force_lock_and_wrong_key(tmp_path, monkeypatch):
     post(hc, "/m/residents/new", {"name": "鍵のテスト", "home_id": "1", "status": "入居中"})
     sy.run_once(hdb)
     assert "鍵がちがう" in sy.run_once(qdb)["error"]
+
+
+def test_sync_review_regressions(tmp_path, monkeypatch):
+    """点検で見つかったこと：やめた本部操作・強制の前に届いていた入力・ログアウト・打刻のPINのロック・停止とパスワード"""
+    sy, store, home, hc, hq, qc = _sync_pair(tmp_path, monkeypatch)
+    hdb, qdb = home.config["DATABASE"], hq.config["DATABASE"]
+    _rounds(sy, home, hq, home)
+    hc.post("/login", data={"username": "admin", "password": "password123"})
+    # 合図も暗号化されている
+    assert set(store.docs[[k for k in store.docs if k.endswith("ctl_hq")][0]]) == {"d"}
+    # 1. グループホームが返事をする前に本部操作をやめても、ふだんの同期にもどる
+    post(qc, "/sync", {"action": "lock_on"})
+    post(qc, "/sync", {"action": "lock_off"})
+    assert sy.status(qdb)["mode"] == "normal"
+    post(hc, "/m/residents/new", {"name": "やめたあとの入力", "home_id": "1", "status": "入居中"})
+    _rounds(sy, home, hq)
+    assert "やめたあとの入力" in qc.get("/m/residents/").get_data(as_text=True)
+    # 2. グループホームが送ったあとに止まり、本部が強制でオン：送ってあった入力は残る
+    post(hc, "/m/residents/new", {"name": "止まる前の入力", "home_id": "1", "status": "入居中"})
+    _rounds(sy, home, n=1)
+    post(qc, "/sync", {"action": "lock_on", "force": "1"})
+    assert sy.status(qdb)["mode"] == "hq_all"
+    assert "止まる前の入力" in qc.get("/m/residents/").get_data(as_text=True)
+    post(qc, "/sync", {"action": "lock_off"})
+    _rounds(sy, home, hq, home, hq)
+    assert "止まる前の入力" in hc.get("/m/residents/").get_data(as_text=True)
+    assert sy.status(hdb)["mode"] == "normal" and sy.status(qdb)["mode"] == "normal"
+    # 4. グループホームでログアウトしても、本部のログインは切れない
+    h2 = home.test_client()
+    h2.post("/login", data={"username": "admin", "password": "password123"})
+    post(h2, "/logout", {})
+    _rounds(sy, home, hq)
+    assert qc.get("/").status_code == 200
+    # 5. 打刻のPINのロック（PCごとの設定）は同期で消えない
+    with home.app_context():
+        from ghms.db import get_db, set_setting
+        set_setting("kiosk_fail:9", "5")
+        get_db().commit()
+    post(qc, "/m/expenses/new", {"date": "2026-10-01", "kind": "水道光熱費", "item": "設定を送る", "amount": "1"})
+    _rounds(sy, hq, home)
+    with home.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT value FROM settings WHERE key='kiosk_fail:9'").fetchone()[0] == "5"
+    # 6. 本部が止めた人が、そのあとグループホームでパスワードを変えても、止めたまま
+    with hq.app_context():
+        from ghms.db import get_db
+        uid = get_db().execute("SELECT id FROM users WHERE username='ghstaff'").fetchone()[0]
+    post(qc, "/users", {"action": "disable", "id": str(uid)})
+    with home.app_context():
+        from ghms.db import get_db
+        get_db().execute("UPDATE users SET password_hash='changed', updated_at='2099-01-01 00:00:00' WHERE id=?", (uid,))
+        get_db().commit()
+    _rounds(sy, hq, home, hq)
+    for a in (home, hq):
+        with a.app_context():
+            from ghms.db import get_db
+            r = get_db().execute("SELECT active, password_hash FROM users WHERE id=?", (uid,)).fetchone()
+            assert (r[0], r[1]) == (0, "changed"), a
