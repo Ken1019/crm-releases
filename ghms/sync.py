@@ -124,6 +124,11 @@ def save_state(db_path, st):
     _write_json(state_path(db_path), st)
 
 
+def new_sid():
+    """同期を始めるたびの番号（受け渡し場所の文書の名前の前につける）"""
+    return secrets.token_hex(4)
+
+
 def new_key():
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
 
@@ -150,6 +155,7 @@ CONNECT_HEAD = "GHMS-CONNECT:"
 def connect_file_text(cfg):
     """参加するPCに渡す「接続ファイル」：受け渡し場所・同期用のログイン・暗号の鍵（参加するPCの役は相手の役）"""
     body = {k: cfg[k] for k in ("site", "api_key", "project", "email", "password", "key")}
+    body["sid"] = cfg.get("sid", "")
     body["role"] = OTHER[cfg["role"]]
     return CONNECT_HEAD + base64.urlsafe_b64encode(json.dumps(body).encode()).decode() + "\n"
 
@@ -168,7 +174,10 @@ def parse_connect(text):
     if not all(isinstance(body.get(k), str) and body.get(k) for k in need) or body["role"] not in (HOME, HQ) \
             or not parse_key(body["key"]) or not SITE_RE.match(body["site"]):
         return None
-    return {k: body[k] for k in need}
+    out = {k: body[k] for k in need}
+    if re.match(r"^[0-9a-f]{0,16}$", str(body.get("sid", ""))):
+        out["sid"] = body.get("sid", "")
+    return out
 
 
 def now():

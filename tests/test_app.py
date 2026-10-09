@@ -2335,3 +2335,11 @@ def test_sync_review_regressions(tmp_path, monkeypatch):
             from ghms.db import get_db
             r = get_db().execute("SELECT active, password_hash FROM users WHERE id=?", (uid,)).fetchone()
             assert (r[0], r[1]) == (0, "changed"), a
+
+
+def test_sync_uses_session_prefix(tmp_path, monkeypatch):
+    sy, store, home, hc, hq, qc = _sync_pair(tmp_path, monkeypatch)
+    sid = sy.load_cfg(hq.config["DATABASE"])["sid"]
+    assert sid and sy.load_cfg(home.config["DATABASE"])["sid"] == sid
+    _rounds(sy, home, hq, home)
+    assert all(k.startswith(sid + "_") for k in store.docs)

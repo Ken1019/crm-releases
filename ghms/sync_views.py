@@ -61,7 +61,7 @@ def index():
                 new = {"role": role, "site": request.form.get("site", "").strip(),
                        "api_key": request.form.get("api_key", "").strip(), "project": request.form.get("project", "").strip(),
                        "email": request.form.get("email", "").strip(), "password": request.form.get("password", ""),
-                       "key": sy.new_key(), "origin": True}
+                       "key": sy.new_key(), "origin": True, "sid": sy.new_sid()}
                 if role not in (sy.HOME, sy.HQ):
                     errs.append("このPCの役を選んでください")
                 if not sy.SITE_RE.match(new["site"]):
