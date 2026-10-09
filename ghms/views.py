@@ -1,10 +1,8 @@
 import calendar
-import io
 import json
-import sqlite3
 from datetime import date, datetime, timedelta
 
-from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, url_for
 from openpyxl import Workbook
 
 from . import excel
@@ -638,19 +636,6 @@ def settings():
     return render_template("settings.html", items=items, system_start=get_setting("system_start", ""))
 
 
-@bp.route("/backup")
-@admin_required
-def backup():
-    src = sqlite3.connect(current_app.config["DATABASE"])
-    mem = sqlite3.connect(":memory:")
-    src.backup(mem)
-    src.close()
-    data = mem.serialize()
-    mem.close()
-    name = f"ghms_backup_{datetime.now():%Y%m%d_%H%M}.sqlite3"
-    return send_file(io.BytesIO(data), mimetype="application/octet-stream", as_attachment=True, download_name=name)
-
-
 @bp.route("/audit")
 @admin_required
 def audit_log():
@@ -682,5 +667,5 @@ AUDIT_ACTIONS = {
     "user_enable": "ユーザー再開", "user_unlock": "ロック解除", "reauth": "管理者画面の本人確認",
     "pin_set": "PINの設定", "pin_clear": "PINを消した", "user_pin_set": "PINの設定（管理者）", "user_pin_clear": "PINを消した（管理者）",
     "device_add": "PIN端末の登録", "device_remove": "PIN端末の解除",
-    "update_check": "更新の確認", "update_install": "更新の開始", "update_failed": "更新の失敗",
+    "update_check": "更新の確認", "update_install": "更新の開始", "update_failed": "更新の失敗", "backup": "バックアップ", "restore": "バックアップから元にもどした",
 }

@@ -48,10 +48,17 @@ def create_app(test_config=None):
     if test_config:
         app.config.update(test_config)
 
-    db.init_db(app.config["DATABASE"])
-    app.teardown_appcontext(db.close_db)
+    from . import backup
 
-    from . import absences, auth, billing, crud, customize, compliance, docs, leave, payroll, today, shift, updater, views, work
+    # 版が変わったときは、データの形を新しくする前にバックアップする（作れなければ起動しない）
+    backup.before_version_change(app.config["DATABASE"], VERSION)
+    db.init_db(app.config["DATABASE"])
+    backup.remember_version(app.config["DATABASE"], VERSION)
+    app.teardown_appcontext(db.close_db)
+    if not app.testing and not app.config.get("NO_AUTO_BACKUP"):
+        backup.start_auto(app.config["DATABASE"])
+
+    from . import absences, auth, backup_views, billing, crud, customize, compliance, docs, leave, payroll, today, shift, updater, views, work
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(crud.bp)
@@ -67,6 +74,7 @@ def create_app(test_config=None):
     app.register_blueprint(compliance.bp)
     app.register_blueprint(leave.bp)
     app.register_blueprint(today.bp)
+    app.register_blueprint(backup_views.bp)
     auth.install(app)
     customize.install(app)
 

@@ -1,7 +1,8 @@
 """動かしている環境（インストール版か、開発・ZIP版か）と、データ・設定の置き場所。
 
 インストール版（PyInstallerで固めた GHMS.exe）では、プログラムは Program Files に、
-データは C:\\ProgramData\\GHMS に置く。更新・アンインストールしてもデータは残る。
+設定（config.ini）とログは C:\\ProgramData\\GHMS に、データはインストールのときに選んだフォルダ
+（初めは C:\\ProgramData\\GHMS\\data）に置く。更新・アンインストールしてもデータは残る。
 """
 
 import configparser
@@ -28,7 +29,22 @@ def base_dir():
 
 
 def data_dir():
-    return os.environ.get("GHMS_DATA_DIR") or os.path.join(base_dir(), "data")
+    """データ（ghms.sqlite3）のフォルダ。インストールのときに選んだ場所（config.ini の [data] dir）。
+    書いていなければ、設定のフォルダの data"""
+    if os.environ.get("GHMS_DATA_DIR"):
+        return os.environ["GHMS_DATA_DIR"]
+    chosen = configured_data_dir()
+    return chosen or os.path.join(base_dir(), "data")
+
+
+def configured_data_dir():
+    cp = _read_ini()
+    raw = (cp.get("data", "dir", fallback="") or "").strip().strip('"')
+    if raw and os.path.isabs(raw):
+        return raw
+    if raw:
+        logging.getLogger(__name__).warning("config.ini の [data] dir はドライブから書いてください（%r）。決まった場所を使います", raw)
+    return ""
 
 
 def config_path():

@@ -144,7 +144,7 @@ def install(app):
         if request.method == "POST" and request.form.get("_csrf") != session.get("csrf"):
             abort(400, "画面の有効期限が切れました。もう一度開き直してください。")
         # Excel出力・バックアップは許可された人だけ
-        if (request.path.endswith(".xlsx") or request.endpoint == "views.backup") and not can_export():
+        if (request.path.endswith(".xlsx") or request.endpoint == "backups.download") and not can_export():
             abort(403)
         return None
 

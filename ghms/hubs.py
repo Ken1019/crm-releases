@@ -134,7 +134,7 @@ HUBS = [
     },
     {
         "key": "settings", "icon": "⚙️", "title": "設定", "desc": "事業所・住居・ログインする人・バックアップ",
-        "entities": ["homes"], "endpoints": ["views.settings", "auth.users", "views.audit_log", "system.update", "auth.reauth",
+        "entities": ["homes"], "endpoints": ["views.settings", "auth.users", "views.audit_log", "system.update", "auth.reauth", "backups.index",
                                                 "customize.features", "customize.choices", "customize.fields"],
         "tasks": [
             ("住居（ユニット）を登録・変更する", "ホームの名前・定員・住所", lambda: url_for("crud.index", key="homes"), False),
@@ -144,7 +144,7 @@ HUBS = [
             ("独自の項目を追加する", "入居者・日誌などに事業所で必要な項目を足す", lambda: url_for("customize.fields"), True),
             ("ログインする人を追加する・パスワードを変える", "職員ごとにアカウントを作ります", lambda: url_for("auth.users"), True),
             ("自分のパスワードを変える", "", lambda: url_for("auth.my_password"), False),
-            ("バックアップを保存する", "データをファイルに保存（毎日のバックアップは backup.bat）", lambda: url_for("views.backup"), True),
+            ("バックアップ（自動・2か所目・元にもどす）", "毎日自動で保存。USBメモリなどへの保存・元にもどすのもここ", lambda: url_for("backups.index"), True),
             ("だれが何をしたか見る", "操作の記録", lambda: url_for("views.audit_log"), True),
             ("ソフトを最新の版に更新する", "新しい版の確認・ネット経由で更新", lambda: url_for("system.update"), True),
         ],

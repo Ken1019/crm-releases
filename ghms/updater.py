@@ -14,7 +14,6 @@ import os
 import re
 import secrets
 import shutil
-import sqlite3
 import sys
 import threading
 import time
@@ -163,14 +162,10 @@ def download_installer(m, dest_dir, opener=_open):
 
 
 def backup_before_update(db_path, version):
-    dest = os.path.join(os.path.dirname(db_path), "backup")
-    os.makedirs(dest, exist_ok=True)
-    out = os.path.join(dest, f"before_update_{VERSION}_to_{version}_{datetime.now():%Y%m%d_%H%M%S}.sqlite3")
-    src, dst = sqlite3.connect(db_path), sqlite3.connect(out)
-    src.backup(dst)
-    dst.close()
-    src.close()
-    return out
+    """ネット経由の更新の前に、こわれていないか確かめたバックアップを作る（作れなければ更新しない）"""
+    from .backup import event_backup
+
+    return event_backup(db_path, "before_update", f"{VERSION}_to_{re.sub(r'[^0-9.]', '', str(version))}")
 
 
 def is_local_request():

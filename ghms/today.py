@@ -364,6 +364,14 @@ def build(user_admin=True, staff_id=None, alerts=None):
             who = "、".join(dict.fromkeys(x["who"] for x in (pending or xs)))
             add(lv, f"{xs[0]['name']}（{len(pending or xs)}件）", pre + (who if len(who) < 70 else who[:70] + "…"),
                 url_for("compliance.index") + f"#c-{key}" if user_admin else xs[0]["url"], done=not pending)
+    # バックアップ（失敗・2か所目の未設定・とどいていない）
+    if user_admin:
+        from flask import current_app
+
+        from .backup import health
+
+        for lv, title, detail in health(current_app.config["DATABASE"], get_setting("backup_dir2", "")):
+            add(lv, title, detail, url_for("backups.index"))
     # 受給者証・計画などの期限（ホームのお知らせと同じもの）
     if user_admin:
         if alerts is None:

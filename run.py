@@ -50,20 +50,21 @@ def stop(port):
 
 
 def backup(dest):
-    """動かしたままでも安全にコピーできる SQLite のバックアップ機能を使う"""
-    import sqlite3
+    """動かしたままでも安全にコピーできる SQLite のバックアップ機能を使い、こわれていないか確かめて置く"""
     from datetime import datetime
+
+    from ghms.backup import make_backup
 
     src_path = os.path.join(runtime.data_dir(), "ghms.sqlite3")
     if not os.path.exists(src_path):
         print("データが見つかりません:", src_path)
         return False
-    os.makedirs(dest, exist_ok=True)
     out = os.path.join(dest, f"ghms_{datetime.now():%Y%m%d_%H%M}.sqlite3")
-    src, dst = sqlite3.connect(src_path), sqlite3.connect(out)
-    src.backup(dst)
-    dst.close()
-    src.close()
+    try:
+        make_backup(src_path, out)
+    except Exception as e:  # noqa: BLE001
+        print("バックアップに失敗しました:", e)
+        return False
     print("バックアップしました:", out)
     return True
 

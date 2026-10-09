@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block title %}バックアップ{% endblock %}
+{% block content %}
+<h1>🛟 バックアップ</h1>
+<p class="guide">GHMS が動いているあいだ、<b>毎日自動で</b>データをバックアップします（1時間ごとにその日の分を新しくします）。
+PCがこわれたときのために、<b>USBメモリ・外付けHDDなどの「2か所目」</b>にも保存してください。</p>
+
+{% for lv, title, detail in health %}
+<p class="flash {{ 'error' if lv == 'over' else 'warn' }}">{{ title }}：{{ detail }}</p>
+{% endfor %}
+
+<div class="tiles">
+  <div class="tile"><b class="small">{{ st.get('last_at') or 'まだありません' }}</b><span>最後の自動バックアップ</span></div>
+  <div class="tile"><b class="small">{% if dest %}{{ (st.get('dest2') or {}).get('last_at') or 'まだありません' }}{% else %}設定していません{% endif %}</b><span>2か所目に保存した日時</span></div>
+  <div class="tile"><b>{{ backups|length }}</b><span>残っているバックアップ</span></div>
+</div>
+
+<section class="card">
+  <h2>💾 今すぐバックアップする</h2>
+  <p>大きな入力をする前や、PCを入れかえる前に押してください。2か所目を設定していれば、そこにもコピーします。</p>
+  <div class="actions">
+    <form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="now">
+      <button class="btn primary">💾 今すぐバックアップする</button></form>
+    {% if can_export %}<a class="btn" href="{{ url_for('backups.download') }}">⬇️ いまのデータをファイルでダウンロード</a>{% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <h2>🔌 2か所目の保存先（USBメモリ・外付けHDD・NAS）</h2>
+  <form method="post" class="form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="dest2">
+    <label><span>保存先のフォルダ（例：<code>E:\</code>、<code>\\NAS\共有\GHMS</code>）。空にすると2か所目の保存をやめます</span>
+      <input name="dest2" value="{{ dest }}" placeholder="E:\"></label>
+    <div class="actions"><button class="btn primary">✔ 設定して、今すぐコピーする</button></div>
+  </form>
+  {% if dest %}<p class="muted small">保存している場所：{{ dest_root }}{% if (st.get('dest2') or {}).get('error') %}<br><span class="ng">最後のまちがい：{{ st['dest2']['error'] }}</span>{% endif %}</p>{% endif %}
+  <ul class="small">
+    <li>USBメモリ・外付けHDDは、<b>つないでいるあいだに自動でコピー</b>します。7日とどかないとホームの「今日のやること」に出ます。</li>
+    <li>個人情報が入っています。USBメモリ・外付けHDDは <b>BitLocker To Go（Windowsの暗号化）</b> をかけ、鍵のかかる場所に保管してください。</li>
+    <li>おすすめ：2本のUSBメモリを週ごとに入れかえ、1本は事務所の外（金庫など）に置く。火事・盗難・ウイルスのときも、どちらかが残ります。</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>🗂 残っているバックアップ</h2>
+  <p class="muted small">データの場所：{{ data_dir }}／バックアップの場所：{{ local_root }}<br>
+    残す数：毎日 {{ KEEP['daily'] }}日分・毎月 {{ KEEP['monthly'] }}か月分・版が変わる前／インストールの前／復元の前／手動 それぞれ {{ KEEP['manual'] }}こ（古いものから消します）</p>
+  {% if backups %}
+  <div class="tablewrap"><table class="list">
+    <tr><th>日時</th><th>種類</th><th>場所</th><th>ファイル</th><th>大きさ</th></tr>
+    {% for b in backups %}
+    <tr><td>{{ b.at }}</td><td>{{ b.kind_label }}</td><td>{{ 'このPC' if b.where == 'local' else '2か所目' }}</td>
+      <td class="small">{{ b.name }}</td><td class="small">{{ '%.1f'|format(b.size / 1048576) }} MB</td></tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="empty">まだバックアップがありません。「今すぐバックアップする」を押してください。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>⏪ バックアップから元にもどす</h2>
+  <p class="flash warn">いまのデータが、選んだバックアップの時点にもどります（それより後の入力は消えます）。
+    念のため、もどす前のデータを「復元の前」に自動で残します。職員が入力していないときに行ってください。終わったら全員ログインし直しになります。</p>
+  <form method="post" action="{{ url_for('backups.restore') }}" enctype="multipart/form-data" class="form"
+        onsubmit="return confirm('本当に元にもどしますか？')">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label><span>① 一覧から選ぶ</span>
+      <select name="id"><option value="">（選んでください）</option>
+        {% for b in backups %}<option value="{{ b.id }}">{{ b.at }}　{{ b.kind_label }}（{{ 'このPC' if b.where == 'local' else '2か所目' }}）</option>{% endfor %}
+      </select></label>
+    <label><span>② または、ファイルを選ぶ（別のPCから持ってきたバックアップ・ダウンロードしたファイル。①より優先）</span>
+      <input type="file" name="file" accept=".sqlite3"></label>
+    <label><span>確認のため「{{ word }}」と入れてください</span><input name="word" autocomplete="off"></label>
+    <div class="actions"><button class="btn danger">⏪ 元にもどす</button></div>
+  </form>
+  <p class="muted small">PCを入れかえるとき：古いPCで「今すぐバックアップ」→ USBメモリにコピー → 新しいPCにGHMSを入れて、はじめての設定をすませる → この画面の②でファイルを選んで元にもどす。</p>
+</section>
+{% endblock %}

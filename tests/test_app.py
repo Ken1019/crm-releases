@@ -1907,3 +1907,120 @@ def test_rent_subsidy_not_prorated_and_yakin_checked(client):
     assert '<b class="rowtotal">5,000</b>' in client.get("/billing/invoices?ym=2026-10").get_data(as_text=True)
     post(client, "/payroll/settings", {"pay_yakin_checked": "1"})
     assert 'name="pay_yakin_checked" value="1" checked' in client.get("/payroll/settings").get_data(as_text=True)
+
+
+# ---------------------------------------------------------------- バックアップ
+def test_backup_auto_rotate_and_dest2(client, app, tmp_path):
+    import os
+
+    from ghms import backup as bk
+
+    db_path = app.config["DATABASE"]
+    st = bk.run_auto(db_path)
+    assert st["last_at"] and not st.get("error")
+    root = bk.local_root(db_path)
+    assert bk._files(os.path.join(root, "daily")) and bk._files(os.path.join(root, "monthly"))
+    assert bk.check_file(st["last_file"]) == (True, "")
+    # 古いものは決まった数だけ残す
+    for i in range(40):
+        open(os.path.join(root, "daily", f"ghms_2000{i:04d}.sqlite3"), "wb").close()
+    bk.prune(os.path.join(root, "daily"), bk.KEEP["daily"])
+    names = bk._files(os.path.join(root, "daily"))
+    assert len(names) == 30 and names[-1].startswith(f"ghms_{date.today():%Y%m%d}")
+    # 2か所目：まだ設定していなければ「今日のやること」に出る
+    assert "2か所目" in client.get("/").get_data(as_text=True)
+    # データのフォルダの中は選べない
+    post(client, "/backup", {"action": "dest2", "dest2": os.path.join(os.path.dirname(db_path), "x")})
+    with app.app_context():
+        from ghms.db import get_setting
+        assert get_setting("backup_dir2", "") == ""
+    usb = tmp_path.parent / (tmp_path.name + "_usb")
+    usb.mkdir()
+    r = post(client, "/backup", {"action": "dest2", "dest2": str(usb)})
+    assert r.status_code == 302
+    assert bk._files(os.path.join(bk.dest2_root(str(usb)), "daily"))
+    assert "2か所目（USBメモリ" not in client.get("/").get_data(as_text=True)
+    # USBメモリをはずしたとき（とどかない）は知らせる
+    import shutil
+    shutil.rmtree(usb)
+    st = bk.run_auto(db_path)
+    assert st["dest2"]["error"] and not st.get("error")
+    page = client.get("/backup").get_data(as_text=True)
+    assert "見つかりません" in page
+
+
+def test_backup_restore(client, app):
+    import os
+
+    from ghms import backup as bk
+
+    post(client, "/m/homes/new", {"name": "もどす前の住居"})
+    assert post(client, "/backup", {"action": "now"}).status_code == 302
+    post(client, "/m/homes/new", {"name": "あとで足した住居"})
+    items = bk.list_backups(app.config["DATABASE"])
+    man = [b for b in items if b["kind"] == "manual"][0]
+    # 確認の言葉がなければしない・一覧にないものは選べない
+    post(client, "/backup/restore", {"id": man["id"], "word": ""})
+    post(client, "/backup/restore", {"id": "local:manual:../ghms.sqlite3", "word": "復元する"})
+    assert "あとで足した住居" in client.get("/m/homes/").get_data(as_text=True)
+    r = post(client, "/backup/restore", {"id": man["id"], "word": "復元する"})
+    assert r.status_code == 302 and "/login" in r.headers["Location"]
+    # ログインし直し
+    assert client.get("/").status_code == 302
+    client.post("/login", data={"username": "admin", "password": "password123"})
+    html = client.get("/m/homes/").get_data(as_text=True)
+    assert "もどす前の住居" in html and "あとで足した住居" not in html
+    assert bk._files(os.path.join(bk.local_root(app.config["DATABASE"]), "before_restore"))
+    # GHMSのデータでないファイルは使えない
+    import io
+    data = {"_csrf": csrf(client), "word": "復元する", "file": (io.BytesIO(b"not a db"), "x.sqlite3")}
+    client.post("/backup/restore", data=data, content_type="multipart/form-data")
+    assert "もどす前の住居" in client.get("/m/homes/").get_data(as_text=True)
+
+
+def test_backup_staff_forbidden(client, app):
+    c = staff_client(client, app)
+    for path in ["/backup", "/backup/download"]:
+        assert c.get(path).status_code == 403, path
+    assert client.get("/backup/download").data[:15] == b"SQLite format 3"
+
+
+def test_backup_before_version_change(tmp_path, monkeypatch):
+    import os
+    import sqlite3
+
+    from ghms import VERSION
+    from ghms import backup as bk
+
+    monkeypatch.setenv("GHMS_DATA_DIR", str(tmp_path))
+    app = create_app({"TESTING": True})
+    db_path = app.config["DATABASE"]
+    assert bk.stored_version(db_path) == VERSION
+    con = sqlite3.connect(db_path)
+    con.execute("UPDATE settings SET value='0.9.0' WHERE key='app_version'")
+    con.commit()
+    con.close()
+    create_app({"TESTING": True})
+    files = bk._files(os.path.join(bk.local_root(db_path), "before_update"))
+    assert len(files) == 1 and "0.9.0_to_" + VERSION in files[0]
+    assert bk.stored_version(db_path) == VERSION
+    # 古い版で開いても、使った版（新しいほう）は上書きしない
+    con = sqlite3.connect(db_path)
+    con.execute("UPDATE settings SET value='99.0.0' WHERE key='app_version'")
+    con.commit()
+    con.close()
+    create_app({"TESTING": True})
+    assert bk.stored_version(db_path) == "99.0.0"
+
+
+def test_data_dir_from_config(tmp_path, monkeypatch):
+    from ghms import runtime
+
+    monkeypatch.delenv("GHMS_DATA_DIR", raising=False)
+    monkeypatch.setenv("GHMS_HOME", str(tmp_path))
+    assert runtime.data_dir() == str(tmp_path / "data")
+    chosen = tmp_path / "選んだ場所"
+    (tmp_path / "config.ini").write_text(f"[data]\ndir = {chosen}\n", encoding="cp932")
+    assert runtime.data_dir() == str(chosen)
+    (tmp_path / "config.ini").write_text("[data]\ndir = relative\\path\n", encoding="cp932")
+    assert runtime.data_dir() == str(tmp_path / "data")

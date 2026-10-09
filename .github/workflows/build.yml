@@ -74,29 +74,50 @@ jobs:
           & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" packaging\installer.iss
           if ($LASTEXITCODE -ne 0) { throw "インストーラーを作れませんでした" }
 
-      - name: インストーラーの動作確認（入れる → 起動 → 止める → アンインストール）
+      - name: インストーラーの動作確認（選んだ場所に入れる → 起動 → 入れ直してバックアップ → アンインストールでもデータが残る）
         run: |
           $v = "${{ steps.ver.outputs.version }}"
-          # -Wait はインストーラーが起動したGHMSの終了まで待ってしまうため、インストーラー本体だけを待つ
-          $p = Start-Process -FilePath "dist\GHMS-Setup-$v.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/MERGETASKS=!desktopicon,!startup" -PassThru
-          if (-not $p.WaitForExit(300000)) { throw "インストーラーが終わりません" }
-          if ($p.ExitCode -ne 0) { throw "インストーラーがエラーで終わりました: $($p.ExitCode)" }
+          $data = "C:\GHMSのデータ"
           $exe = Join-Path $env:ProgramFiles "GHMS\GHMS.exe"
-          if (-not (Test-Path $exe)) { throw "インストールされていません" }
-          $ok = $false
-          for ($i = 0; $i -lt 60; $i++) {
-            try { $r = Invoke-RestMethod http://127.0.0.1:8000/__ping -TimeoutSec 2; if ($r.ok) { $ok = $true; break } } catch {}
-            Start-Sleep -Seconds 1
+          function Install($extra) {
+            # -Wait はインストーラーが起動したGHMSの終了まで待ってしまうため、インストーラー本体だけを待つ
+            $a = @("/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/MERGETASKS=!desktopicon,!startup") + $extra
+            $p = Start-Process -FilePath "dist\GHMS-Setup-$v.exe" -ArgumentList $a -PassThru
+            if (-not $p.WaitForExit(300000)) { throw "インストーラーが終わりません" }
+            if ($p.ExitCode -ne 0) { throw "インストーラーがエラーで終わりました: $($p.ExitCode)" }
+            if (-not (Test-Path $exe)) { throw "インストールされていません" }
           }
-          if (-not $ok) { Start-Process -FilePath $exe -ArgumentList "--no-browser"; Start-Sleep -Seconds 10; $r = Invoke-RestMethod http://127.0.0.1:8000/__ping }
+          function WaitPing {
+            for ($i = 0; $i -lt 60; $i++) {
+              try { $r = Invoke-RestMethod http://127.0.0.1:8000/__ping -TimeoutSec 2; if ($r.ok) { return $r } } catch {}
+              Start-Sleep -Seconds 1
+            }
+            Start-Process -FilePath $exe -ArgumentList "--no-browser"; Start-Sleep -Seconds 10
+            return Invoke-RestMethod http://127.0.0.1:8000/__ping
+          }
+          function StopGhms { (Start-Process -FilePath $exe -ArgumentList "--stop" -PassThru).WaitForExit(60000) | Out-Null; Start-Sleep -Seconds 2 }
+
+          Install @("/DATADIR=`"$data`"")
+          $r = WaitPing
           Write-Host "installed version: $($r.version)"
-          if (-not (Test-Path (Join-Path $env:ProgramData "GHMS\data\ghms.sqlite3"))) { throw "データが ProgramData に作られていません" }
-          (Start-Process -FilePath $exe -ArgumentList "--stop" -PassThru).WaitForExit(60000) | Out-Null
+          if (-not (Test-Path (Join-Path $data "ghms.sqlite3"))) { Get-Content (Join-Path $env:ProgramData "GHMS\config.ini"); throw "選んだ場所にデータが作られていません" }
+          if (Test-Path (Join-Path $env:ProgramData "GHMS\data\ghms.sqlite3")) { throw "決まった場所にもデータが作られています" }
+          StopGhms
+
+          # 入れ直し（更新と同じ）：場所は変わらず、入れかえる前のバックアップができる
+          Install @()
+          $r = WaitPing
+          $bk = Get-ChildItem (Join-Path $data "backup\before_install") -Filter "ghms_*.sqlite3"
+          if (-not $bk) { throw "入れかえる前のバックアップがありません" }
+          Write-Host "before_install: $($bk.Name)"
+          StopGhms
+
           $u = Start-Process -FilePath (Join-Path $env:ProgramFiles "GHMS\unins000.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -PassThru
           if (-not $u.WaitForExit(300000)) { throw "アンインストールが終わりません" }
           Start-Sleep -Seconds 3
           if (Test-Path $exe) { throw "アンインストールできていません" }
-          if (-not (Test-Path (Join-Path $env:ProgramData "GHMS\data\ghms.sqlite3"))) { throw "アンインストールでデータが消えています" }
+          if (-not (Test-Path (Join-Path $data "ghms.sqlite3"))) { throw "アンインストールでデータが消えています" }
+          if (-not (Test-Path (Join-Path $env:ProgramData "GHMS\config.ini"))) { throw "アンインストールで設定が消えています" }
           Write-Host "installer OK"
 
       - name: 更新情報（latest.json）を作る
