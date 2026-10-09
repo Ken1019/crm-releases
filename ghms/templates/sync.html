@@ -3,28 +3,37 @@
 {% block content %}
 <h1>🔄 本部とグループホームの同期</h1>
 {% if not cfg %}
-<p class="guide">グループホームのPCと本部のPCで、同じデータを使えるようにします。データは<b>暗号化してから</b> Firebase（給与計算ソフトで使っている受け渡し場所）に置くので、Google や Firebase からは中身が見えません。<br>
-  ふだんは、<b>グループホーム</b>で日々の入力（日誌・記録・実績・勤務の確定など）、<b>本部</b>で請求・給与・経費・加算・設定を行います。本部で入力を直すときは「本部操作」をオンにします（その間、グループホームのPCは見るだけになります）。</p>
+<p class="guide">本部のPCとグループホームのPCで、同じデータを使えるようにします。データは<b>暗号化してから</b> Firebase（給与計算ソフトで使っている受け渡し場所）に置くので、Google や Firebase からは中身が見えません。<br>
+  ふだんは、<b>グループホーム</b>で日々の入力（日誌・記録・実績・勤務の確定など）、<b>本部</b>で請求・給与・経費・加算・設定・ログインする人の追加を行います。本部で入力を直すときは「本部操作」をオンにします（その間、グループホームのPCは見るだけになります）。</p>
 <ol class="small">
-  <li>はじめに<b>グループホームのPC（いまのデータがあるPC）</b>で設定します。暗号の鍵ができるので、鍵のファイルをUSBメモリに保存してください。</li>
-  <li>本部のPCにGHMSを入れ、はじめての設定をすませてから、この画面で「本部」を選び、鍵のファイルを選びます。グループホームのデータがすべて届きます（本部で作ったログインは、グループホームのログインに置きかわります）。</li>
-  <li>Firebase の準備（メールとパスワードのログイン・データベースのルール）は「docs/同期の設定.md」を見てください。</li>
+  <li><b>本部のPC</b>にGHMSを入れ、はじめての設定・入居者や職員・グループホームの職員のログインを入れておきます。</li>
+  <li>本部のPCで、下の「① このPCで始める」をします。終わったら「接続ファイルを保存」して、USBメモリに入れます。</li>
+  <li><b>グループホームのPC</b>にGHMSを入れ、はじめての設定をすませてから（ここで作ったログインは、あとで本部のログインに置きかわります）、この画面の「② 接続ファイルで参加する」でファイルを選びます。本部のデータがすべて届きます。</li>
+  <li>Firebase の準備（同期用のログイン・データベースのルール）は「docs/同期の設定.md」を見てください。</li>
 </ol>
-<form method="post" enctype="multipart/form-data" class="card form">
-  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="setup">
+<section class="card">
+<h2>① このPCで始める（本部のPC）</h2>
+<form method="post" class="form">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="start">
   <fieldset><legend>このPCの役</legend>
-    <label class="check"><input type="radio" name="role" value="{{ HOME }}" required> グループホーム（日々の入力をするPC・いまのデータがあるPC）</label>
-    <label class="check"><input type="radio" name="role" value="{{ HQ }}"> 本部（請求・給与をするPC）</label></fieldset>
-  <label><span>事業所のID（両方のPCで同じにする。半角英数字）</span><input name="site" value="{{ default_site }}" required pattern="[A-Za-z0-9_\-]{3,40}"></label>
+    <label class="check"><input type="radio" name="role" value="{{ HQ }}" checked> 本部（請求・給与・設定をするPC）</label>
+    <label class="check"><input type="radio" name="role" value="{{ HOME }}"> グループホーム（グループホームに先にデータがあるとき）</label></fieldset>
+  <label><span>事業所のID（半角英数字。例：office1）</span><input name="site" value="{{ default_site }}" required pattern="[A-Za-z0-9_\-]{3,40}"></label>
   <label><span>Firebase のウェブAPIキー（プロジェクトの設定 → 全般）</span><input name="api_key" required autocomplete="off"></label>
   <label><span>Firebase のプロジェクトID</span><input name="project" required autocomplete="off"></label>
   <label><span>同期用のログイン（Firebase Authentication に作ったメール）</span><input name="email" type="email" required autocomplete="off"></label>
   <label><span>そのパスワード</span><input name="password" type="password" required autocomplete="new-password"></label>
-  <fieldset><legend>暗号の鍵（本部のときだけ。グループホームのときは自動で作ります）</legend>
-    <label><span>鍵のファイル（ghms-sync-key.txt）</span><input type="file" name="key_file" accept=".txt"></label>
-    <label><span>または、鍵の文字をはりつけ</span><input name="key" autocomplete="off"></label></fieldset>
-  <div class="actions"><button class="btn primary big">🔄 つないで同期を始める</button></div>
+  <div class="actions"><button class="btn primary big">🔄 つないで始める</button></div>
 </form>
+</section>
+<section class="card">
+<h2>② 接続ファイルで参加する（グループホームのPC）</h2>
+<form method="post" enctype="multipart/form-data" class="form" onsubmit="return confirm('このPCのデータは、相手のPCのデータに置きかわります（このPCのバックアップは残します）。よろしいですか？')">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="join">
+  <label><span>本部のPCで保存した接続ファイル（ghms-connect.txt）</span><input type="file" name="connect_file" accept=".txt" required></label>
+  <div class="actions"><button class="btn primary big">🔗 参加する</button></div>
+</form>
+</section>
 {% else %}{% set st = s.st %}
 <div class="tiles">
   <div class="tile"><b>{{ s.label }}</b><span>このPCの役（事業所のID：{{ cfg.site }}）</span></div>
@@ -39,6 +48,7 @@
 <section class="card">
   <h2>🛠 本部操作</h2>
   {% if s.mode == 'joining' %}<p>グループホームのデータを受け取っています。グループホームのPCでGHMSが動いていれば、1〜2分で終わります。</p>
+  {% elif s.mode == 'alone' %}<p>グループホームのPCが参加すると使えます。</p>
   {% elif s.mode == 'hq_all' %}
     <p class="flash warn">本部操作中です（{{ st.lock.by }}・{{ st.lock.since }} から）。入力も直せます。<b>グループホームのPCは見るだけ</b>になっています。終わったら、すぐにオフにしてください。</p>
     <form method="post"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="lock_off">
@@ -58,13 +68,21 @@
 {% else %}
 <section class="card">
   <h2>🏠 このPCはグループホーム</h2>
-  {% if s.mode == 'locked' %}<p class="flash error">本部操作中です（{{ st.locked.by }}・{{ st.locked.since }} から）。この間は見るだけです。</p>
+  {% if s.mode == 'joining' %}<p class="flash warn">本部のデータを受け取っています。本部のPCでGHMSが動いていれば、1〜2分で終わります。受け取ったら、本部で作ったログインで入り直してください。</p>
+  {% elif s.mode == 'locked' %}<p class="flash error">本部操作中です（{{ st.locked.by }}・{{ st.locked.since }} から）。この間は見るだけです。</p>
   {% else %}<p>日々の入力はこのPCで行います。請求・給与・経費・加算・設定は本部のPCで行います（このPCでは見るだけです）。</p>{% endif %}
-  <p><a class="btn" href="{{ url_for('sync.key_file') }}">🔑 暗号の鍵のファイルを保存（本部のPCの設定に使う）</a></p>
-  <p class="muted small">鍵は、本部のPCに設定したら、USBメモリから消すか鍵のかかる場所に保管してください。鍵があれば受け渡し場所のデータを開けてしまいます。</p>
 </section>
 {% endif %}
 
+{% if s.origin %}
+<section class="card">
+  <h2>🔗 {{ '本部' if s.role == HOME else 'グループホーム' }}のPCを追加する</h2>
+  {% if s.mode == 'alone' %}<p class="flash warn">まだ{{ '本部' if s.role == HOME else 'グループホーム' }}のPCが参加していません。今はこのPCで全部直せます。</p>{% endif %}
+  <p><a class="btn primary" href="{{ url_for('sync.connect_file') }}">💾 接続ファイルを保存（ghms-connect.txt）</a></p>
+  <p class="muted small">{{ '本部' if s.role == HOME else 'グループホーム' }}のPCの「同期の設定」→「② 接続ファイルで参加する」で選びます。
+    接続ファイルには同期用のパスワードと暗号の鍵が入っています。参加させたら、USBメモリから消してください。</p>
+</section>
+{% endif %}
 <section class="card">
   <div class="actions">
     <form method="post" class="inline"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="action" value="now"><button class="btn">🔄 今すぐ同期する</button></form>

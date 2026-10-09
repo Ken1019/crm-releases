@@ -2137,6 +2137,7 @@ def test_staff_records_own_temperature(client, app):
 
 # ---------------------------------------------------------------- 本部とグループホームの同期（Firebase のかわりにメモリ）
 def _sync_pair(tmp_path, monkeypatch):
+    """本部を先に入れて始め、グループホームのPCを接続ファイルで参加させる"""
     from ghms import sync as sy
     from ghms.customize import FEATURES
 
@@ -2157,14 +2158,21 @@ def _sync_pair(tmp_path, monkeypatch):
             get_db().commit()
         return a, c
 
-    home, hc = make("home", "admin")
-    hq, qc = make("hq", "hqtemp")
+    hq, qc = make("hq", "admin")
+    home, hc = make("home", "ghtemp")
     cfg = {"site": "office1", "api_key": "k", "project": "p", "email": "s@example.com", "password": "x"}
-    post(hc, "/m/homes/new", {"name": "ひまわり"})
-    post(hc, "/m/residents/new", {"name": "同期太郎", "home_id": "1", "status": "入居中"})
-    assert post(hc, "/sync", dict(cfg, action="setup", role="home")).status_code == 302
-    key = sy.load_cfg(home.config["DATABASE"])["key"]
-    assert post(qc, "/sync", dict(cfg, action="setup", role="hq", key=sy.key_file_text(dict(cfg, key=key)))).status_code == 302
+    assert post(qc, "/sync", dict(cfg, action="start", role="hq")).status_code == 302
+    # 本部で始めたばかり（相手がまだいない）ときは、本部で入居者も入れられる
+    post(qc, "/m/homes/new", {"name": "ひまわり"})
+    post(qc, "/m/residents/new", {"name": "同期太郎", "home_id": "1", "status": "入居中"})
+    # グループホームの職員のログインも本部で作る
+    post(qc, "/users", {"action": "add", "username": "ghstaff", "password": "temppass1", "role": "staff"})
+    text = qc.get("/sync/connect.txt").get_data(as_text=True)
+    assert text.startswith("GHMS-CONNECT:")
+    import io
+    r = hc.post("/sync", data={"_csrf": csrf(hc), "action": "join", "connect_file": (io.BytesIO(text.encode()), "ghms-connect.txt")},
+                content_type="multipart/form-data")
+    assert r.status_code == 302 and sy.load_cfg(home.config["DATABASE"])["role"] == "home"
     return sy, store, home, hc, hq, qc
 
 
@@ -2178,12 +2186,18 @@ def _rounds(sy, *apps, n=2):
 def test_sync_home_and_hq(tmp_path, monkeypatch):
     sy, store, home, hc, hq, qc = _sync_pair(tmp_path, monkeypatch)
     hdb, qdb = home.config["DATABASE"], hq.config["DATABASE"]
-    _rounds(sy, hq, home, hq)
-    assert sy.load_state(qdb).get("joined")
-    # 本部のログインはグループホームのログインに置きかわる
-    assert qc.get("/").status_code == 302
-    qc.post("/login", data={"username": "admin", "password": "password123"})
-    assert "同期太郎" in qc.get("/m/residents/").get_data(as_text=True)
+    assert sy.status(hdb)["mode"] == "joining"
+    _rounds(sy, home, hq, home)
+    assert sy.load_state(hdb).get("joined") and sy.status(qdb)["mode"] == "normal"
+    # グループホームのログインは本部のログインに置きかわる（前のログインは切れる）
+    assert hc.get("/").status_code == 302
+    hc.post("/login", data={"username": "ghtemp", "password": "password123"})
+    assert hc.get("/").status_code == 302  # グループホームで仮に作ったログインはもうない
+    hc.post("/login", data={"username": "admin", "password": "password123"})
+    assert "同期太郎" in hc.get("/m/residents/").get_data(as_text=True)
+    with home.app_context():
+        from ghms.db import get_db
+        assert get_db().execute("SELECT 1 FROM users WHERE username='ghstaff'").fetchone()
     # 受け渡し場所には暗号化したものだけ
     assert all("同期太郎" not in json.dumps(d, ensure_ascii=False) for d in store.docs.values())
     # グループホームの入力 → 本部に届く
@@ -2241,8 +2255,8 @@ def test_sync_home_and_hq(tmp_path, monkeypatch):
 def test_sync_force_lock_and_wrong_key(tmp_path, monkeypatch):
     sy, store, home, hc, hq, qc = _sync_pair(tmp_path, monkeypatch)
     hdb, qdb = home.config["DATABASE"], hq.config["DATABASE"]
-    _rounds(sy, hq, home, hq)
-    qc.post("/login", data={"username": "admin", "password": "password123"})
+    _rounds(sy, home, hq, home)
+    hc.post("/login", data={"username": "admin", "password": "password123"})
     # グループホームのPCが止まっている：強制でオン → すぐ直せる
     post(qc, "/sync", {"action": "lock_on", "force": "1"})
     assert sy.status(qdb)["mode"] == "hq_all"

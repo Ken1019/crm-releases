@@ -67,7 +67,7 @@ HQ_ENDPOINTS = {"billing.invoices", "payroll.edit", "payroll.index", "payroll.se
 # どちらのPCでも、いつでも使える（そのPCだけのこと・ログイン・自分のパスワード）
 FREE_ENDPOINTS = {"auth.login", "auth.logout", "auth.reauth", "auth.pin_login", "auth.my_password", "auth.my_pin",
                   "auth.devices", "auth.setup", "backups.index", "backups.download", "system.update", "system.shutdown",
-                  "sync.index", "sync.key_file", "static"}
+                  "sync.index", "sync.connect_file", "static"}
 
 
 def endpoint_owner(endpoint, view_args):
@@ -141,6 +141,33 @@ def parse_key(text):
 
 def key_file_text(cfg):
     return f"GHMS-SYNC-KEY:{cfg['site']}:{cfg['key']}\n"
+
+
+CONNECT_HEAD = "GHMS-CONNECT:"
+
+
+def connect_file_text(cfg):
+    """参加するPCに渡す「接続ファイル」：受け渡し場所・同期用のログイン・暗号の鍵（参加するPCの役は相手の役）"""
+    body = {k: cfg[k] for k in ("site", "api_key", "project", "email", "password", "key")}
+    body["role"] = OTHER[cfg["role"]]
+    return CONNECT_HEAD + base64.urlsafe_b64encode(json.dumps(body).encode()).decode() + "\n"
+
+
+def parse_connect(text):
+    t = (text or "").strip()
+    i = t.find(CONNECT_HEAD)
+    if i < 0:
+        return None
+    raw = t[i + len(CONNECT_HEAD):].split()[0]
+    try:
+        body = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)).decode())
+    except (ValueError, TypeError):
+        return None
+    need = ("site", "api_key", "project", "email", "password", "key", "role")
+    if not all(isinstance(body.get(k), str) and body.get(k) for k in need) or body["role"] not in (HOME, HQ) \
+            or not parse_key(body["key"]) or not SITE_RE.match(body["site"]):
+        return None
+    return {k: body[k] for k in need}
 
 
 def now():
@@ -506,15 +533,62 @@ def run_once(db_path):
         return st
 
 
+def is_origin(cfg):
+    """はじめに設定したPC（データを持っていて、相手が参加してくる）か。ふつうは本部"""
+    return bool(cfg.get("origin", cfg["role"] == HOME))
+
+
+def _answer_full(db_path, cfg, store, st, other):
+    """相手が「すべてほしい」（はじめての参加・取り直し）と言っていれば、すべてを送る"""
+    ctl = st.setdefault("ctl", {})
+    if other.get("need_full") and ctl.get("full_for") != other["need_full"] and not st.get("locked"):
+        seq = upload(db_path, cfg, store, st, full=True, force=True)
+        ctl.update(full_for=other["need_full"], full_seq=seq, at=now())
+        _put_ctl(store, cfg, st)
+        # すべてを送ったときから、相手の表は相手が直す（このあとこのPCで直すと、相手が受け取らないため）
+        st["partner_joined"] = True
+    if other.get("joined"):
+        st["partner_joined"] = True
+
+
+def _join(db_path, cfg, store, st, other):
+    """参加するPC：相手のすべてを受け取って、このPCのデータを置きかえる。終わったら True"""
+    ctl = st.setdefault("ctl", {})
+    if not ctl.get("need_full"):
+        ctl.update(need_full=secrets.token_hex(8), at=now())
+        _put_ctl(store, cfg, st)
+        return False
+    if other.get("full_for") != ctl["need_full"]:
+        return False
+    o = OTHER[cfg["role"]]
+    seq = _receive(db_path, cfg, store, st, f"full_{o}", {HOME, HQ}, after=int(other.get("full_seq") or 0) - 1,
+                   replace_users=True)
+    if seq is None:
+        return False
+    # このPCで前にログインしていた人は、すべて入り直し（同じIDが別の人になっているため）
+    con = sqlite3.connect(db_path, timeout=30)
+    try:
+        con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sync_epoch', ?)", (secrets.token_hex(8),))
+        con.commit()
+    finally:
+        con.close()
+    st["joined"] = True
+    st.setdefault("down", {})[f"pkg_{o}"] = seq
+    st.setdefault("up", {})  # 受け取った内容と同じものは送り直さない
+    ctl.pop("need_full", None)
+    ctl["joined"] = True
+    _put_ctl(store, cfg, st)
+    return True
+
+
 def _run_home(db_path, cfg, store, st):
     hq = store.get("ctl_hq") or {}
     ctl = st.setdefault("ctl", {})
     req = hq.get("req", "")
-    # 本部が「すべてほしい」（はじめての参加・取り直し）
-    if hq.get("need_full") and ctl.get("full_for") != hq["need_full"] and not st.get("locked"):
-        seq = upload(db_path, cfg, store, st, full=True, force=True)
-        ctl.update(full_for=hq["need_full"], full_seq=seq, at=now())
-        _put_ctl(store, cfg, st)
+    if not is_origin(cfg) and not st.get("joined"):
+        _join(db_path, cfg, store, st, hq)
+        return
+    _answer_full(db_path, cfg, store, st, hq)
     if hq.get("want") == HQ and req and ctl.get("granted") != req:
         # 本部操作が始まる：先に見るだけにしてから、すべてを送る
         st["locked"] = {"req": req, "by": hq.get("by", ""), "since": hq.get("at", ""), "force": bool(hq.get("force"))}
@@ -548,29 +622,10 @@ def _run_home(db_path, cfg, store, st):
 def _run_hq(db_path, cfg, store, st):
     home = store.get("ctl_home") or {}
     ctl = st.setdefault("ctl", {})
-    if not st.get("joined"):
-        # はじめて：グループホームのすべてを受け取る
-        if not ctl.get("need_full"):
-            ctl.update(need_full=secrets.token_hex(8), at=now())
-            _put_ctl(store, cfg, st)
-            return
-        if home.get("full_for") != ctl["need_full"]:
-            return
-        seq = _receive(db_path, cfg, store, st, f"full_{HOME}", {HOME, HQ}, after=int(home.get("full_seq") or 0) - 1,
-                       replace_users=True)
-        if seq is not None:
-            # 本部で前にログインしていた人は、すべて入り直し（同じIDが別の人になっているため）
-            con = sqlite3.connect(db_path, timeout=30)
-            try:
-                con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sync_epoch', ?)", (secrets.token_hex(8),))
-                con.commit()
-            finally:
-                con.close()
-            st["joined"] = True
-            st.setdefault("down", {})[f"pkg_{HOME}"] = seq
-            ctl.pop("need_full", None)
-            _put_ctl(store, cfg, st)
+    if not is_origin(cfg) and not st.get("joined"):
+        _join(db_path, cfg, store, st, home)
         return
+    _answer_full(db_path, cfg, store, st, home)
     lock = st.get("lock")
     if lock:
         if not lock.get("ready"):
@@ -634,14 +689,16 @@ def status(db_path):
         return None
     st = load_state(db_path)
     role = cfg["role"]
-    s = {"role": role, "label": ROLE_LABEL[role], "site": cfg["site"], "st": st, "mode": "normal"}
-    if role == HOME and st.get("locked"):
+    s = {"role": role, "label": ROLE_LABEL[role], "site": cfg["site"], "st": st, "mode": "normal", "origin": is_origin(cfg)}
+    if not s["origin"] and not st.get("joined"):
+        s["mode"] = "joining"
+    elif s["origin"] and not st.get("partner_joined"):
+        s["mode"] = "alone"  # 相手がまだ参加していない：このPCで全部直してよい
+    elif role == HOME and st.get("locked"):
         s["mode"] = "locked"
-    if role == HQ:
+    elif role == HQ:
         lock = st.get("lock")
-        if not st.get("joined"):
-            s["mode"] = "joining"
-        elif lock and lock.get("ready"):
+        if lock and lock.get("ready"):
             s["mode"] = "hq_all"
         elif lock:
             s["mode"] = "waiting"
@@ -660,14 +717,16 @@ def can_write(db_path, endpoint, view_args):
     if endpoint == "backups.restore":
         return False, "同期を使っているあいだは、バックアップから元にもどせません（「同期の設定」で同期をやめてから行ってください）。"
     owner = endpoint_owner(endpoint, view_args)
+    if s["mode"] == "joining":
+        return False, f"{ROLE_LABEL[OTHER[s['role']]]}のデータを受け取っています。少し待ってから、もう一度行ってください。"
+    if s["mode"] == "alone":
+        return True, ""
     if s["role"] == HOME:
         if s["mode"] == "locked":
             return False, "本部操作中です。この間はグループホームのPCでは見るだけです（本部が終わると、また入力できます）。"
         if owner == HQ:
             return False, "請求・給与・設定などは本部のPCで行います（このPCでは見るだけです）。"
         return True, ""
-    if s["mode"] == "joining":
-        return False, "グループホームのデータを受け取っています。少し待ってから、もう一度行ってください。"
     if s["mode"] == "hq_all":
         return True, ""
     if owner == HOME:
@@ -706,7 +765,8 @@ def start_auto(db_path):
             try:
                 if load_cfg(db_path):
                     st = run_once(db_path)
-                    busy = (st.get("lock") and not st["lock"].get("ready")) or st.get("wait_release") or not st.get("joined", True)
+                    busy = (st.get("lock") and not st["lock"].get("ready")) or st.get("wait_release") or \
+                        (not is_origin(load_cfg(db_path) or {"role": HOME}) and not st.get("joined"))
                     time.sleep(10 if busy else POLL_SEC)
                     continue
             except Exception:  # noqa: BLE001

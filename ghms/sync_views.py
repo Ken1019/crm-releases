@@ -53,29 +53,32 @@ def index():
     if request.method == "POST":
         action = request.form.get("action", "")
         user = g.user["username"]
-        if action == "setup" and not cfg:
-            role = request.form.get("role")
-            site = request.form.get("site", "").strip()
-            new = {"role": role, "site": site, "api_key": request.form.get("api_key", "").strip(),
-                   "project": request.form.get("project", "").strip(), "email": request.form.get("email", "").strip(),
-                   "password": request.form.get("password", "")}
-            if role == sy.HOME:
-                new["key"] = sy.new_key()
-            else:
-                text = request.form.get("key", "")
-                up = request.files.get("key_file")
-                if up and up.filename:
-                    text = up.read(4096).decode("utf-8", errors="replace")
-                new["key"] = sy.parse_key(text)
+        if action in ("start", "join") and not cfg:
             errs = []
-            if role not in (sy.HOME, sy.HQ):
-                errs.append("このPCの役（グループホーム・本部）を選んでください")
-            if not sy.SITE_RE.match(site):
-                errs.append("事業所のID は半角の英字・数字・-・_ で3〜40文字にしてください")
-            if not all(new[k] for k in ("api_key", "project", "email", "password")):
-                errs.append("Firebase の4つの項目をすべて入れてください")
-            if not new["key"]:
-                errs.append("暗号の鍵が読めません（グループホームのPCで出した鍵を、そのまま入れてください）")
+            if action == "start":
+                # はじめに設定するPC（ふつうは本部）：暗号の鍵を作る
+                role = request.form.get("role", sy.HQ)
+                new = {"role": role, "site": request.form.get("site", "").strip(),
+                       "api_key": request.form.get("api_key", "").strip(), "project": request.form.get("project", "").strip(),
+                       "email": request.form.get("email", "").strip(), "password": request.form.get("password", ""),
+                       "key": sy.new_key(), "origin": True}
+                if role not in (sy.HOME, sy.HQ):
+                    errs.append("このPCの役を選んでください")
+                if not sy.SITE_RE.match(new["site"]):
+                    errs.append("事業所のID は半角の英字・数字・-・_ で3〜40文字にしてください")
+                if not all(new[k] for k in ("api_key", "project", "email", "password")):
+                    errs.append("Firebase の4つの項目をすべて入れてください")
+            else:
+                # 参加するPC（ふつうはグループホーム）：本部で保存した接続ファイルを選ぶだけ
+                text = request.form.get("connect", "")
+                up = request.files.get("connect_file")
+                if up and up.filename:
+                    text = up.read(8192).decode("utf-8", errors="replace")
+                new = sy.parse_connect(text)
+                if new is None:
+                    errs.append("接続ファイルが読めません（本部のPCで保存した ghms-connect.txt を選んでください）")
+                else:
+                    new["origin"] = False
             if not errs:
                 try:
                     _test_connection(db_path, new)
@@ -84,13 +87,20 @@ def index():
             if errs:
                 flash("同期を始められません：" + "／".join(errs), "error")
                 return redirect(url_for("sync.index"))
+            role = new["role"]
             sy.save_cfg(db_path, new)
             sy.save_state(db_path, {})
-            log_event("settings", detail=f"同期を始めた（{sy.ROLE_LABEL[role]}・{site}）")
+            log_event("settings", detail=f"同期を{'始めた' if action == 'start' else '参加した'}（{sy.ROLE_LABEL[role]}・{new['site']}）")
             get_db().commit()
             st = sy.run_once(db_path)
-            flash(f"同期を始めました（このPCは{sy.ROLE_LABEL[role]}）。" + (f"まちがい：{st['error']}" if st.get("error") else ""),
-                  "error" if st.get("error") else "ok")
+            if st.get("error"):
+                flash(f"同期を始めましたが、まちがいがありました：{st['error']}", "error")
+            elif action == "start":
+                flash(f"このPCを{sy.ROLE_LABEL[role]}として始めました。次に「接続ファイルを保存」して、"
+                      f"{sy.ROLE_LABEL[sy.OTHER[role]]}のPCで選んでください。", "ok")
+            else:
+                flash(f"このPCを{sy.ROLE_LABEL[role]}として参加させました。{sy.ROLE_LABEL[sy.OTHER[role]]}のデータを受け取っています"
+                      "（1〜2分）。受け取ったら、もう一度ログインしてください。", "ok")
         elif not cfg:
             return redirect(url_for("sync.index"))
         elif action == "now":
@@ -127,13 +137,14 @@ def index():
                            default_site=(get_setting("office_no", "") or "").strip() or "office1")
 
 
-@bp.route("/key.txt")
+@bp.route("/connect.txt")
 @admin_required
-def key_file():
+def connect_file():
+    """参加するPCに渡す接続ファイル（はじめに設定したPCだけ。同期用のパスワードと暗号の鍵が入っている）"""
     cfg = sy.load_cfg(_db_path())
-    if not cfg or cfg["role"] != sy.HOME:
+    if not cfg or not sy.is_origin(cfg):
         return redirect(url_for("sync.index"))
-    log_event("export", detail="同期の鍵のファイル")
+    log_event("export", detail="同期の接続ファイル")
     get_db().commit()
-    return Response(sy.key_file_text(cfg), mimetype="text/plain",
-                    headers={"Content-Disposition": "attachment; filename=ghms-sync-key.txt"})
+    return Response(sy.connect_file_text(cfg), mimetype="text/plain",
+                    headers={"Content-Disposition": "attachment; filename=ghms-connect.txt"})
