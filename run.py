@@ -69,6 +69,34 @@ def backup(dest):
     return True
 
 
+EDGE_PATHS = [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+              r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
+              r"%LocalAppData%\Microsoft\Edge\Application\msedge.exe"]
+
+
+def _edge():
+    for p in EDGE_PATHS:
+        p = os.path.expandvars(p)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def open_window(url, as_app=True):
+    """GHMS の画面を開く。Windows では Edge の「アプリ」表示（アドレス欄・タブのない、ソフトのような窓）で開く。
+    Edge がない・使わない設定（config.ini の [app] window = browser）のときは、ふつうのブラウザで開く"""
+    edge = _edge() if as_app and sys.platform == "win32" else None
+    if edge:
+        import subprocess
+
+        try:
+            subprocess.Popen([edge, f"--app={url}", "--window-size=1280,860"], close_fds=True)  # noqa: S603
+            return
+        except OSError:
+            logging.getLogger("ghms").warning("Edge で開けませんでした。ブラウザで開きます")
+    webbrowser.open(url)
+
+
 def _setup_logging():
     log_dir = os.path.join(runtime.base_dir(), "logs")
     os.makedirs(log_dir, exist_ok=True)
@@ -88,6 +116,7 @@ def main():
     p.add_argument("--lan", action="store_true", default=cfg["lan"], help="LAN内の他のPCからの接続を許可する")
     p.add_argument("--port", type=int, default=cfg["port"])
     p.add_argument("--no-browser", action="store_true")
+    p.add_argument("--browser", action="store_true", help="アプリの窓ではなく、ふつうのブラウザで開く")
     p.add_argument("--stop", action="store_true", help="起動中のシステムを止める")
     p.add_argument("--backup", metavar="フォルダ", help="データを指定のフォルダにバックアップして終わる")
     a = p.parse_args()
@@ -99,7 +128,7 @@ def main():
         sys.exit(0 if backup(a.backup) else 1)
     if _port_in_use(a.port):  # すでに起動中 → 画面を開くだけ
         if not a.no_browser:
-            webbrowser.open(url)
+            open_window(url, cfg["window"] and not a.browser)
         return
 
     os.environ.setdefault("GHMS_DATA_DIR", runtime.data_dir())
@@ -118,7 +147,7 @@ def main():
         print("LAN内の他のPCからは http://<このPCのIPアドレス>:%d/ で接続できます" % a.port)
     print("終了するにはこのウィンドウを閉じるか Ctrl+C を押してください。")
     if not a.no_browser:
-        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.5, lambda: open_window(url, cfg["window"] and not a.browser)).start()
     serve(app, host=host, port=a.port, threads=8)
 
 

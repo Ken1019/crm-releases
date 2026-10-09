@@ -58,6 +58,7 @@ Filename: "{commonappdata}\GHMS\config.ini"; Section: "server"; Key: "lan"; Stri
 
 [Icons]
 Name: "{group}\GHMS を開く"; Filename: "{app}\{#AppExe}"
+Name: "{group}\GHMS をブラウザで開く"; Filename: "{app}\{#AppExe}"; Parameters: "--browser"
 Name: "{group}\GHMS を停止する"; Filename: "{app}\{#AppExe}"; Parameters: "--stop"
 Name: "{group}\データのフォルダを開く"; Filename: "{code:DataDir}"
 Name: "{group}\GHMS をアンインストール"; Filename: "{uninstallexe}"
@@ -295,13 +296,15 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  // データの場所は、ファイルを入れる前に書いておく（入れたあとすぐ起動するGHMSが、まちがいなく読むように）
+  if (CurStep = ssInstall) and not Upgrading then
+  begin
+    ForceDirectories(ExpandConstant('{commonappdata}\GHMS'));
+    ForceDirectories(ChosenDataDir());
+    SetIniString('data', 'dir', ChosenDataDir(), ConfigFile());
+  end;
   if CurStep = ssPostInstall then
   begin
-    if not Upgrading then
-    begin
-      ForceDirectories(ChosenDataDir());
-      SetIniString('data', 'dir', ChosenDataDir(), ConfigFile());
-    end;
     if Trim(OfficePage.Values[0]) <> '' then
     begin
       SetIniString('office', 'name', Trim(OfficePage.Values[0]), ConfigFile());

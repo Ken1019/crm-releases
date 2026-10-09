@@ -1690,7 +1690,7 @@ def test_config_ini_with_percent(tmp_path, monkeypatch):
     (tmp_path / "config.ini").write_text("[server]\nport = abc\n", encoding="utf-8")
     assert runtime.load_config()["port"] == 8000
     (tmp_path / "config.ini").write_text("[server]\nport = 70000\nlan = 1\n", encoding="utf-8")
-    assert runtime.load_config() == {"port": 8000, "lan": True}
+    assert runtime.load_config() == {"port": 8000, "lan": True, "window": True}
     # Shift-JIS（インストーラーが書く形）でも読める
     (tmp_path / "config.ini").write_bytes("[office]\nname = ひだまり\n".encode("cp932"))
     assert runtime.load_office()["name"] == "ひだまり"

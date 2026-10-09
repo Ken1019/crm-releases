@@ -81,7 +81,7 @@ jobs:
           $exe = Join-Path $env:ProgramFiles "GHMS\GHMS.exe"
           function Install($extra) {
             # -Wait はインストーラーが起動したGHMSの終了まで待ってしまうため、インストーラー本体だけを待つ
-            $a = @("/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/MERGETASKS=!desktopicon,!startup") + $extra
+            $a = @("/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/LOG","/MERGETASKS=!desktopicon,!startup") + $extra
             $p = Start-Process -FilePath "dist\GHMS-Setup-$v.exe" -ArgumentList $a -PassThru
             if (-not $p.WaitForExit(300000)) { throw "インストーラーが終わりません" }
             if ($p.ExitCode -ne 0) { throw "インストーラーがエラーで終わりました: $($p.ExitCode)" }
@@ -93,7 +93,17 @@ jobs:
               Start-Sleep -Seconds 1
             }
             Start-Process -FilePath $exe -ArgumentList "--no-browser"; Start-Sleep -Seconds 10
-            return Invoke-RestMethod http://127.0.0.1:8000/__ping
+            try { return Invoke-RestMethod http://127.0.0.1:8000/__ping -TimeoutSec 5 } catch {
+              # 起動しないときは、原因がわかるようにログ・設定・権限を出す
+              Write-Host "---- config.ini"; Get-Content (Join-Path $env:ProgramData "GHMS\config.ini") -ErrorAction SilentlyContinue
+              Write-Host "---- ghms.log"; Get-Content (Join-Path $env:ProgramData "GHMS\logs\ghms.log") -Tail 80 -ErrorAction SilentlyContinue
+              Write-Host "---- files"; Get-ChildItem -Recurse (Join-Path $env:ProgramData "GHMS"), $data -ErrorAction SilentlyContinue | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 300 | Write-Host
+              Write-Host "---- acl"; icacls (Join-Path $env:ProgramData "GHMS"); icacls $data
+              Write-Host "---- processes"; Get-Process GHMS -ErrorAction SilentlyContinue | Format-Table Id, StartTime, CPU | Out-String | Write-Host
+              Write-Host "---- netstat"; netstat -ano | Select-String ":8000"
+              Write-Host "---- installer log"; Get-ChildItem $env:TEMP -Filter "Setup Log*.txt" | Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content -Tail 60
+              throw "GHMS が起動しませんでした"
+            }
           }
           function StopGhms { (Start-Process -FilePath $exe -ArgumentList "--stop" -PassThru).WaitForExit(60000) | Out-Null; Start-Sleep -Seconds 2 }
 

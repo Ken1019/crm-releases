@@ -90,9 +90,12 @@ def load_config():
         except ValueError:
             logging.getLogger(__name__).warning("config.ini の port の値がまちがっています（%r）。%d を使います", raw, DEFAULT_PORT)
             port = DEFAULT_PORT
+    app = cp["app"] if cp.has_section("app") else {}
     return {
         "lan": str(sec.get("lan", "0")).strip().lower() in ("1", "true", "yes"),
         "port": port,
+        # 画面の開き方：window＝アプリの窓（Edge のアプリ表示。アドレス欄・タブなし）／browser＝ふつうのブラウザ
+        "window": str(app.get("window", "window")).strip().lower() != "browser",
     }
 
 
